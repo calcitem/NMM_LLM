@@ -61,14 +61,18 @@ class GameAI:
         self.blunder_probability = max(0.0, min(1.0, blunder_probability))
         self._nodes = 0
         self._deadline: float = math.inf   # set by _iterative_deepen; checked in _negamax
+        self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def force_stop(self) -> None:
-        """Interrupt any running search immediately; _negamax raises _SearchAbort."""
-        self._deadline = 0.0
+        """Interrupt any running search immediately; _negamax raises _SearchAbort.
+        Also sets _force_stop so the subsequent score_move() returns immediately.
+        """
+        self._force_stop = True
+        self._deadline   = 0.0
 
     def choose_move(
         self,
@@ -77,7 +81,8 @@ class GameAI:
         endgame_state=None, # EndgameState        — Stage 5
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
-        self._deadline = math.inf  # reset any prior force_stop() effect
+        self._force_stop = False
+        self._deadline   = math.inf  # reset any prior force_stop() effect
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -115,6 +120,10 @@ class GameAI:
 
         return max(scored, key=lambda x: x[1])[0]
 
+    # Time budget for score_move() — kept short because it is only used for relative
+    # ranking (is this move good or bad?), not for the actual played move.
+    _SCORE_TIME = 3.0
+
     def score_move(self, board: BoardState, move: dict) -> float:
         """
         Rate `move` relative to all legal moves from 0.0 (worst) to 1.0 (best).
@@ -122,16 +131,23 @@ class GameAI:
         Used by the LLM commentary system: a score below the configured threshold
         triggers a MillsLLM comment on the human's move.
         """
+        if self._force_stop:
+            return 0.5   # force-stopped; skip scoring rather than adding more delay
+
         moves = get_all_legal_moves(board)
         if not moves:
             return 0.5
 
         total_on_board = sum(board.pieces_on_board.values())
         if total_on_board < _EARLY_GAME_PIECE_THRESHOLD:
-            depth = 3   # trivially fast on near-empty board; scoring isn't meaningful yet
+            depth = 3
         else:
             depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
+
+        # Hard cap: score_move must finish within _SCORE_TIME seconds.
+        self._deadline = time.time() + self._SCORE_TIME
         scored = self._score_all(board, moves, depth)
+        self._deadline = math.inf
 
         move_key = (move.get("from"), move["to"], move.get("capture"))
         my_score = next(

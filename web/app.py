@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import logging.handlers
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +14,27 @@ from fastapi.templating import Jinja2Templates
 
 _ROOT = Path(__file__).parent.parent
 _WEB  = Path(__file__).parent
+
+# ── Rotating debug log ────────────────────────────────────────────────────────
+# 3 generations (server.log, server.log.1, server.log.2), 200 KB each.
+# Every server restart begins a fresh log at server.log; old ones shift up.
+
+_LOG_DIR = _ROOT / "data" / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_handler = logging.handlers.RotatingFileHandler(
+    _LOG_DIR / "server.log",
+    maxBytes=200_000,
+    backupCount=3,
+    encoding="utf-8",
+)
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+
+log = logging.getLogger("nmm")
+log.setLevel(logging.DEBUG)
+log.addHandler(_handler)
+log.addHandler(logging.StreamHandler())   # also print to console
+log.info("=== Server started ===")
 
 import sys
 sys.path.insert(0, str(_ROOT))
@@ -157,19 +180,31 @@ def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
 
 
 async def _ai_turn(ws: WebSocket, session: Session) -> None:
+    import time as _time
     board = session.engine.board
     diff  = session.game_ai.difficulty if session.game_ai else 3
     total = sum(board.pieces_on_board.values())
+    exp   = _expected_think_seconds(diff, total)
+    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs",
+             board.turn, diff, total, exp)
     await _send(ws, {
         "type":             "thinking",
         "color":            board.turn,
-        "expected_seconds": _expected_think_seconds(diff, total),
+        "expected_seconds": exp,
     })
 
-    if session.coordinator:
-        move = await asyncio.to_thread(session.coordinator.deliberate, board)
-    else:
-        move = await asyncio.to_thread(session.game_ai.choose_move, board)
+    t0 = _time.time()
+    try:
+        if session.coordinator:
+            move = await asyncio.to_thread(session.coordinator.deliberate, board)
+        else:
+            move = await asyncio.to_thread(session.game_ai.choose_move, board)
+    except Exception as exc:
+        log.error("AI deliberation failed: %s", exc, exc_info=True)
+        raise
+
+    elapsed = _time.time() - t0
+    log.info("AI turn end    move=%s elapsed=%.2fs", move, elapsed)
 
     session.engine.apply_move(move)
 
@@ -206,12 +241,14 @@ async def ws_endpoint(websocket: WebSocket):
         try:
             await _ai_turn(websocket, session)
         except Exception as exc:
+            log.error("AI background task failed: %s", exc, exc_info=True)
             try:
                 await _send(websocket, {"type": "error", "message": str(exc)})
             except Exception:
                 pass
         finally:
             ai_thinking = False
+            log.debug("AI background task finished, ai_thinking=False")
 
     def _maybe_start_ai() -> None:
         nonlocal ai_thinking
@@ -230,6 +267,8 @@ async def ws_endpoint(websocket: WebSocket):
                 if session and session.game_ai:
                     session.game_ai.force_stop()
                 continue
+
+            log.debug("WS msg kind=%s", kind)
 
             # ── new_game ──────────────────────────────────────────────────────
             if kind == "new_game":
@@ -270,6 +309,7 @@ async def ws_endpoint(websocket: WebSocket):
                         await asyncio.to_thread(coord.on_game_start)
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
+                log.info("New game  human=%s diff=%s vs_human=%s llm=%s", hc, diff, vs_human, use_llm)
                 await _send(websocket, _state(session))
                 await _commentary(websocket, session)
                 _maybe_start_ai()
@@ -284,7 +324,10 @@ async def ws_endpoint(websocket: WebSocket):
                 legal  = get_all_legal_moves(board)
                 valid  = any(m.get("from") == frm and m["to"] == to for m in legal)
 
+                log.info("Human move from=%s to=%s turn=%s", frm, to, board.turn)
                 if not valid:
+                    log.warning("Illegal move from=%s to=%s legal=%s", frm, to,
+                                [(m.get("from"), m["to"]) for m in legal])
                     await _send(websocket, {"type": "error", "message": f"Illegal move to {to}"})
                     continue
 
@@ -460,8 +503,9 @@ async def ws_endpoint(websocket: WebSocket):
                                             "text": "LLM not available — enable MillsAI commentary."})
 
     except WebSocketDisconnect:
-        pass
+        log.info("WebSocket disconnected")
     except Exception as exc:
+        log.error("WebSocket error: %s", exc, exc_info=True)
         try:
             await _send(websocket, {"type": "error", "message": str(exc)})
         except Exception:
