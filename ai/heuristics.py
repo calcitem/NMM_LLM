@@ -20,7 +20,7 @@ _WEIGHTS = {
 }
 
 
-def evaluate(board: BoardState, color: str) -> int:
+def evaluate(board: BoardState, color: str, endgame_state=None) -> int:
     """Evaluate board from `color`'s perspective. Higher is better for color."""
     terminal, winner = is_terminal(board)
     if terminal:
@@ -40,7 +40,7 @@ def evaluate(board: BoardState, color: str) -> int:
     opp_dbl    = _double_mills(board, opp)
     win_cfg    = _win_config(board, opp)
 
-    return (
+    base = (
         w[0] * (our_mills  - opp_mills)
         + w[1] * blocked
         + w[2] * piece_diff
@@ -48,6 +48,7 @@ def evaluate(board: BoardState, color: str) -> int:
         + w[4] * (our_dbl  - opp_dbl)
         + w[5] * win_cfg
     )
+    return base + endgame_score(board, color, endgame_state)
 
 
 def _closed_mills(board: BoardState, color: str) -> int:
@@ -99,5 +100,35 @@ def _win_config(board: BoardState, opp: str) -> int:
 
 
 def endgame_score(board: BoardState, color: str, endgame_state=None) -> int:
-    """Placeholder — Stage 5 (Endgame Recognition) replaces this with phase-tuned evaluation."""
-    return 0
+    """
+    Supplementary endgame evaluation added on top of evaluate().
+
+    Rewards:
+    - Mobility advantage  — more moves available than the opponent
+    - Zugzwang pressure   — opponent has very few moves (≤ 2)
+    - Mill cycle          — a closed mill can be opened/closed at will
+    """
+    if endgame_state is None or not endgame_state.active:
+        return 0
+
+    opp = "B" if color == "W" else "W"
+    mob_self = endgame_state.mobility_white if color == "W" else endgame_state.mobility_black
+    mob_opp  = endgame_state.mobility_black if color == "W" else endgame_state.mobility_white
+
+    score = 0
+
+    # Mobility advantage (each extra legal move is worth ~20 points in endgame)
+    score += (mob_self - mob_opp) * 20
+
+    # Zugzwang pressure on the opponent
+    if mob_opp <= 2 and mob_self >= 4:
+        score += 200
+
+    # Mill cycle controlled by us
+    if (
+        endgame_state.pattern == "mill_cycle"
+        and endgame_state.pattern_notes.startswith(color)
+    ):
+        score += 150
+
+    return score

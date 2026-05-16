@@ -15,6 +15,7 @@ from ai.game_ai import GameAI
 from ai.mills_llm import MillsLLM
 from ai.memory_manager import MemoryManager
 from ai.opening_recognizer import OpeningRecognizer, INACTIVE_RESULT
+from ai.endgame_recognizer import EndgameRecognizer, INACTIVE_ENDGAME
 from game.rules import get_all_legal_moves, get_game_phase
 
 
@@ -28,6 +29,7 @@ class Coordinator:
         poor_move_threshold: float = 0.3,
         max_poor_move_comments: int = 5,
         opening_recognizer: OpeningRecognizer | None = None,
+        endgame_recognizer: EndgameRecognizer | None = None,
     ) -> None:
         self.game_ai = game_ai
         self.mills_llm = mills_llm
@@ -36,6 +38,7 @@ class Coordinator:
         self.poor_move_threshold = poor_move_threshold
         self.max_poor_move_comments = max_poor_move_comments
         self.opening_recognizer = opening_recognizer
+        self.endgame_recognizer = endgame_recognizer
 
         self.dialogue_log: list[str] = []
         self._poor_move_count = 0
@@ -43,6 +46,7 @@ class Coordinator:
         self._turn_num = 0
         self._session_id = str(uuid.uuid4())
         self._game_moves: list[dict] = []
+        self._endgame_state = INACTIVE_ENDGAME
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -75,6 +79,9 @@ class Coordinator:
         self.mills_llm.narrative_memory = ""
         if self.opening_recognizer:
             self.opening_recognizer.reset()
+        if self.endgame_recognizer:
+            self.endgame_recognizer.reset()
+        self._endgame_state = INACTIVE_ENDGAME
 
         recent = self.memory.load_recent_games(n=5)
         if recent:
@@ -139,22 +146,29 @@ class Coordinator:
         if not legal:
             raise RuntimeError("No legal moves available")
 
-        # 1. Get current opening recognition
+        # 1. Get current opening recognition and endgame state
         recognition = (
             self.opening_recognizer.get_current_result()
             if self.opening_recognizer else INACTIVE_RESULT
         )
+        if self.endgame_recognizer:
+            self._endgame_state = self.endgame_recognizer.update(board)
+            for msg in self.endgame_recognizer.transition_announcements():
+                self.emit("MillsLLM", msg)
+        endgame_state = self._endgame_state
 
-        # 2. GameAI picks its best move (with opening bonus if applicable)
-        ai_move = self.game_ai.choose_move(board, recognition=recognition)
+        # 2. GameAI picks its best move (with opening bonus and endgame depth boost)
+        ai_move = self.game_ai.choose_move(
+            board, recognition=recognition, endgame_state=endgame_state
+        )
         ai_score = self.game_ai.score_move(board, ai_move)
 
         # 3. Expose score hint to MillsLLM for its prompt
         self.mills_llm._last_ai_score = ai_score
 
-        # 4. Ask MillsLLM for a recommendation (with opening context)
+        # 4. Ask MillsLLM for a recommendation (with opening + endgame context)
         opinion, llm_notation = self.mills_llm.ask_for_move_opinion(
-            board, legal, ai_move, recognition=recognition
+            board, legal, ai_move, recognition=recognition, endgame_state=endgame_state
         )
 
         # 4. Try to adopt the LLM's recommendation if it scores well enough
@@ -226,6 +240,12 @@ class Coordinator:
         human_move: dict,
     ) -> None:
         self._turn_num += 1
+
+        # Update endgame state
+        if self.endgame_recognizer:
+            self._endgame_state = self.endgame_recognizer.update(board_after)
+            for msg in self.endgame_recognizer.transition_announcements():
+                self.emit("MillsLLM", msg)
 
         # Update recognizer with human's move
         recognition = INACTIVE_RESULT

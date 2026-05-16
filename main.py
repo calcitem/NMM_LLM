@@ -25,6 +25,7 @@ from ai.mills_llm import MillsLLM
 from ai.coordinator import Coordinator
 from ai.opening_book import OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
+from ai.endgame_recognizer import EndgameRecognizer
 
 
 def _load_settings(path: str = "data/settings.json") -> dict:
@@ -126,6 +127,11 @@ def run_game(
             )
             opening_book = OpeningBook()
             opening_recognizer = OpeningRecognizer(opening_book)
+            endgame_recognizer = EndgameRecognizer(
+                active_threshold=settings.get("endgame_active_threshold", 11),
+                deep_threshold=settings.get("endgame_deep_threshold", 8),
+                zugzwang_threshold=settings.get("endgame_zugzwang_threshold", 0.4),
+            )
             coordinator = Coordinator(
                 game_ai=game_ai,
                 mills_llm=mills_llm,
@@ -133,6 +139,7 @@ def run_game(
                 poor_move_threshold=poor_move_threshold,
                 max_poor_move_comments=max_comments,
                 opening_recognizer=opening_recognizer,
+                endgame_recognizer=endgame_recognizer,
             )
             coordinator.on_game_start()
 

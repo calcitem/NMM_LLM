@@ -41,6 +41,22 @@ If you are not confident the move was bad, reply with exactly: NO_COMMENT\
 """
 
 
+def _endgame_context_block(endgame_state) -> str:
+    lines = [
+        "\n--- Endgame Context ---",
+        f"Phase:         {endgame_state.phase}",
+        f"Pieces:        W={endgame_state.pieces_white}  B={endgame_state.pieces_black}"
+        f"  (total {endgame_state.total_pieces})",
+        f"Mobility:      W={endgame_state.mobility_white} moves  "
+        f"B={endgame_state.mobility_black} moves",
+        f"Zugzwang risk: {'YES' if endgame_state.zugzwang_risk else 'no'}",
+        f"Pattern:       {endgame_state.pattern or 'none'}"
+        + (f" — {endgame_state.pattern_notes}" if endgame_state.pattern_notes else ""),
+        "---\n",
+    ]
+    return "\n".join(lines)
+
+
 def _opening_context_block(recognition) -> str:
     lines = [
         "\n--- Opening Context ---",
@@ -133,6 +149,7 @@ class MillsLLM:
         legal_moves: list[dict],
         game_ai_suggestion: dict,
         recognition=None,
+        endgame_state=None,
     ) -> tuple[str, str | None]:
         """
         Returns (response_text, recommended_notation_or_None).
@@ -153,6 +170,8 @@ class MillsLLM:
         )
         if recognition and recognition.status not in ("inactive", "novel"):
             user += _opening_context_block(recognition)
+        if endgame_state and endgame_state.active:
+            user += _endgame_context_block(endgame_state)
         if strategy:
             user += f"\nStrategy hints:\n{strategy}\n"
         user += "\nSelect the best move from the legal moves list."

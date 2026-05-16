@@ -56,8 +56,8 @@ class GameAI:
     def choose_move(
         self,
         board: BoardState,
-        recognition=None,   # OpeningRecognitionResult — Stage 4
-        endgame_state=None, # EndgameState              — Stage 5
+        recognition=None,   # RecognitionResult  — Stage 4
+        endgame_state=None, # EndgameState        — Stage 5
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
         moves = get_all_legal_moves(board)
@@ -79,7 +79,12 @@ class GameAI:
             return self._iterative_deepen(board)
 
         depth = _DEPTH_TABLE[self.difficulty]
-        scored = self._score_all(board, moves, depth)
+
+        # Deeper search in endgame for better tactical accuracy.
+        if endgame_state is not None and endgame_state.active:
+            depth += 2 if endgame_state.deep else 1
+
+        scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
 
         if recognition is not None:
             scored = self._apply_opening_adjustments(scored, recognition)
@@ -174,7 +179,12 @@ class GameAI:
         return best_move, best_score
 
     def _negamax(
-        self, board: BoardState, depth: int, alpha: int, beta: int
+        self,
+        board: BoardState,
+        depth: int,
+        alpha: int,
+        beta: int,
+        endgame_state=None,
     ) -> int:
         """
         Negamax with alpha-beta pruning.
@@ -184,11 +194,10 @@ class GameAI:
 
         terminal, _ = is_terminal(board)
         if terminal:
-            # board.turn is the player who has just been found to have lost
             return -(INF - depth)
 
         if depth == 0:
-            return evaluate(board, board.turn)
+            return evaluate(board, board.turn, endgame_state)
 
         moves = get_all_legal_moves(board)
         if not moves:
@@ -197,7 +206,7 @@ class GameAI:
         value = -INF
         for move in moves:
             nb = board.apply_move(move)
-            score = -self._negamax(nb, depth - 1, -beta, -alpha)
+            score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
             if score > value:
                 value = score
             if value > alpha:
@@ -207,14 +216,14 @@ class GameAI:
         return value
 
     def _score_all(
-        self, board: BoardState, moves: list, depth: int
+        self, board: BoardState, moves: list, depth: int, endgame_state=None
     ) -> list[tuple[dict, int]]:
         """Score every move in `moves` and return [(move, score), ...]."""
         self._nodes = 0
         results = []
         for move in moves:
             nb = board.apply_move(move)
-            score = -self._negamax(nb, depth - 1, -INF, INF)
+            score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state)
             results.append((move, score))
         return results
 
