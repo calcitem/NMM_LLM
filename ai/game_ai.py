@@ -121,7 +121,11 @@ class GameAI:
         if not moves:
             return 0.5
 
-        depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
+        total_on_board = sum(board.pieces_on_board.values())
+        if total_on_board < _EARLY_GAME_PIECE_THRESHOLD:
+            depth = 3   # trivially fast on near-empty board; scoring isn't meaningful yet
+        else:
+            depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
         scored = self._score_all(board, moves, depth)
 
         move_key = (move.get("from"), move["to"], move.get("capture"))

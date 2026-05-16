@@ -274,8 +274,14 @@ class MillsLLM:
 
     def _make_client(self):
         try:
+            import httpx
             import ollama
-            return ollama.Client(host=self._url)
+            # 5 s connect timeout, 30 s read timeout — prevents blocking forever
+            # when Ollama is cold-loading a model or swapping between models.
+            return ollama.Client(
+                host=self._url,
+                timeout=httpx.Timeout(30.0, connect=5.0),
+            )
         except Exception:
             return None
 
