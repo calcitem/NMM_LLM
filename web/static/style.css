@@ -24,12 +24,12 @@ html, body {
   line-height: 1.5;
 }
 
-/* ── Layout ──────────────────────────────────────────────────────────── */
+/* ── App shell ───────────────────────────────────────────────────────── */
 #app {
   display: grid;
   grid-template-rows: auto 1fr auto;
   height: 100%;
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 0 12px;
 }
@@ -61,37 +61,110 @@ header h1 {
 }
 #toggle-settings:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ── Main 3-column grid ──────────────────────────────────────────────── */
+/*   [commentary 260px] [board 1fr] [side 280px]                         */
 main {
   display: grid;
-  grid-template-columns: 1fr 300px;
-  gap: 16px;
+  grid-template-columns: 260px 1fr 280px;
+  gap: 14px;
   padding: 12px 0;
-  min-height: 0;       /* allow grid row to shrink below content */
+  min-height: 0;
   overflow: hidden;
 }
 
-/* ── Board column ────────────────────────────────────────────────────── */
+/* ── Commentary column (left) ────────────────────────────────────────── */
+#commentary-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The panel-box inside commentary-col stretches to fill the full height */
+#commentary-col > .commentary-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#commentary-feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: .82rem;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+/* Player chat row */
+#player-chat-row {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+#player-chat-input {
+  flex: 1;
+  background: #1e1a12;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: .85rem;
+}
+#player-chat-input:focus { outline: none; border-color: var(--accent); }
+
+#player-chat-send {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: .85rem;
+  white-space: nowrap;
+}
+#player-chat-send:hover { border-color: var(--accent); color: var(--accent); }
+
+.commentary-line {
+  background: #1e1a12;
+  border-radius: 4px;
+  padding: 4px 8px;
+  word-break: break-word;
+  flex-shrink: 0;
+}
+
+.speaker {
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.commentary-line:has(.speaker:first-child):where(:nth-child(odd)) {
+  background: #221d14;
+}
+
+/* ── Board column (centre) ───────────────────────────────────────────── */
 #board-col {
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: center;
-  min-height: 0;        /* allow flex child to shrink in constrained layouts */
-  overflow-y: auto;
+  min-height: 0;
 }
 
 #board-wrap {
   width: 100%;
-  max-width: 560px;
-  /* Cap board height so the eval graph and undo button always stay visible.
-     ~200px accounts for: header, status bar, graph (90px), undo, commentary. */
-  max-height: calc(100vh - 200px);
   aspect-ratio: 1;
+  /* Never taller than what the viewport can fit above the bottom bar */
+  max-height: calc(100vh - 160px);
   background: #2a1f14;
   border-radius: 10px;
   box-shadow: 0 4px 24px rgba(0,0,0,.6);
   padding: 8px;
-  flex-shrink: 0;
 }
 
 #board-svg {
@@ -107,7 +180,7 @@ main {
   min-height: 1.4em;
 }
 
-/* ── Side panel ──────────────────────────────────────────────────────── */
+/* ── Side panel (right) ──────────────────────────────────────────────── */
 #side-panel {
   display: flex;
   flex-direction: column;
@@ -115,6 +188,7 @@ main {
   overflow-y: auto;
 }
 
+/* ── Panel box (shared card style) ──────────────────────────────────── */
 .panel-box {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -153,8 +227,6 @@ main {
 .piece-b { color: #9090cc; }
 
 /* Settings */
-#settings-panel { }
-
 .form-row {
   display: flex;
   flex-direction: column;
@@ -189,70 +261,18 @@ main {
 }
 #btn-new-game:hover { background: #e09050; }
 
-/* Commentary full-width row */
-#commentary-wrap {
-  padding-bottom: 16px;
-}
-
-#commentary-feed {
-  height: 90px;
-  overflow-y: auto;
-  font-size: .82rem;
-  line-height: 1.55;
+/* ── Bottom bar: eval graph + undo ───────────────────────────────────── */
+#bottom-bar {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 12px;
+  border-top: 1px solid var(--border);
 }
 
-/* Player chat row */
-#player-chat-row {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-#player-chat-input {
-  flex: 1;
-  background: #1e1a12;
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 5px 8px;
-  border-radius: 4px;
-  font-size: .85rem;
-}
-#player-chat-input:focus { outline: none; border-color: var(--accent); }
-
-#player-chat-send {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 4px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: .85rem;
-}
-#player-chat-send:hover { border-color: var(--accent); color: var(--accent); }
-
-.commentary-line {
-  background: #1e1a12;
-  border-radius: 4px;
-  padding: 4px 8px;
-  word-break: break-word;
-}
-
-.speaker {
-  font-weight: 700;
-  color: var(--accent);
-  margin-right: 4px;
-}
-.commentary-line:has(.speaker:first-child):where(:nth-child(odd)) {
-  background: #221d14;
-}
-
-/* ── Eval graph ──────────────────────────────────────────────────────────── */
 #eval-graph-wrap {
-  width: 100%;
-  max-width: 560px;
+  flex: 1;
+  min-width: 0;
 }
 
 .eval-graph-labels {
@@ -267,30 +287,33 @@ main {
 #eval-graph {
   display: block;
   width: 100%;
-  height: 72px;
+  height: 64px;
   border-radius: 4px;
   overflow: hidden;
 }
 
 /* ── Undo button ─────────────────────────────────────────────────────── */
 #btn-undo {
+  flex-shrink: 0;
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  padding: 4px 12px;
+  padding: 4px 14px;
   border-radius: 4px;
   cursor: pointer;
   font-size: .85rem;
-  align-self: center;
 }
 #btn-undo:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 #btn-undo:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
-@media (max-width: 700px) {
+@media (max-width: 860px) {
   main {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto auto;
+    overflow-y: auto;
   }
-  #side-panel { max-height: 45vh; }
+  #commentary-col { min-height: 200px; max-height: 35vh; }
+  #board-col { align-items: center; }
+  #side-panel { max-height: 40vh; }
 }

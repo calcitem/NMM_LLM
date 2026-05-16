@@ -222,7 +222,7 @@ function drawEvalGraph() {
   const svg = $("eval-graph");
   if (!svg) return;
 
-  const W = 560, H = 72;
+  const W = 800, H = 64;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("width", "100%");
   svg.setAttribute("height", H);

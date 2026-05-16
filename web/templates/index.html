@@ -14,36 +14,34 @@
   </header>
 
   <main>
-    <!-- Board column -->
+    <!-- Left column: commentary feed + player chat -->
+    <div id="commentary-col">
+      <div class="panel-box commentary-panel">
+        <h3>Commentary</h3>
+        <div id="commentary-feed"></div>
+        <div id="player-chat-row">
+          <input type="text" id="player-chat-input" placeholder="Ask MillsAI…" maxlength="300" autocomplete="off">
+          <button id="player-chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Centre column: board + status -->
     <div id="board-col">
       <div id="board-wrap">
         <svg id="board-svg"></svg>
       </div>
       <div id="status-bar">Configure a game and click New Game.</div>
-
-      <!-- Strength history graph -->
-      <div id="eval-graph-wrap">
-        <div class="eval-graph-labels">
-          <span class="piece-w">⬜</span>
-          <span id="eval-graph-title">Position strength</span>
-          <span class="piece-b">⬛</span>
-        </div>
-        <svg id="eval-graph" preserveAspectRatio="none"></svg>
-      </div>
-
-      <button id="btn-undo" disabled>&larr; Undo move</button>
     </div>
 
-    <!-- Side panel (info + settings only) -->
+    <!-- Right column: status badge, game info, settings -->
     <div id="side-panel">
 
-      <!-- Turn / result -->
       <div class="panel-box">
         <h3>Status</h3>
         <span id="turn-badge" class="badge"></span>
       </div>
 
-      <!-- Game info -->
       <div class="panel-box">
         <h3>Game Info</h3>
         <div class="piece-row">
@@ -68,7 +66,6 @@
         </div>
       </div>
 
-      <!-- Settings -->
       <div class="panel-box" id="settings-panel">
         <h3>New Game</h3>
 
@@ -116,16 +113,17 @@
     </div><!-- /side-panel -->
   </main>
 
-  <!-- Commentary + player chat — full width below -->
-  <div id="commentary-wrap">
-    <div class="panel-box">
-      <h3>Commentary</h3>
-      <div id="commentary-feed"></div>
-      <div id="player-chat-row">
-        <input type="text" id="player-chat-input" placeholder="Ask MillsAI…" maxlength="300" autocomplete="off">
-        <button id="player-chat-send">Send</button>
+  <!-- Bottom bar: strength graph + undo -->
+  <div id="bottom-bar">
+    <div id="eval-graph-wrap">
+      <div class="eval-graph-labels">
+        <span class="piece-w">⬜ White</span>
+        <span id="eval-graph-title">Position strength</span>
+        <span class="piece-b">Black ⬛</span>
       </div>
+      <svg id="eval-graph" preserveAspectRatio="none"></svg>
     </div>
+    <button id="btn-undo" disabled>&larr; Undo</button>
   </div>
 
 </div>
