@@ -297,6 +297,7 @@ main {
 }
 
 /* ── Draw / Hint / Undo buttons ──────────────────────────────────────── */
+#btn-force-move,
 #btn-force-cap,
 #btn-draw,
 #btn-hint,
@@ -311,10 +312,16 @@ main {
   font-size: .85rem;
   white-space: nowrap;
 }
-#btn-force-cap:hover:not(:disabled) { border-color: var(--red);    color: var(--red); }
-#btn-draw:hover:not(:disabled)      { border-color: var(--green);  color: var(--green); }
-#btn-hint:hover:not(:disabled)      { border-color: var(--tan);    color: var(--tan); }
-#btn-undo:hover:not(:disabled)      { border-color: var(--accent); color: var(--accent); }
+#btn-force-move:hover                { border-color: #e0c040; color: #e0c040; }
+#btn-force-cap:hover:not(:disabled)  { border-color: var(--red);    color: var(--red); }
+#btn-draw:hover:not(:disabled)       { border-color: var(--green);  color: var(--green); }
+#btn-hint:hover:not(:disabled)       { border-color: var(--tan);    color: var(--tan); }
+#btn-undo:hover:not(:disabled)       { border-color: var(--accent); color: var(--accent); }
+#btn-force-move { border-color: #806030; color: #c8a030; animation: pulse-border 1.2s ease-in-out infinite; }
+@keyframes pulse-border {
+  0%, 100% { border-color: #806030; }
+  50%       { border-color: #e0c040; }
+}
 #btn-force-cap.btn-active { border-color: var(--red); color: var(--red); }
 #btn-force-cap:disabled,
 #btn-draw:disabled,

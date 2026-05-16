@@ -46,13 +46,17 @@ cd NMM_ollama
 - 10 difficulty levels — level 1–8 use fixed minimax depth (2–9 ply); levels 9–10 use iterative deepening (20 s / 45 s time budget)
 - Undo (rewinds both your move and the AI's response)
 - Human vs AI, Human vs Human, or Random colour selection
+- Draw by threefold repetition (both players oscillate), 50-move rule, and mutual agreement
+- **Force Capture** toggle — makes the AI capture aggressively, disabling the fly-sacrifice strategy
 
 ### AI
 - **GameAI** — negamax + alpha-beta with phase-aware heuristics:
   - Closed mills, blocked pieces, piece count, two-configurations, double-mill pivots, win configuration
   - Mobility difference and immediate mill threats (phase-weighted)
   - Cross/cardinal node positional bonus (3-neighbour nodes score higher than 2-neighbour corners)
+  - Fly-phase asymmetry bonus (prefer reaching 3 pieces before opponent in 4v4 endgame)
   - tanh normalisation with per-phase scale (not a hard clamp)
+- **Force Move** — interrupt the AI's current search at any time; it plays the best move found so far
 - **Opening Book** — curated opening lines with UCB1-scored selection; learns win/loss/draw per opening; names novel openings via LLM
 - **Opening Recogniser** — detects rotated and mirrored opening variants (full D4 dihedral group: 4 rotations × 4 reflections)
 - **Endgame Recogniser** — detects named endgame phases, zugzwang risk, and mill-cycle patterns
@@ -61,13 +65,19 @@ cd NMM_ollama
 - Consults a locally running Ollama model for move opinions, position commentary, and post-game session summaries
 - Reads the last 10 games (with full move sequences) before each new game
 - Remembers bad moves via ChromaDB vector store
+- Comments on **mill formations**, **strong moves** (score ≥ 0.75), and **poor moves** (capped to avoid spam)
+- Asks periodic strategic questions to invite the player to think ahead
 - **Player chat** — type a message at any point and MillsAI responds in context; conversations saved to game files
+- All move recommendations are validated against the legal move list (LLM cannot suggest an illegal move)
 
 ### Web interface
 - SVG board with coordinate labels (a–g, 1–7)
 - Real-time game strength graph — shows White/Black advantage across all moves
+- **Thinking time indicator** — status bar shows elapsed time and expected max wait while AI computes
+- **Force Move button** (animated gold pulse) — visible while AI is thinking; interrupts search immediately
 - Colour-coded hints: green = legal placements, yellow = selectable pieces, red = capturable pieces
-- Mill highlight on capture
+- Optimistic board rendering — your move appears instantly before the server confirms
+- Mill highlight on capture; **Hint** system (3 per game) with LLM explanation
 - Commentary feed with speaker labels
 - Settings: colour, opponent, difficulty 1–10, LLM toggle
 

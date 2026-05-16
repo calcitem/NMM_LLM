@@ -66,6 +66,10 @@ class GameAI:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def force_stop(self) -> None:
+        """Interrupt any running search immediately; _negamax raises _SearchAbort."""
+        self._deadline = 0.0
+
     def choose_move(
         self,
         board: BoardState,
@@ -73,6 +77,7 @@ class GameAI:
         endgame_state=None, # EndgameState        — Stage 5
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
+        self._deadline = math.inf  # reset any prior force_stop() effect
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -245,13 +250,23 @@ class GameAI:
     def _score_all(
         self, board: BoardState, moves: list, depth: int, endgame_state=None
     ) -> list[tuple[dict, int]]:
-        """Score every move in `moves` and return [(move, score), ...]."""
+        """Score every move in `moves` and return [(move, score), ...].
+
+        If _SearchAbort is raised mid-loop (force_stop() called), unscored moves
+        receive the worst score seen so far so max() still picks the best partial result.
+        """
         self._nodes = 0
         results = []
-        for move in moves:
+        for i, move in enumerate(moves):
             nb = board.apply_move(move)
-            score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state)
-            results.append((move, score))
+            try:
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state)
+                results.append((move, score))
+            except _SearchAbort:
+                worst = min(s for _, s in results) if results else -INF
+                for remaining in moves[i:]:
+                    results.append((remaining, worst))
+                break
         return results
 
     def _pick_blunder(self, board: BoardState, moves: list) -> dict:

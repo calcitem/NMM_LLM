@@ -126,30 +126,38 @@ class GameEngine:
                 (color, move.get("from"), move.get("to"), move.get("capture"))
             )
 
-            # Move repetition: detect oscillation (A→B, B→A, A→B by the same player).
-            # Positions -1, -3, -5 are all the same player (alternating turns).
-            # Any of the three moves involving a capture is NOT repetition.
+            # Threefold repetition: the SAME BOARD POSITION occurred 3 times.
+            # This requires BOTH players to oscillate over 6 half-moves (3 per player):
+            #   Player A: A→B  Player B: C→D
+            #   Player A: B→A  Player B: D→C   (position repeats)
+            #   Player A: A→B  Player B: C→D   (position repeats a 3rd time)
+            # A draw where only one player oscillates is NOT threefold repetition —
+            # the other player's different moves change the board state each cycle.
             log = self._move_log
-            if len(log) >= 5:
-                c1, f1, t1, cap1 = log[-1]
-                c3, f3, t3, cap3 = log[-3]
-                c5, f5, t5, cap5 = log[-5]
-                no_captures = (cap1 is None and cap3 is None and cap5 is None)
-                oscillation = (
-                    no_captures
-                    and c1 == c3 == c5             # same player all three times
-                    and f1 == t3 and t1 == f3      # -1 reverses -3 (A→B / B→A)
-                    and f1 == f5 and t1 == t5      # -1 and -5 are the same move
-                    and f1 is not None             # movement phase only
-                )
-                exact_repeat = (
-                    no_captures and log[-1] == log[-3] == log[-5]
-                )
-                if oscillation or exact_repeat:
-                    self.finished = True
-                    self.winner = None
-                    self.draw_reason = "repetition"
-                    self.game_record["draw_reason"] = "repetition"
+            if len(log) >= 6:
+                no_captures = all(log[i][3] is None for i in (-1, -2, -3, -4, -5, -6))
+                if no_captures:
+                    c1, f1, t1, _ = log[-1]
+                    c3, f3, t3, _ = log[-3]
+                    c5, f5, t5, _ = log[-5]
+                    c2, f2, t2, _ = log[-2]
+                    c4, f4, t4, _ = log[-4]
+                    c6, f6, t6, _ = log[-6]
+                    osc_a = (
+                        c1 == c3 == c5 and f1 is not None
+                        and f1 == t3 and t1 == f3
+                        and f1 == f5 and t1 == t5
+                    )
+                    osc_b = (
+                        c2 == c4 == c6 and f2 is not None
+                        and f2 == t4 and t2 == f4
+                        and f2 == f6 and t2 == t6
+                    )
+                    if osc_a and osc_b:
+                        self.finished = True
+                        self.winner = None
+                        self.draw_reason = "repetition"
+                        self.game_record["draw_reason"] = "repetition"
 
             # 50-move rule (100 half-moves post-placement without capture)
             if not self.finished and self._post_placement_moves >= self.AUTO_DRAW_THRESHOLD:

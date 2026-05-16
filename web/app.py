@@ -145,9 +145,26 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
         await _commentary(ws, session)
 
 
+def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
+    if total_pieces < 10:
+        return 2.0
+    if difficulty >= 10:
+        return 45.0
+    if difficulty >= 9:
+        return 20.0
+    estimates = {1: 1, 2: 1, 3: 2, 4: 3, 5: 5, 6: 8, 7: 12, 8: 20}
+    return float(estimates.get(difficulty, 5))
+
+
 async def _ai_turn(ws: WebSocket, session: Session) -> None:
     board = session.engine.board
-    await _send(ws, {"type": "thinking", "color": board.turn})
+    diff  = session.game_ai.difficulty if session.game_ai else 3
+    total = sum(board.pieces_on_board.values())
+    await _send(ws, {
+        "type":             "thinking",
+        "color":            board.turn,
+        "expected_seconds": _expected_think_seconds(diff, total),
+    })
 
     if session.coordinator:
         move = await asyncio.to_thread(session.coordinator.deliberate, board)
@@ -182,12 +199,37 @@ def _is_ai_turn(session: Session) -> bool:
 async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
     session: Optional[Session] = None
+    ai_thinking: bool = False
+
+    async def _run_ai_background() -> None:
+        nonlocal ai_thinking
+        try:
+            await _ai_turn(websocket, session)
+        except Exception as exc:
+            try:
+                await _send(websocket, {"type": "error", "message": str(exc)})
+            except Exception:
+                pass
+        finally:
+            ai_thinking = False
+
+    def _maybe_start_ai() -> None:
+        nonlocal ai_thinking
+        if _is_ai_turn(session) and not ai_thinking:
+            ai_thinking = True
+            asyncio.create_task(_run_ai_background())
 
     try:
         while True:
             raw = await websocket.receive_text()
             msg = json.loads(raw)
             kind = msg.get("type")
+
+            # ── force_move — interrupt AI; received while AI task runs ────────
+            if kind == "force_move":
+                if session and session.game_ai:
+                    session.game_ai.force_stop()
+                continue
 
             # ── new_game ──────────────────────────────────────────────────────
             if kind == "new_game":
@@ -230,9 +272,7 @@ async def ws_endpoint(websocket: WebSocket):
                 session = Session(engine, game_ai, coord, hc, vs_human)
                 await _send(websocket, _state(session))
                 await _commentary(websocket, session)
-
-                if _is_ai_turn(session):
-                    await _ai_turn(websocket, session)
+                _maybe_start_ai()
 
             # ── move ──────────────────────────────────────────────────────────
             elif kind == "move" and session:
@@ -276,8 +316,8 @@ async def ws_endpoint(websocket: WebSocket):
 
                 if session.engine.finished:
                     await _game_over(websocket, session)
-                elif _is_ai_turn(session):
-                    await _ai_turn(websocket, session)
+                else:
+                    _maybe_start_ai()
 
             # ── capture ───────────────────────────────────────────────────────
             elif kind == "capture" and session and session._pending:
@@ -308,8 +348,8 @@ async def ws_endpoint(websocket: WebSocket):
 
                 if session.engine.finished:
                     await _game_over(websocket, session)
-                elif _is_ai_turn(session):
-                    await _ai_turn(websocket, session)
+                else:
+                    _maybe_start_ai()
 
             # ── undo ──────────────────────────────────────────────────────────
             elif kind == "undo" and session and session._board_history:

@@ -203,6 +203,44 @@ OUTPUT RULES:
 - Be concise and coaching in tone
 """
 
+_POSITIVE_COMMENT_SYSTEM = _BOARD_RULES + """
+
+TASK:
+Comment briefly on the human's strong move.
+
+OUTPUT RULES:
+- Write exactly one short sentence, max 18 words
+- Focus on what makes this move strong: mobility gain, mill threat, positional control
+- Be encouraging but concise
+- Do not suggest another move
+- Do not mention chess
+- If the move is not worth commenting on, reply exactly: NO_COMMENT
+"""
+
+_MILL_COMMENT_SYSTEM = _BOARD_RULES + """
+
+TASK:
+Comment briefly on the human forming a mill and capturing a piece.
+
+OUTPUT RULES:
+- Write exactly one short sentence, max 18 words
+- Note the tactical achievement and what it means for the position going forward
+- Do not suggest a move
+- Do not mention chess
+"""
+
+_POSITION_QUESTION_SYSTEM = _BOARD_RULES + """
+
+TASK:
+Ask the human one brief useful question about their strategic plan.
+
+OUTPUT RULES:
+- One sentence only
+- Max 14 words
+- No lecture, no move suggestion
+- Ask something that invites them to think about mobility, threats, or mill formation
+"""
+
 
 def _endgame_context_block(endgame_state) -> str:
     lines = [
@@ -439,6 +477,31 @@ No other text.
         self.bad_moves_context = self._memory.retrieve_similar_positions(
             board.to_fen_string(), n_results=5
         )
+
+    def comment_on_good_move(
+        self, board: "BoardState", move: dict, score: float
+    ) -> str | None:
+        move_notation = _move_to_notation(move)
+        user = (
+            f"HUMAN MOVE: {move_notation}\n"
+            f"MOVE QUALITY (0=worst, 1=best): {score:.2f}\n\n"
+            f"BOARD:\n{board.to_display_grid()}"
+        )
+        reply = self._chat(_POSITIVE_COMMENT_SYSTEM, user, keep_history=False)
+        if not reply or reply.strip() == "NO_COMMENT":
+            return None
+        return reply.strip()
+
+    def comment_on_mill(self, board: "BoardState", move: dict) -> str | None:
+        move_notation = _move_to_notation(move)
+        user = f"HUMAN MILL + CAPTURE: {move_notation}\n\nBOARD:\n{board.to_display_grid()}"
+        reply = self._chat(_MILL_COMMENT_SYSTEM, user, keep_history=False)
+        return reply.strip() if reply else None
+
+    def ask_strategic_question(self, board: "BoardState") -> str | None:
+        user = f"BOARD:\n{board.to_display_grid()}"
+        reply = self._chat(_POSITION_QUESTION_SYSTEM, user, keep_history=False)
+        return reply.strip() if reply.strip() else None
 
     def generate_question_for_human(self, board: "BoardState") -> str | None:
         user = f"BOARD:\n{board.to_display_grid()}"

@@ -43,6 +43,7 @@ Usage
   
   # Parallel self play (only available with no llm)
   python tools/self_play.py --games 20 --no-llm --white 8 --black 8 --parallel 10
+  python tools/self_play.py --games 20 --no-llm --white 3 --black 3 --parallel 4
 """
 
 from __future__ import annotations

@@ -15,6 +15,9 @@ let evalHistory     = [];     // [{move: n, score: f}] — history for the graph
 let hintsLeft       = 3;      // server-tracked cap; synced via hint messages
 let drawUnlocked    = false;  // true once 40 post-placement half-moves have passed
 let forceAggressive = false;  // when true, AI ignores fly-sacrifice heuristic
+let thinkingInterval  = null; // setInterval handle while AI is thinking
+let thinkingStarted   = 0;    // Date.now() when thinking began
+let thinkingExpected  = 0;    // expected seconds from server
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -57,6 +60,12 @@ document.addEventListener("DOMContentLoaded", () => {
       : "Force Capture OFF — AI returns to fly-sacrifice strategy."
     );
   });
+  $("btn-force-move").addEventListener("click", () => {
+    if (!ws) return;
+    ws.send(JSON.stringify({ type: "force_move" }));
+    stopThinkingTimer();
+    $("btn-force-move").hidden = true;
+  });
   $("player-chat-send").addEventListener("click", sendPlayerMessage);
   $("player-chat-input").addEventListener("keydown", e => {
     if (e.key === "Enter") sendPlayerMessage();
@@ -91,6 +100,8 @@ function startNewGame() {
   drawEvalGraph();
   renderMoves([]);
   $("btn-undo").disabled = true;
+  $("btn-force-move").hidden = true;
+  stopThinkingTimer();
   updateHintButton();
   updateDrawButton();
 
@@ -125,6 +136,8 @@ function handleMessage(msg) {
     case "state":
       gameState = msg;
       phase = msg.finished ? "game_over" : "playing";
+      stopThinkingTimer();
+      $("btn-force-move").hidden = true;
       board.render(msg);
       if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
       updateInfoPanel(msg);
@@ -157,7 +170,8 @@ function handleMessage(msg) {
       break;
 
     case "thinking":
-      setStatus(`AI (${msg.color === "W" ? "White" : "Black"}) is thinking…`);
+      startThinkingTimer(msg.color, msg.expected_seconds ?? 0);
+      $("btn-force-move").hidden = false;
       break;
 
     case "ai_move": {
@@ -187,6 +201,8 @@ function handleMessage(msg) {
 
     case "game_over":
       phase = "game_over";
+      stopThinkingTimer();
+      $("btn-force-move").hidden = true;
       setStatus(msg.message);
       setTurnBadge(null, msg.winner);
       addCommentary("Game", msg.message);
@@ -299,6 +315,28 @@ function updateInfoPanel(state) {
 
 function setStatus(text) {
   $("status-bar").textContent = text;
+}
+
+function startThinkingTimer(color, expectedSec) {
+  stopThinkingTimer();
+  thinkingStarted  = Date.now();
+  thinkingExpected = expectedSec;
+  const colorName  = color === "W" ? "White" : "Black";
+  const maxStr     = expectedSec > 0 ? ` / ~${Math.round(expectedSec)}s` : "";
+
+  function tick() {
+    const elapsed = ((Date.now() - thinkingStarted) / 1000).toFixed(1);
+    setStatus(`AI (${colorName}) thinking… ${elapsed}s${maxStr}`);
+  }
+  tick();
+  thinkingInterval = setInterval(tick, 200);
+}
+
+function stopThinkingTimer() {
+  if (thinkingInterval !== null) {
+    clearInterval(thinkingInterval);
+    thinkingInterval = null;
+  }
 }
 
 function updateDrawButton() {

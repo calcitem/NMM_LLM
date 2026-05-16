@@ -43,7 +43,9 @@ class Coordinator:
 
         self.dialogue_log: list[str] = []
         self._poor_move_count = 0
+        self._general_comment_count = 0
         self._last_comment_turn = -2
+        self._human_turn_num = 0
         self._turn_num = 0
         self._session_id = str(uuid.uuid4())
         self._game_moves: list[dict] = []
@@ -68,11 +70,16 @@ class Coordinator:
             return False
         return True
 
+    def _can_comment_general(self) -> bool:
+        return self._turn_num - self._last_comment_turn >= 2
+
     # ── Game lifecycle ────────────────────────────────────────────────────────
 
     def on_game_start(self) -> None:
         self._poor_move_count = 0
+        self._general_comment_count = 0
         self._last_comment_turn = -2
+        self._human_turn_num = 0
         self._turn_num = 0
         self._game_moves = []
         self._session_id = str(uuid.uuid4())
@@ -302,6 +309,7 @@ class Coordinator:
         human_move: dict,
     ) -> None:
         self._turn_num += 1
+        self._human_turn_num += 1
 
         # Update endgame state
         if self.endgame_recognizer:
@@ -315,7 +323,6 @@ class Coordinator:
             recognition = self.opening_recognizer.update(
                 human_move.get("to", ""), board_after
             )
-            # Emit opening name when first recognised
             if recognition.status == "exact" and recognition.name:
                 self.emit("MillsLLM", f"Opening recognised: {recognition.name}")
             elif recognition.status == "transposition" and recognition.name:
@@ -341,22 +348,52 @@ class Coordinator:
             },
         })
 
-        if not self._can_comment():
+        if not self._can_comment_general():
             return
 
+        has_capture = bool(human_move.get("capture"))
         score_after = 1.0 - score_before
-        comment = self.mills_llm.evaluate_human_move(
-            board_before=board_before,
-            human_move=human_move,
-            score_before=score_before,
-            score_after=score_after,
-            score_drop_threshold=self.poor_move_threshold,
-            recognition=recognition,
-        )
-        if comment:
-            self.emit("MillsLLM", comment, tag="warning")
-            self._poor_move_count += 1
-            self._last_comment_turn = self._turn_num
+
+        # 1. Mill/capture commentary — always comment when human forms a mill
+        if has_capture:
+            comment = self.mills_llm.comment_on_mill(board_after, human_move)
+            if comment:
+                self.emit("MillsLLM", comment)
+                self._general_comment_count += 1
+                self._last_comment_turn = self._turn_num
+                return
+
+        # 2. Poor-move warning (capped by max_poor_move_comments)
+        if self._can_comment():
+            comment = self.mills_llm.evaluate_human_move(
+                board_before=board_before,
+                human_move=human_move,
+                score_before=score_before,
+                score_after=score_after,
+                score_drop_threshold=self.poor_move_threshold,
+                recognition=recognition,
+            )
+            if comment:
+                self.emit("MillsLLM", comment, tag="warning")
+                self._poor_move_count += 1
+                self._last_comment_turn = self._turn_num
+                return
+
+        # 3. Positive commentary on strong moves
+        if score_before >= 0.75:
+            comment = self.mills_llm.comment_on_good_move(board_after, human_move, score_before)
+            if comment:
+                self.emit("MillsLLM", comment)
+                self._general_comment_count += 1
+                self._last_comment_turn = self._turn_num
+                return
+
+        # 4. Periodic strategic question every 8 human moves
+        if self._human_turn_num % 8 == 0:
+            question = self.mills_llm.ask_strategic_question(board_after)
+            if question:
+                self.emit("MillsLLM", question)
+                self._last_comment_turn = self._turn_num
 
     # ── Export ────────────────────────────────────────────────────────────────
 

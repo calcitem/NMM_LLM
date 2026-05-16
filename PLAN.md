@@ -10,7 +10,11 @@
 | 4     | Opening Book                 | ✅ Complete |
 | 5     | Web GUI                      | ✅ Complete |
 | 5.5   | Install & Run Scripts        | ✅ Complete |
-| 5.6   | In-Game Hint System          | ⬜ Planned  |
+| 5.6   | In-Game Hint System          | ✅ Complete |
+| 5.7   | Force Move + Thinking Timer  | ✅ Complete |
+| 5.8   | Enhanced LLM Commentary      | ✅ Complete |
+| 5.9   | Move Replay Viewer           | ⬜ Planned  |
+| 5.10  | Position Setup / Editor      | ⬜ Planned  |
 | 6     | Self-Play Training Loop      | 🔄 Current  |
 | 7     | Heuristic Parameter Evolution| ⬜ Planned  |
 | 8     | Adaptive Difficulty          | ⬜ Planned  |
@@ -138,9 +142,55 @@ The game as shipped today can:
 - Show a live eval-history graph updated after every move.
 - Recognise named openings (D4 symmetry-aware) and steer toward statistically good ones via UCB1.
 - Detect endgame phases, zugzwang, and mill-cycle patterns; announce transitions.
-- Undo moves.
+- Undo moves; offer / accept draw; Force Capture toggle.
 - Record every game in structured JSONL; MillsAI reads the last 10 before each new game.
-- Score-normalise position evaluation using per-phase tanh scaling so the graph is meaningful across all phases.
+- Score-normalise position evaluation using per-phase tanh scaling.
+- Interrupt the AI search mid-think via Force Move and see elapsed thinking time.
+- LLM comments on poor moves, good moves, mills, and asks periodic strategic questions.
+
+---
+
+## Completed Stages
+
+---
+
+### Stage 5.6 — In-Game Hint System ✅
+
+**Goal:** Let the human player request a hint at any point during their turn, getting both a visual board highlight and a plain-English explanation from MillsAI.
+
+**Delivered:**
+- `web/app.py` — `hint_request` handler; `Session.hints_used` counter (cap 3 per game).
+- `web/static/game.js` — Hint button wiring, `hint` message handler.
+- `web/static/board.js` — `showHint(from, to)` method with 4 s timed fade.
+- `web/static/style.css` — `#btn-hint` styles.
+
+---
+
+### Stage 5.7 — Force Move + Thinking Time Indicator ✅
+
+**Goal:** Let the player interrupt a slow AI search and see how long the AI has been thinking.
+
+**Delivered:**
+- `ai/game_ai.py` — `force_stop()` sets `self._deadline = 0`; `_score_all()` catches `_SearchAbort` and returns partial results so the best move found so far is still returned; `choose_move()` resets deadline at start.
+- `web/app.py` — AI turn runs as a background `asyncio.Task` so `force_move` WebSocket messages can be received concurrently; `_expected_think_seconds()` computes a rough budget by difficulty; `thinking` message now includes `expected_seconds`.
+- `web/static/game.js` — `startThinkingTimer()` / `stopThinkingTimer()` update the status bar with elapsed time every 200 ms; Force Move button appears while AI thinks (animated border) and disappears when `state` arrives.
+- `web/templates/index.html` — `<button id="btn-force-move">` in the bottom bar, hidden by default.
+- `web/static/style.css` — Force Move button with pulsing gold border animation.
+
+---
+
+### Stage 5.8 — Enhanced LLM Commentary ✅
+
+**Goal:** MillsAI comments on more than just blunders — it now reacts to mills, strong moves, and asks periodic strategic questions.
+
+**Delivered:**
+- `ai/mills_llm.py` — Three new prompt templates: `_POSITIVE_COMMENT_SYSTEM`, `_MILL_COMMENT_SYSTEM`, `_POSITION_QUESTION_SYSTEM`; three new methods: `comment_on_good_move()`, `comment_on_mill()`, `ask_strategic_question()`.
+- `ai/coordinator.py` — `react_to_human_move()` now has four commentary paths in priority order:
+  1. Mill/capture comment (always, when gap ≥ 2 turns).
+  2. Poor-move warning (capped at `max_poor_move_comments`).
+  3. Positive comment on strong moves (score ≥ 0.75).
+  4. Periodic strategic question every 8 human turns.
+- `_human_turn_num` counter and `_can_comment_general()` helper added to `Coordinator`.
 
 ---
 
@@ -148,38 +198,67 @@ The game as shipped today can:
 
 ---
 
-### Stage 5.6 — In-Game Hint System ⬜
+### Stage 5.9 — Move Replay Viewer ⬜
 
-**Goal:** Let the human player request a hint at any point during their turn, getting both a visual board highlight and a plain-English explanation from MillsAI.
+**Goal:** Let the player step forward and backward through all moves of the completed game directly in the browser, with the board re-rendered at each ply.
 
 **User flow:**
-1. Player clicks **Hint** button (visible only on the human's turn).
-2. The board immediately highlights the GameAI's top suggestion:
-   - Placement phase: green pulse on the recommended empty node.
-   - Movement phase: yellow pulse on the piece to move, then a blue pulse on its destination.
-3. Simultaneously, MillsAI is asked for a one- or two-sentence explanation of why that move is strong — this appears in the commentary feed.
-4. The player can ignore the hint and play wherever they like; the hint highlight fades after 4 seconds or on the next click.
+1. After the game ends, **◀ Prev** and **Next ▶** arrow buttons appear below the Game Info panel.
+2. Clicking steps the board one half-move at a time; the current ply is shown (e.g. "Move 7 / 24").
+3. The moves list highlights the current ply.
+4. MillsAI commentary feed is unaffected (read-only during replay).
 
 **Implementation sketch:**
 
-*Server side (`web/app.py`):*
-- New WebSocket message type `hint_request` (client → server).
-- Handler calls `game_ai.choose_move(board)` to get the engine's top move, then `llm.player_chat(hint_prompt, board)` for the explanation (reusing the existing player-chat LLM path so no new prompt engineering is needed).
-- Response message type `hint` carries `{ from, to, explanation }`.
+*Server side:* No changes — the full move list is already in the `state` message's `moves` array, and `board_fen_before` is stored per move.
 
-*Client side (`web/static/game.js`, `board.js`):*
-- `btn-hint` button; disabled when it is not the human's turn or when waiting for AI.
-- On `hint` message: call `board.showHint(from, to)` which draws temporary highlight rings in the hint layer (same SVG group used for legal-move hints), then `setTimeout` clears them after 4 s.
-- Explanation text emitted as a commentary line tagged `[Hint]`.
-
-*Rate limiting:*
-- Cap at 3 hints per game (tracked server-side in `Session`) to discourage over-reliance; the button is greyed out once the cap is hit and shows "No hints left".
+*Client side:*
+- Keep a `replayMoves[]` array (populated from the final state message).
+- Replay buttons shown only when `phase === "game_over"`.
+- On each step, reconstruct the board from the stored FEN (or replay moves from the start) and redraw the SVG.
+- Use `board.renderFromFen(fen)` — a new method on `Board` — to set `board.grid` from a FEN string.
 
 **Deliverables:**
-- `web/app.py` — `hint_request` handler; `Session.hints_used` counter.
-- `web/static/game.js` — Hint button wiring, `hint` message handler.
-- `web/static/board.js` — `showHint(from, to)` method with timed fade.
-- `web/static/style.css` — `#btn-hint` styles matching the undo button.
+- `web/static/board.js` — `renderFromFen(fen)` method.
+- `web/static/game.js` — Replay state machine, prev/next handlers.
+- `web/templates/index.html` — Replay control buttons under Game Info.
+- `web/static/style.css` — Replay button styles.
+
+---
+
+### Stage 5.10 — Position Setup / Editor ⬜
+
+**Goal:** Let the player drag pieces onto the board to set up any legal mid-game position before starting play, then choose whose turn it is and whether placement is complete.
+
+**Rules enforced during setup:**
+- Maximum 9 White and 9 Black pieces.
+- If a player has a mill on the board at the start, the opponent loses one piece from their starting count (a mill costs the opponent one piece — stays legal but asymmetric). Example: Black has one mill → White starts with 8 pieces.
+- Minimum 3 pieces per side to start in move/fly phase; if fewer, placement must be used.
+
+**User flow:**
+1. Toggle a **Setup Position** button in the Settings panel.
+2. A piece palette appears above the board (W piece, B piece, eraser).
+3. Click any node to cycle: empty → W → B → empty.
+4. A phase selector (`place` / `move`) and a turn selector (W / B) are shown.
+5. A **"Start from here"** button validates the position and starts the game with that board state.
+
+**Implementation sketch:**
+
+*Server side:*
+- New `setup_game` WebSocket message: `{ type: "setup_game", board: {...}, turn: "W", phase: "move", pieces_placed: {W:9, B:9} }`.
+- Server validates the position (piece counts, mill legality), then starts a session with the given `BoardState`.
+
+*Client side:*
+- Setup mode replaces click-to-place with palette cycling.
+- Piece count validation shown live (e.g. "W: 6 / 9, B: 5 / 9").
+- If a mill is detected for one side, the piece count badge shows the deduction.
+
+**Deliverables:**
+- `game/board.py` — `BoardState.from_positions(positions, turn, pieces_placed)` class method.
+- `web/app.py` — `setup_game` handler.
+- `web/static/game.js` — Setup mode state machine, palette, validation.
+- `web/templates/index.html` — Setup toggle and palette UI.
+- `web/static/style.css` — Palette styles.
 
 ---
 

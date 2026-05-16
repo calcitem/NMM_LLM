@@ -1284,5 +1284,69 @@
       "learned"
     ],
     "source_reference": ""
+  },
+  {
+    "opening_id": "novel-10ff0050",
+    "name": "The \"Morning Shield",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "d1",
+      "d7",
+      "g4",
+      "d5",
+      "g1",
+      "e3",
+      "a1",
+      "e5",
+      "g7",
+      "e5",
+      "e4",
+      "c5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B...W...WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
   }
 ]
