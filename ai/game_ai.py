@@ -79,8 +79,12 @@ class GameAI:
             return self._iterative_deepen(board)
 
         depth = _DEPTH_TABLE[self.difficulty]
-        best_move, _ = self._root_search(board, depth)
-        return best_move
+        scored = self._score_all(board, moves, depth)
+
+        if recognition is not None:
+            scored = self._apply_opening_adjustments(scored, recognition)
+
+        return max(scored, key=lambda x: x[1])[0]
 
     def score_move(self, board: BoardState, move: dict) -> float:
         """
@@ -110,6 +114,43 @@ class GameAI:
         if hi == lo:
             return 1.0
         return (my_score - lo) / (hi - lo)
+
+    # ── Opening book integration ──────────────────────────────────────────────
+
+    def _apply_opening_adjustments(
+        self,
+        scored: list[tuple[dict, int]],
+        recognition,
+        book_bonus: float = 0.2,
+        blunder_penalty: float = 0.3,
+    ) -> list[tuple[dict, int]]:
+        """Apply opening-book bonus/penalty to a scored move list."""
+        if recognition.status in ("novel", "inactive"):
+            return scored
+
+        all_scores = [s for _, s in scored]
+        lo, hi = min(all_scores), max(all_scores)
+        scale = max(1, hi - lo)
+
+        book_dest = None
+        if recognition.book_move:
+            # book_move may be "d2" (placement) or "a4-a7" (movement)
+            book_dest = recognition.book_move.split("-")[-1].split("x")[0]
+
+        blunder_dests = set()
+        for b in (recognition.common_blunders or []):
+            blunder_dests.add(b.split("-")[-1].split("x")[0])
+
+        adjusted = []
+        for move, raw in scored:
+            dest = move.get("to", "")
+            delta = 0
+            if book_dest and dest == book_dest:
+                delta += book_bonus * scale
+            if dest in blunder_dests:
+                delta -= blunder_penalty * scale
+            adjusted.append((move, raw + delta))
+        return adjusted
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
