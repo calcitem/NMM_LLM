@@ -6,9 +6,11 @@ from .coordinator import Coordinator
 from .opening_book import OpeningBook
 from .opening_recognizer import OpeningRecognizer, RecognitionResult, INACTIVE_RESULT
 from .endgame_recognizer import EndgameRecognizer, EndgameState, INACTIVE_ENDGAME
+from .debriefer import GameDebriefer, DebriefReport, CriticalMoment
 
 __all__ = [
     "GameAI", "evaluate", "MemoryManager", "MillsLLM", "Coordinator",
     "OpeningBook", "OpeningRecognizer", "RecognitionResult", "INACTIVE_RESULT",
     "EndgameRecognizer", "EndgameState", "INACTIVE_ENDGAME",
+    "GameDebriefer", "DebriefReport", "CriticalMoment",
 ]

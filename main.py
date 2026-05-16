@@ -223,6 +223,19 @@ def run_game(
             human_color=human_color,
         )
         coordinator.on_game_end(record)
+        _print_dialogue(coordinator.flush_dialogue())
+
+        if settings.get("auto_open_debrief", False):
+            from ai.debriefer import GameDebriefer
+            debriefer = GameDebriefer(
+                mills_llm=coordinator.mills_llm,
+                analysis_depth=settings.get("debrief_analysis_depth", 4),
+                critical_threshold=settings.get("debrief_critical_threshold", 0.4),
+            )
+            print("\nAnalysing game...", end="", flush=True)
+            report = debriefer.analyse(record)
+            print(" done.")
+            debriefer.print_report(report)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

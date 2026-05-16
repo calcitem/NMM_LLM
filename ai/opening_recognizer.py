@@ -8,13 +8,21 @@ current result is frozen and returned unchanged for subsequent calls.
 Recognition pipeline per ply
 -----------------------------
 1. Append the move to move_sequence; compute ply = len(move_sequence).
-2. Exact-prefix match against all openings in the book.
-3. Deviation detection — if previous ply had candidates but current ply has
+2. Exact-prefix match against all openings in the book, using the active
+   symmetry (if any was previously detected).
+3. Symmetry scan — if no candidates and no symmetry yet found, try all 7
+   non-identity D4 transformations (rotations + reflections) of the current
+   sequence.  On the first match the winning symmetry index is stored and
+   re-used for every subsequent ply, so the whole game is recognised as one
+   coherent symmetric variant.
+4. Deviation detection — if previous ply had candidates but current ply has
    none, look up branch moves on the previous candidates.
-4. FEN transposition — compare board.to_fen_string() against all
+5. FEN transposition — compare board.to_fen_string() against all
    opening_fen_signatures at this ply across the whole book.
-5. Novel — ply >= 4 and nothing matched.
-6. Set book_move from the matched opening's line_moves[ply] if available.
+6. Novel — ply >= 4 and nothing matched.
+7. Set book_move from the matched opening's line_moves[ply] if available,
+   inverse-transformed back to the actual board orientation when a symmetry
+   was detected.
 """
 
 from __future__ import annotations
@@ -29,6 +37,59 @@ if TYPE_CHECKING:
 from ai.opening_book import Opening, OpeningBook
 
 logger = logging.getLogger(__name__)
+
+
+# ── Board symmetry (D4 — 4 rotations + 4 reflections) ────────────────────────
+#
+# Centre of the NMM board is d4.  Using centred coordinates
+# a=−3, b=−2, c=−1, d=0, e=1, f=2, g=3  and rows 1–7 shifted by −4.
+
+_POSITION_COORDS: dict[str, tuple[int, int]] = {
+    # outer ring
+    "a7": (-3,  3), "d7": (0,  3), "g7": (3,  3),
+    "g4": ( 3,  0), "g1": (3, -3), "d1": (0, -3), "a1": (-3, -3), "a4": (-3, 0),
+    # middle ring
+    "b6": (-2,  2), "d6": (0,  2), "f6": (2,  2),
+    "f4": ( 2,  0), "f2": (2, -2), "d2": (0, -2), "b2": (-2, -2), "b4": (-2, 0),
+    # inner ring
+    "c5": (-1,  1), "d5": (0,  1), "e5": (1,  1),
+    "e4": ( 1,  0), "e3": (1, -1), "d3": (0, -1), "c3": (-1, -1), "c4": (-1, 0),
+}
+_COORDS_POSITION: dict[tuple[int, int], str] = {v: k for k, v in _POSITION_COORDS.items()}
+
+# D4 elements as 2×2 matrix (a, b, c, d): (x, y) → (ax+by, cx+dy)
+_SYMMETRIES: list[tuple[int, int, int, int]] = [
+    ( 1,  0,  0,  1),  # 0: identity
+    ( 0, -1,  1,  0),  # 1: 90° CCW      inverse → 3
+    (-1,  0,  0, -1),  # 2: 180°         inverse → 2
+    ( 0,  1, -1,  0),  # 3: 270° CCW     inverse → 1
+    (-1,  0,  0,  1),  # 4: flip x-axis  inverse → 4
+    ( 1,  0,  0, -1),  # 5: flip y-axis  inverse → 5
+    ( 0,  1,  1,  0),  # 6: main diag    inverse → 6
+    ( 0, -1, -1,  0),  # 7: anti-diag    inverse → 7
+]
+_SYM_INVERSE: list[int] = [0, 3, 2, 1, 4, 5, 6, 7]
+
+
+def _transform_pos(pos: str, sym_idx: int) -> Optional[str]:
+    """Return the position reached by applying symmetry sym_idx, or None."""
+    coords = _POSITION_COORDS.get(pos)
+    if coords is None:
+        return None
+    x, y = coords
+    a, b, c, d = _SYMMETRIES[sym_idx]
+    return _COORDS_POSITION.get((a * x + b * y, c * x + d * y))
+
+
+def _transform_sequence(seq: list[str], sym_idx: int) -> Optional[list[str]]:
+    """Transform every position in seq; return None if any position is unmapped."""
+    result: list[str] = []
+    for pos in seq:
+        t = _transform_pos(pos, sym_idx)
+        if t is None:
+            return None
+        result.append(t)
+    return result
 
 
 # ── RecognitionResult ─────────────────────────────────────────────────────────
@@ -84,6 +145,9 @@ class OpeningRecognizer:
         self._prev_candidates: list[Opening] = []   # candidates from previous ply
         self._last_matched_opening: Optional[Opening] = None
         self._placement_phase_ended: bool = False
+        # D4 symmetry index (0 = identity).  Set once when a rotated/reflected
+        # variant is first detected; all subsequent matching uses this symmetry.
+        self._active_symmetry: int = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -95,6 +159,7 @@ class OpeningRecognizer:
         self._prev_candidates = []
         self._last_matched_opening = None
         self._placement_phase_ended = False
+        self._active_symmetry = 0
 
     def update(self, move_notation: str, board: "BoardState") -> RecognitionResult:
         """
@@ -132,52 +197,50 @@ class OpeningRecognizer:
         # Carry forward previous candidates before overwriting.
         self._prev_candidates = list(self._active_candidates)
 
-        # ── Step 2: exact prefix match ────────────────────────────────────────
-        candidates: list[Opening] = [
-            o for o in self.book.values()
-            if len(o.line_moves) >= ply
-            and o.line_moves[:ply] == self.move_sequence
-        ]
+        # ── Step 2: exact-prefix match ────────────────────────────────────────
+        # Transform the current sequence through the active symmetry so that
+        # all comparisons are done in "book space".
+        sym_idx = self._active_symmetry
+        if sym_idx != 0:
+            book_seq = _transform_sequence(self.move_sequence, sym_idx)
+        else:
+            book_seq = self.move_sequence
+
+        candidates: list[Opening] = (
+            [
+                o for o in self.book.values()
+                if len(o.line_moves) >= ply
+                and o.line_moves[:ply] == book_seq
+            ]
+            if book_seq is not None
+            else []
+        )
         self._active_candidates = candidates
 
         if candidates:
-            # Decide status based on number of matches.
-            if len(candidates) == 1 and ply >= 2:
-                status = "exact"
-                confidence = 1.0
-                matched_opening = candidates[0]
-            else:
-                status = "probable"
-                confidence = 1.0 / len(candidates)
-                # Pick the longest (most specific) candidate as representative.
-                matched_opening = max(candidates, key=lambda o: len(o.line_moves))
-
-            self._last_matched_opening = matched_opening
-
-            # Book move: the next expected move in the line.
-            book_move: Optional[str] = None
-            if len(matched_opening.line_moves) > ply:
-                book_move = matched_opening.line_moves[ply]
-
-            result = RecognitionResult(
-                opening_id=matched_opening.opening_id,
-                name=matched_opening.name,
-                family=matched_opening.family,
-                confidence=confidence,
-                status=status,
-                matched_ply=ply,
-                deviation_ply=None,
-                deviation_move=None,
-                book_move=book_move,
-                branch_name=None,
-                strategic_notes=matched_opening.strategic_notes,
-                common_blunders=list(matched_opening.common_blunders),
-                tags=list(matched_opening.tags),
-            )
+            result = self._build_result_from_candidates(candidates, ply, sym_idx)
             self.current_result = result
             return result
 
-        # ── Step 3: deviation detection ───────────────────────────────────────
+        # ── Step 3: symmetry scan (only when no symmetry established yet) ─────
+        if self._active_symmetry == 0 and not self._prev_candidates:
+            for try_sym in range(1, 8):
+                ts = _transform_sequence(self.move_sequence, try_sym)
+                if ts is None:
+                    continue
+                sym_cands = [
+                    o for o in self.book.values()
+                    if len(o.line_moves) >= ply
+                    and o.line_moves[:ply] == ts
+                ]
+                if sym_cands:
+                    self._active_symmetry = try_sym
+                    self._active_candidates = sym_cands
+                    result = self._build_result_from_candidates(sym_cands, ply, try_sym)
+                    self.current_result = result
+                    return result
+
+        # ── Step 4: deviation detection ───────────────────────────────────────
         # Previous ply had candidates but this ply has none — we deviated.
         if self._prev_candidates:
             deviation_ply = ply
@@ -212,7 +275,7 @@ class OpeningRecognizer:
 
             # No matching branch — fall through to transposition / novel.
 
-        # ── Step 4: transposition detection ──────────────────────────────────
+        # ── Step 5: FEN transposition ─────────────────────────────────────────
         board_fen = board.to_fen_string()
         for opening in self.book.values():
             for sig in opening.opening_fen_signatures:
@@ -243,7 +306,7 @@ class OpeningRecognizer:
                     self._active_candidates = []
                     return result
 
-        # ── Step 5: novel ─────────────────────────────────────────────────────
+        # ── Step 6: novel ─────────────────────────────────────────────────────
         if ply >= 4:
             result = RecognitionResult(
                 opening_id=None,
@@ -278,3 +341,48 @@ class OpeningRecognizer:
     def get_current_result(self) -> RecognitionResult:
         """Return the latest RecognitionResult."""
         return self.current_result
+
+    # ── Internals ─────────────────────────────────────────────────────────────
+
+    def _build_result_from_candidates(
+        self,
+        candidates: list[Opening],
+        ply: int,
+        sym_idx: int,
+    ) -> RecognitionResult:
+        """Build a RecognitionResult from a non-empty candidate list."""
+        if len(candidates) == 1 and ply >= 2:
+            status = "exact"
+            confidence = 1.0
+            matched_opening = candidates[0]
+        else:
+            status = "probable"
+            confidence = 1.0 / len(candidates)
+            matched_opening = max(candidates, key=lambda o: len(o.line_moves))
+
+        self._last_matched_opening = matched_opening
+
+        # Next book move — inverse-transform back to the actual board orientation.
+        book_move: Optional[str] = None
+        if len(matched_opening.line_moves) > ply:
+            bm_book = matched_opening.line_moves[ply]
+            if sym_idx != 0:
+                book_move = _transform_pos(bm_book, _SYM_INVERSE[sym_idx])
+            else:
+                book_move = bm_book
+
+        return RecognitionResult(
+            opening_id=matched_opening.opening_id,
+            name=matched_opening.name,
+            family=matched_opening.family,
+            confidence=confidence,
+            status=status,
+            matched_ply=ply,
+            deviation_ply=None,
+            deviation_move=None,
+            book_move=book_move,
+            branch_name=None,
+            strategic_notes=matched_opening.strategic_notes,
+            common_blunders=list(matched_opening.common_blunders),
+            tags=list(matched_opening.tags),
+        )
