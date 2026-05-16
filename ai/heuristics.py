@@ -35,8 +35,32 @@ _CROSS_NODES = frozenset({
     "a4", "b4", "c4",
 })
 
+# Mill-cycle readiness: a closed mill with a slide-out square enables repeated
+# captures (open/close each cycle).  Highest value in fly; still relevant in move.
+_CYCLE_WEIGHTS = {"place": 8, "move": 22, "fly": 45}
 
-def evaluate(board: BoardState, color: str, endgame_state=None) -> int:
+# Fork-threat: a piece in 2+ open mills simultaneously.  Opponent cannot defend
+# both in one move, so one mill closes next turn regardless.
+_FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 28}
+
+# Herding / encirclement: own pieces adjacent to each opponent piece.
+# Rewards progressively surrounding opponent pieces to shrink their escape space.
+# Irrelevant in fly phase (pieces can jump anywhere).
+_HERD_WEIGHTS  = {"place": 2, "move": 9,  "fly": 0}
+
+# Fly-phase asymmetry: reward entering fly (3 pieces) when the opponent hasn't yet,
+# and penalise giving the opponent fly while we remain in move phase.
+# At 4v4 the search will prefer sacrificing a piece (3v4, us in fly) over
+# capturing an opponent piece (4v3, them in fly).
+_FLY_ASYM_WEIGHTS = {"place": 0, "move": 80, "fly": 0}
+
+
+def evaluate(
+    board: BoardState,
+    color: str,
+    endgame_state=None,
+    force_aggressive: bool = False,
+) -> int:
     """Evaluate board from `color`'s perspective. Higher is better for color."""
     terminal, winner = is_terminal(board)
     if terminal:
@@ -61,6 +85,13 @@ def evaluate(board: BoardState, color: str, endgame_state=None) -> int:
     opp_thr    = _mill_threats(board, opp)
     our_pos    = _position_value(board, color)
     opp_pos    = _position_value(board, opp)
+    our_cycle  = _mill_cycle_ready(board, color)
+    opp_cycle  = _mill_cycle_ready(board, opp)
+    our_fork   = _fork_threats(board, color)
+    opp_fork   = _fork_threats(board, opp)
+    our_herd   = _encirclement(board, color)
+    opp_herd   = _encirclement(board, opp)
+    fly_asym   = 0 if force_aggressive else _fly_asymmetry(board, color)
 
     base = (
         w[0] * (our_mills - opp_mills)
@@ -72,6 +103,10 @@ def evaluate(board: BoardState, color: str, endgame_state=None) -> int:
         + _MOB_WEIGHTS[phase]    * (our_mob - opp_mob)
         + _THREAT_WEIGHTS[phase] * (our_thr - opp_thr)
         + 2 * (our_pos - opp_pos)
+        + _CYCLE_WEIGHTS[phase]  * (our_cycle - opp_cycle)
+        + _FORK_WEIGHTS[phase]   * (our_fork  - opp_fork)
+        + _HERD_WEIGHTS[phase]   * (our_herd  - opp_herd)
+        + _FLY_ASYM_WEIGHTS[phase] * fly_asym
     )
     return base + endgame_score(board, color, endgame_state)
 
@@ -156,6 +191,77 @@ def _position_value(board: BoardState, color: str) -> int:
         if board.positions[pos] == color:
             total += 3 if pos in _CROSS_NODES else 2
     return total
+
+
+def _mill_cycle_ready(board: BoardState, color: str) -> int:
+    """
+    Closed mills where at least one piece has a free adjacent square.
+    Such a mill can be opened and re-closed every two moves to force a
+    capture each cycle — the dominant winning pattern in the endgame.
+    """
+    count = 0
+    for mill in MILLS:
+        if all(board.positions[p] == color for p in mill):
+            for pos in mill:
+                if any(board.positions[nb] == "" for nb in ADJACENCY[pos]):
+                    count += 1
+                    break  # count each mill once even if multiple pieces can slide
+    return count
+
+
+def _fork_threats(board: BoardState, color: str) -> int:
+    """
+    Pieces simultaneously participating in 2+ open mills (two-configurations).
+    A fork piece creates dual threats the opponent cannot both defend in one move.
+    """
+    open_mills = [
+        mill for mill in MILLS
+        if ([board.positions[p] for p in mill].count(color) == 2
+            and [board.positions[p] for p in mill].count("") == 1)
+    ]
+    count = 0
+    for pos in POSITIONS:
+        if board.positions[pos] == color:
+            if sum(1 for m in open_mills if pos in m) >= 2:
+                count += 1
+    return count
+
+
+def _fly_asymmetry(board: BoardState, color: str) -> int:
+    """
+    +1 if color has entered fly phase (3 pieces, all 9 placed) and opponent has not.
+    -1 if opponent has fly and color does not.
+    0 if both or neither are in fly.
+
+    Rewards sacrificing down to 3 pieces to gain fly mobility before the opponent
+    does, and penalises giving the opponent fly (e.g. capturing their 4th piece
+    in a 4v4 position to leave them with 3 = fly advantage).
+    """
+    opp = "B" if color == "W" else "W"
+    color_fly = (board.pieces_placed.get(color, 0) >= 9 and board.pieces_on_board[color] == 3)
+    opp_fly   = (board.pieces_placed.get(opp,   0) >= 9 and board.pieces_on_board[opp]   == 3)
+    if color_fly and not opp_fly:
+        return 1
+    if opp_fly and not color_fly:
+        return -1
+    return 0
+
+
+def _encirclement(board: BoardState, color: str) -> int:
+    """
+    Herding pressure: for each opponent piece, count how many of its adjacent
+    squares are occupied by own pieces.  High score means opponent pieces are
+    surrounded and have fewer escape routes.  Irrelevant in fly phase (pieces
+    can jump to any empty square so adjacency confinement does not apply).
+    """
+    if get_game_phase(board, color) == "fly":
+        return 0
+    opp = "B" if color == "W" else "W"
+    count = 0
+    for pos in POSITIONS:
+        if board.positions[pos] == opp:
+            count += sum(1 for nb in ADJACENCY[pos] if board.positions[nb] == color)
+    return count
 
 
 # ── Endgame supplement ────────────────────────────────────────────────────────

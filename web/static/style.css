@@ -296,7 +296,10 @@ main {
   overflow: hidden;
 }
 
-/* ── Undo button ─────────────────────────────────────────────────────── */
+/* ── Draw / Hint / Undo buttons ──────────────────────────────────────── */
+#btn-force-cap,
+#btn-draw,
+#btn-hint,
 #btn-undo {
   flex-shrink: 0;
   background: none;
@@ -306,8 +309,16 @@ main {
   border-radius: 4px;
   cursor: pointer;
   font-size: .85rem;
+  white-space: nowrap;
 }
-#btn-undo:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+#btn-force-cap:hover:not(:disabled) { border-color: var(--red);    color: var(--red); }
+#btn-draw:hover:not(:disabled)      { border-color: var(--green);  color: var(--green); }
+#btn-hint:hover:not(:disabled)      { border-color: var(--tan);    color: var(--tan); }
+#btn-undo:hover:not(:disabled)      { border-color: var(--accent); color: var(--accent); }
+#btn-force-cap.btn-active { border-color: var(--red); color: var(--red); }
+#btn-force-cap:disabled,
+#btn-draw:disabled,
+#btn-hint:disabled,
 #btn-undo:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Moves list ──────────────────────────────────────────────────────── */

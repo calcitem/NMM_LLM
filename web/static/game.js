@@ -7,11 +7,14 @@ const $ = id => document.getElementById(id);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let ws        = null;
-let board     = null;
-let gameState = null;
-let phase     = "idle";
-let evalHistory = [];   // [{move: n, score: f}] — history for the graph
+let ws              = null;
+let board           = null;
+let gameState       = null;
+let phase           = "idle";
+let evalHistory     = [];     // [{move: n, score: f}] — history for the graph
+let hintsLeft       = 3;      // server-tracked cap; synced via hint messages
+let drawUnlocked    = false;  // true once 40 post-placement half-moves have passed
+let forceAggressive = false;  // when true, AI ignores fly-sacrifice heuristic
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -32,6 +35,27 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-undo").addEventListener("click", () => {
     if (!ws || phase === "idle") return;
     ws.send(JSON.stringify({ type: "undo" }));
+  });
+  $("btn-hint").addEventListener("click", () => {
+    if (!ws || phase === "idle" || phase === "game_over") return;
+    if (!gameState || !gameState.is_human_turn || hintsLeft <= 0) return;
+    $("btn-hint").disabled = true;
+    ws.send(JSON.stringify({ type: "hint_request" }));
+  });
+  $("btn-draw").addEventListener("click", () => {
+    if (!ws || !drawUnlocked || phase !== "playing") return;
+    $("btn-draw").disabled = true;
+    ws.send(JSON.stringify({ type: "draw_offer" }));
+  });
+  $("btn-force-cap").addEventListener("click", () => {
+    if (!ws || phase === "idle") return;
+    forceAggressive = !forceAggressive;
+    $("btn-force-cap").classList.toggle("btn-active", forceAggressive);
+    ws.send(JSON.stringify({ type: "force_aggressive", active: forceAggressive }));
+    addCommentary("Game", forceAggressive
+      ? "Force Capture ON — AI will capture aggressively even in 4v4."
+      : "Force Capture OFF — AI returns to fly-sacrifice strategy."
+    );
   });
   $("player-chat-send").addEventListener("click", sendPlayerMessage);
   $("player-chat-input").addEventListener("keydown", e => {
@@ -59,9 +83,16 @@ function startNewGame() {
   setStatus("Starting…");
   phase = "idle";
   evalHistory = [];
+  hintsLeft = 3;
+  drawUnlocked = false;
+  forceAggressive = false;
+  $("btn-force-cap").classList.remove("btn-active");
+  $("btn-force-cap").disabled = true;
   drawEvalGraph();
   renderMoves([]);
   $("btn-undo").disabled = true;
+  updateHintButton();
+  updateDrawButton();
 
   if (ws) { ws.close(); ws = null; }
 
@@ -103,6 +134,10 @@ function handleMessage(msg) {
       }
       if (msg.moves) renderMoves(msg.moves);
       $("btn-undo").disabled = (phase === "idle" || phase === "game_over");
+      updateHintButton(msg.is_human_turn && phase !== "game_over");
+      if ((msg.post_placement_moves ?? 0) >= 40) drawUnlocked = true;
+      updateDrawButton();
+      $("btn-force-cap").disabled = (phase === "idle" || phase === "game_over");
       if (msg.is_human_turn) {
         setStatus(
           msg.phase === "place"
@@ -137,12 +172,36 @@ function handleMessage(msg) {
       addCommentary("MillsAI", msg.text);
       break;
 
+    case "hint":
+      board.showHint(msg.from, msg.to);
+      hintsLeft = msg.hints_left;
+      updateHintButton(true);
+      if (msg.explanation) {
+        addCommentary("[Hint]", msg.explanation);
+      } else {
+        const dest = msg.from ? `${msg.from} → ${msg.to}` : msg.to;
+        addCommentary("[Hint]", `Suggested move: ${dest}`);
+      }
+      break;
+
     case "game_over":
       phase = "game_over";
       setStatus(msg.message);
       setTurnBadge(null, msg.winner);
       addCommentary("Game", msg.message);
       $("btn-undo").disabled = true;
+      $("btn-force-cap").disabled = true;
+      updateHintButton(false);
+      updateDrawButton();
+      break;
+
+    case "draw_accepted":
+      addCommentary("Game", "Draw offer accepted.");
+      break;
+
+    case "draw_rejected":
+      addCommentary("Game", "Draw offer declined — the AI believes it can win.");
+      updateDrawButton();
       break;
 
     case "error":
@@ -222,6 +281,22 @@ function updateInfoPanel(state) {
 
 function setStatus(text) {
   $("status-bar").textContent = text;
+}
+
+function updateDrawButton() {
+  const btn = $("btn-draw");
+  btn.disabled = !drawUnlocked || phase !== "playing";
+}
+
+function updateHintButton(isHumanTurn = false) {
+  const btn = $("btn-hint");
+  if (hintsLeft <= 0) {
+    btn.textContent = "No hints left";
+    btn.disabled = true;
+  } else {
+    btn.textContent = `Hint (${hintsLeft})`;
+    btn.disabled = !isHumanTurn || phase === "idle" || phase === "game_over";
+  }
 }
 
 // ── Eval graph ────────────────────────────────────────────────────────────────

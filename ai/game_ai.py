@@ -23,6 +23,11 @@ from .heuristics import INF, evaluate
 _DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9}
 _TIME_LIMIT = {5: 10.0, 9: 20.0, 10: 45.0}  # difficulty → iterative-deepening budget
 
+# First 2 placements per AI colour use a short time budget regardless of
+# difficulty — the tree is tiny with so few pieces on the board.
+_EARLY_GAME_MOVES = 2
+_EARLY_GAME_TIME  = 1.5  # seconds
+
 
 class GameAI:
     """
@@ -50,7 +55,8 @@ class GameAI:
         self.difficulty = max(1, min(10, difficulty))
         self.blunder_probability = max(0.0, min(1.0, blunder_probability))
         self._nodes = 0
-        self.last_was_blunder: bool = False  # flag readable by Coordinator / MillsLLM
+        self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
+        self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -75,6 +81,13 @@ class GameAI:
             return blunder
 
         self.last_was_blunder = False
+
+        # Early-game fast path: use a short time budget for the first two
+        # placements this AI makes — the position tree is tiny with so few
+        # pieces on the board and deep search wastes time.
+        if (board.pieces_placed.get(self.color, 0) < _EARLY_GAME_MOVES
+                and sum(board.pieces_placed.values()) < _EARLY_GAME_MOVES * 2):
+            return self._iterative_deepen(board, _EARLY_GAME_TIME)
 
         if self.difficulty in _TIME_LIMIT:
             return self._iterative_deepen(board, _TIME_LIMIT[self.difficulty])
@@ -198,7 +211,7 @@ class GameAI:
             return -(INF - depth)
 
         if depth == 0:
-            return evaluate(board, board.turn, endgame_state)
+            return evaluate(board, board.turn, endgame_state, self.force_aggressive)
 
         moves = get_all_legal_moves(board)
         if not moves:

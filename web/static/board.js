@@ -129,6 +129,11 @@ export class Board {
     // Mill flash overlay
     this._millGroup = _el("g", { opacity:0, "pointer-events":"none" });
     svg.appendChild(this._millGroup);
+
+    // Hint overlay — temporary move suggestion rings, above everything
+    this._hintOverlay = _el("g", { "pointer-events":"none" });
+    svg.appendChild(this._hintOverlay);
+    this._hintTimer = null;
   }
 
   render(state) {
@@ -140,6 +145,7 @@ export class Board {
     this.capMode     = false;
     this.legalCaps   = new Set();
     this.selected    = null;
+    this.clearHint();
     this._drawPieces();
     this._drawHints();
   }
@@ -275,6 +281,33 @@ export class Board {
     this.selected = name;
     this._drawPieces();
     this._drawHints();
+  }
+
+  showHint(from_pos, to_pos) {
+    this.clearHint();
+    if (from_pos) {
+      // Movement: amber pulse on the piece to move
+      const [fx, fy] = nodeXY(from_pos);
+      this._hintOverlay.appendChild(_el("circle", {
+        cx:fx, cy:fy, r:PIECE_R + 8,
+        fill:"rgba(244,197,66,0.30)", stroke:"#f4c542", "stroke-width":3,
+      }));
+    }
+    if (to_pos) {
+      // Destination: blue pulse
+      const [tx, ty] = nodeXY(to_pos);
+      this._hintOverlay.appendChild(_el("circle", {
+        cx:tx, cy:ty, r:PIECE_R + 8,
+        fill:"rgba(60,150,255,0.30)", stroke:"#4099ff", "stroke-width":3,
+      }));
+    }
+    this._hintTimer = setTimeout(() => this.clearHint(), 4000);
+  }
+
+  clearHint() {
+    clearTimeout(this._hintTimer);
+    this._hintTimer = null;
+    this._hintOverlay.innerHTML = "";
   }
 
   flashMills(boardGrid, color) {

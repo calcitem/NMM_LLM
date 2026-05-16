@@ -39,6 +39,10 @@ from ai.opening_book import Opening, OpeningBook
 
 logger = logging.getLogger(__name__)
 
+# With fewer than this many placements the sequence is too short to commit to
+# a single opening — "exact" and "novel" are both deferred until this ply.
+_COMMIT_PLY = 12
+
 
 # ── Board symmetry (D4 — 4 rotations + 4 reflections) ────────────────────────
 #
@@ -325,7 +329,7 @@ class OpeningRecognizer:
                     return result
 
         # ── Step 6: novel ─────────────────────────────────────────────────────
-        if ply >= 4:
+        if ply >= _COMMIT_PLY:
             result = RecognitionResult(
                 opening_id=None,
                 name=None,
@@ -369,7 +373,7 @@ class OpeningRecognizer:
         sym_idx: int,
     ) -> RecognitionResult:
         """Build a RecognitionResult from a non-empty candidate list."""
-        if len(candidates) == 1 and ply >= 2:
+        if len(candidates) == 1 and ply >= _COMMIT_PLY:
             status = "exact"
             confidence = 1.0
             matched_opening = candidates[0]

@@ -36,18 +36,27 @@ class GameEngine:
         {"from": str|None, "to": str, "capture": str|None}
     """
 
+    # Half-moves after placement before the draw-offer button unlocks.
+    DRAW_OFFER_THRESHOLD = 40
+    # Half-moves after placement before automatic draw (50 per player).
+    AUTO_DRAW_THRESHOLD  = 100
+
     def __init__(self, human_color: str = "W") -> None:
         self.board: BoardState = BoardState.new_game()
         self.human_color: str = human_color
         self.finished: bool = False
         self.winner: Optional[str] = None
+        self.draw_reason: Optional[str] = None
         self._turn_num: int = 1  # pair number (White + Black = 1 turn)
+        self._post_placement_moves: int = 0   # half-moves after placement ends
+        self._move_log: List[Tuple] = []       # (color, from, to) per half-move
 
         self.game_record: Dict = {
             "session_id": str(uuid.uuid4()),
             "date": datetime.now().isoformat(),
             "human_color": human_color,
             "winner": None,
+            "draw_reason": None,
             "recognised_opening_id": None,
             "recognised_opening_name": None,
             "opening_recognition_status": None,
@@ -101,6 +110,53 @@ class GameEngine:
             self.finished = True
             self.winner = winner
             self.game_record["winner"] = winner
+
+        # Draw checks (only when game not already finished by terminal condition)
+        if not self.finished:
+            placement_done = (
+                self.board.pieces_placed.get("W", 0) >= 9
+                and self.board.pieces_placed.get("B", 0) >= 9
+            )
+            if placement_done:
+                self._post_placement_moves += 1
+
+            # Store (color, from, to, capture) so the repetition check can exclude
+            # moves that changed material — a capture can never be part of repetition.
+            self._move_log.append(
+                (color, move.get("from"), move.get("to"), move.get("capture"))
+            )
+
+            # Move repetition: detect oscillation (A→B, B→A, A→B by the same player).
+            # Positions -1, -3, -5 are all the same player (alternating turns).
+            # Any of the three moves involving a capture is NOT repetition.
+            log = self._move_log
+            if len(log) >= 5:
+                c1, f1, t1, cap1 = log[-1]
+                c3, f3, t3, cap3 = log[-3]
+                c5, f5, t5, cap5 = log[-5]
+                no_captures = (cap1 is None and cap3 is None and cap5 is None)
+                oscillation = (
+                    no_captures
+                    and c1 == c3 == c5             # same player all three times
+                    and f1 == t3 and t1 == f3      # -1 reverses -3 (A→B / B→A)
+                    and f1 == f5 and t1 == t5      # -1 and -5 are the same move
+                    and f1 is not None             # movement phase only
+                )
+                exact_repeat = (
+                    no_captures and log[-1] == log[-3] == log[-5]
+                )
+                if oscillation or exact_repeat:
+                    self.finished = True
+                    self.winner = None
+                    self.draw_reason = "repetition"
+                    self.game_record["draw_reason"] = "repetition"
+
+            # 50-move rule (100 half-moves post-placement without capture)
+            if not self.finished and self._post_placement_moves >= self.AUTO_DRAW_THRESHOLD:
+                self.finished = True
+                self.winner = None
+                self.draw_reason = "50-move rule"
+                self.game_record["draw_reason"] = "50-move rule"
 
     # ── Helpers used by the UI / AI ───────────────────────────────────────────
 

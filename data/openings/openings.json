@@ -1028,5 +1028,261 @@
       "learned"
     ],
     "source_reference": ""
+  },
+  {
+    "opening_id": "novel-6f99d2f3",
+    "name": "The \"Eagle's Stronghold Formation",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "f2",
+      "b2",
+      "b4",
+      "a4",
+      "d7",
+      "d1",
+      "g7",
+      "a7",
+      "e5",
+      "g4",
+      "e4",
+      "e3",
+      "a1",
+      "c5",
+      "f6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.WBB..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........W.WBBWB........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.....W.W.WBBWB........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".BB..W.W.W.WBBWB........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
+  },
+  {
+    "opening_id": "novel-2438fb30",
+    "name": "Self-Play Line novel-",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d1",
+      "f4",
+      "a1",
+      "g1",
+      "a4",
+      "a7",
+      "d2",
+      "d3",
+      "b4",
+      "c4",
+      "b6",
+      "b2",
+      "d7",
+      "g7",
+      "g4",
+      "e4",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....BB..W.W............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "....WBBB.W.W............|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "W...WBBB.W.W.B..........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "W...WBBB.W.W.B.B.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
+  },
+  {
+    "opening_id": "novel-2e5e82ee",
+    "name": "Self-Play Line novel-",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d1",
+      "f4",
+      "a1",
+      "g1",
+      "a4",
+      "a7",
+      "d2",
+      "d3",
+      "b4",
+      "c4",
+      "b2",
+      "g7",
+      "b6",
+      "a7",
+      "f2",
+      "a7",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....BB..W.W............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "....WBBB.W.W............|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "W...WBBB.W.W.B..........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "W...WBBB.W.W.B.B.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 6
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
+  },
+  {
+    "opening_id": "novel-1081eef3",
+    "name": "The Weaver's Stronghold",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "d7",
+      "d5",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "b2",
+      "c5",
+      "e5",
+      "c4",
+      "a4",
+      "c3",
+      "a1",
+      "b2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.......W.W.B.B.B......|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.......WWWBB.B.B......|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W......WWWWBB.B.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
   }
 ]

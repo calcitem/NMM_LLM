@@ -36,6 +36,8 @@ def _load_settings() -> dict:
 
 # ── Session ───────────────────────────────────────────────────────────────────
 
+_HINT_CAP = 3
+
 class Session:
     def __init__(
         self,
@@ -50,6 +52,7 @@ class Session:
         self.coordinator = coordinator
         self.human_color = human_color
         self.vs_human    = vs_human
+        self.hints_used: int = 0
         self._pending: Optional[dict] = None   # move awaiting a capture choice
         self._board_before = None              # board snapshot before human move
         self._board_history: list = []         # list of BoardState for undo
@@ -102,8 +105,10 @@ def _state(session: Session) -> dict:
         "legal_sources":    legal_sources,
         "move_pairs":       move_pairs,
         "eval_score":       eval_score,
-        "finished":         engine.finished,
-        "winner":           engine.winner,
+        "finished":              engine.finished,
+        "winner":                engine.winner,
+        "draw_reason":           engine.draw_reason,
+        "post_placement_moves":  engine._post_placement_moves,
         "moves":            [
             {"color": m["color"], "notation": m["notation"]}
             for m in engine.game_record.get("moves", [])
@@ -122,9 +127,15 @@ async def _commentary(ws: WebSocket, session: Session) -> None:
 
 
 async def _game_over(ws: WebSocket, session: Session) -> None:
-    winner = session.engine.winner
-    msg = f"{'White' if winner == 'W' else 'Black'} wins!" if winner else "Draw!"
-    await _send(ws, {"type": "game_over", "winner": winner, "message": msg})
+    winner      = session.engine.winner
+    draw_reason = session.engine.draw_reason
+    if winner:
+        msg = f"{'White' if winner == 'W' else 'Black'} wins!"
+    elif draw_reason:
+        msg = f"Draw — {draw_reason}."
+    else:
+        msg = "Draw!"
+    await _send(ws, {"type": "game_over", "winner": winner, "draw_reason": draw_reason, "message": msg})
 
     if session.coordinator:
         record = session.coordinator.build_game_record(
@@ -302,12 +313,88 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── undo ──────────────────────────────────────────────────────────
             elif kind == "undo" and session and session._board_history:
-                session.engine.board    = session._board_history.pop()
-                session.engine.finished = False
-                session.engine.winner   = None
-                session._pending        = None
-                session._board_before   = None
+                session.engine.board       = session._board_history.pop()
+                session.engine.finished    = False
+                session.engine.winner      = None
+                session.engine.draw_reason = None
+                session._pending           = None
+                session._board_before      = None
                 await _send(websocket, _state(session))
+
+            # ── hint_request ──────────────────────────────────────────────────
+            elif kind == "hint_request" and session:
+                if not session.game_ai:
+                    await _send(websocket, {"type": "error", "message": "Hints require an AI opponent."})
+                    continue
+                if session.hints_used >= _HINT_CAP:
+                    await _send(websocket, {"type": "error", "message": "No hints remaining this game."})
+                    continue
+
+                board = session.engine.board
+                hint_move = await asyncio.to_thread(session.game_ai.choose_move, board)
+                session.hints_used += 1
+                hints_left = _HINT_CAP - session.hints_used
+
+                explanation: Optional[str] = None
+                if session.coordinator:
+                    from_pos = hint_move.get("from")
+                    to_pos   = hint_move.get("to")
+                    move_str = f"{from_pos}-{to_pos}" if from_pos else to_pos
+                    prompt   = (
+                        f"In one or two sentences, why is {move_str} a strong move "
+                        f"in this position? Be specific about the strategic reason."
+                    )
+                    explanation = await asyncio.to_thread(
+                        session.coordinator.mills_llm.player_chat, prompt, board
+                    )
+
+                await _send(websocket, {
+                    "type":        "hint",
+                    "from":        hint_move.get("from"),
+                    "to":          hint_move.get("to"),
+                    "explanation": explanation,
+                    "hints_left":  hints_left,
+                })
+
+            # ── force_aggressive ──────────────────────────────────────────────
+            elif kind == "force_aggressive" and session:
+                if session.game_ai:
+                    session.game_ai.force_aggressive = bool(msg.get("active", False))
+
+            # ── draw_offer ────────────────────────────────────────────────────
+            elif kind == "draw_offer" and session:
+                engine = session.engine
+                if engine.finished:
+                    await _send(websocket, {"type": "error", "message": "Game already over."})
+                    continue
+                if engine._post_placement_moves < engine.DRAW_OFFER_THRESHOLD:
+                    await _send(websocket, {"type": "error", "message": "Draw offer not available yet."})
+                    continue
+
+                # AI decides: accept if it is not winning (eval < 0.15 from AI's perspective)
+                accept = True
+                if session.game_ai:
+                    board = engine.board
+                    try:
+                        eval_from_human = session.game_ai.position_eval(board)
+                        # eval_from_human is White-positive; adjust sign for AI color
+                        if session.game_ai.color == "W":
+                            ai_eval = eval_from_human
+                        else:
+                            ai_eval = -eval_from_human
+                        accept = ai_eval < 0.15   # AI not clearly winning
+                    except Exception:
+                        accept = True
+
+                if accept:
+                    engine.finished   = True
+                    engine.winner     = None
+                    engine.draw_reason = "agreement"
+                    engine.game_record["draw_reason"] = "agreement"
+                    await _send(websocket, {"type": "draw_accepted"})
+                    await _game_over(websocket, session)
+                else:
+                    await _send(websocket, {"type": "draw_rejected"})
 
             # ── player_message ────────────────────────────────────────────────
             elif kind == "player_message" and session:
