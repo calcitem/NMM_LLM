@@ -104,6 +104,10 @@ def _state(session: Session) -> dict:
         "eval_score":       eval_score,
         "finished":         engine.finished,
         "winner":           engine.winner,
+        "moves":            [
+            {"color": m["color"], "notation": m["notation"]}
+            for m in engine.game_record.get("moves", [])
+        ],
     }
 
 

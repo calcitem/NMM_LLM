@@ -22,6 +22,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("toggle-settings").addEventListener("click", () => {
     const p = $("settings-panel");
     p.hidden = !p.hidden;
+    $("toggle-settings").classList.toggle("btn-active", !p.hidden);
+  });
+  $("toggle-moves").addEventListener("click", () => {
+    const p = $("moves-panel");
+    p.hidden = !p.hidden;
+    $("toggle-moves").classList.toggle("btn-active", !p.hidden);
   });
   $("btn-undo").addEventListener("click", () => {
     if (!ws || phase === "idle") return;
@@ -54,6 +60,7 @@ function startNewGame() {
   phase = "idle";
   evalHistory = [];
   drawEvalGraph();
+  renderMoves([]);
   $("btn-undo").disabled = true;
 
   if (ws) { ws.close(); ws = null; }
@@ -94,6 +101,7 @@ function handleMessage(msg) {
         evalHistory.push(msg.eval_score);
         drawEvalGraph();
       }
+      if (msg.moves) renderMoves(msg.moves);
       $("btn-undo").disabled = (phase === "idle" || phase === "game_over");
       if (msg.is_human_turn) {
         setStatus(
@@ -290,6 +298,63 @@ function drawEvalGraph() {
     fill:"#c8a96e", "font-size":"9", "font-family":"monospace" });
   lbl.textContent = who;
   svg.appendChild(lbl);
+}
+
+// ── Moves list ────────────────────────────────────────────────────────────────
+
+function renderMoves(moves) {
+  const list = $("moves-list");
+  if (!list) return;
+  list.innerHTML = "";
+
+  if (!moves || moves.length === 0) return;
+
+  // Pair moves into rows: [white_notation, black_notation]
+  const rows = [];
+  let i = 0;
+  // White always moves first; handle the case where the player is Black
+  // and the AI (White) may have already moved once before the first state.
+  while (i < moves.length) {
+    const w = moves[i].color === "W" ? moves[i] : null;
+    const b = moves[i].color === "B" && !w ? moves[i] : null;
+    if (w) {
+      const bNext = moves[i + 1] && moves[i + 1].color === "B" ? moves[i + 1] : null;
+      rows.push([w.notation, bNext ? bNext.notation : ""]);
+      i += bNext ? 2 : 1;
+    } else {
+      rows.push(["—", b ? b.notation : moves[i].notation]);
+      i += 1;
+    }
+  }
+
+  // Header row
+  const hdr = document.createElement("div");
+  hdr.className = "move-row move-row-hdr";
+  hdr.innerHTML = `<span class="move-num">#</span>
+    <span class="move-w">⬜</span>
+    <span class="move-b">⬛</span>`;
+  list.appendChild(hdr);
+
+  rows.forEach((pair, idx) => {
+    const row = document.createElement("div");
+    row.className = "move-row" + (idx === rows.length - 1 ? " move-row-last" : "");
+    const num  = document.createElement("span");
+    num.className   = "move-num";
+    num.textContent = `${idx + 1}.`;
+    const wm = document.createElement("span");
+    wm.className   = "move-w";
+    wm.textContent = pair[0] || "";
+    const bm = document.createElement("span");
+    bm.className   = "move-b";
+    bm.textContent = pair[1] || "";
+    row.appendChild(num);
+    row.appendChild(wm);
+    row.appendChild(bm);
+    list.appendChild(row);
+  });
+
+  // Auto-scroll to bottom
+  list.scrollTop = list.scrollHeight;
 }
 
 function setTurnBadge(name, winner) {

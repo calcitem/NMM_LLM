@@ -49,8 +49,8 @@ header h1 {
   color: var(--tan);
 }
 
+#toggle-moves,
 #toggle-settings {
-  margin-left: auto;
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -59,7 +59,11 @@ header h1 {
   cursor: pointer;
   font-size: .85rem;
 }
-#toggle-settings:hover { border-color: var(--accent); color: var(--accent); }
+#toggle-settings { margin-left: auto; }
+#toggle-moves:hover,
+#toggle-settings:hover  { border-color: var(--accent); color: var(--accent); }
+#toggle-moves.btn-active,
+#toggle-settings.btn-active { border-color: var(--tan); color: var(--tan); }
 
 /* ── Main 3-column grid ──────────────────────────────────────────────── */
 /*   [commentary 260px] [board 1fr] [side 280px]                         */
@@ -305,6 +309,37 @@ main {
 }
 #btn-undo:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 #btn-undo:disabled { opacity: 0.35; cursor: default; }
+
+/* ── Moves list ──────────────────────────────────────────────────────── */
+#moves-list {
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: .82rem;
+  font-family: "Courier New", monospace;
+}
+
+.move-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.move-row:hover { background: #1e1a12; }
+.move-row-hdr {
+  color: var(--text-dim);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.move-row-last { background: #1e1a12; }
+
+.move-num  { color: var(--text-dim); }
+.move-row .move-w { color: var(--white-p); }
+.move-row .move-b { color: #9090cc; }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 860px) {

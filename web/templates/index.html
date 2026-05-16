@@ -10,6 +10,7 @@
 <div id="app">
   <header>
     <h1>Nine Men's Morris</h1>
+    <button id="toggle-moves">Moves</button>
     <button id="toggle-settings">Settings</button>
   </header>
 
@@ -34,8 +35,14 @@
       <div id="status-bar">Configure a game and click New Game.</div>
     </div>
 
-    <!-- Right column: status badge, game info, settings -->
+    <!-- Right column: moves list, status badge, game info, settings -->
     <div id="side-panel">
+
+      <!-- Moves list (toggled via header button) -->
+      <div class="panel-box" id="moves-panel" hidden>
+        <h3>Moves</h3>
+        <div id="moves-list"></div>
+      </div>
 
       <div class="panel-box">
         <h3>Status</h3>
