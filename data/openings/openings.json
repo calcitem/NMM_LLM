@@ -836,5 +836,197 @@
       "learned"
     ],
     "source_reference": ""
+  },
+  {
+    "opening_id": "novel-8102c4ae",
+    "name": "Self-Play Line novel-",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d7",
+      "f4",
+      "a7",
+      "g7",
+      "g4",
+      "a4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "d2",
+      "d1",
+      "g1",
+      "d5",
+      "a1",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "BB.......W.W............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "BBWB.....W.W............|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "BBWB...W.W.W...B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "BBWB...W.WWWB..B........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 8
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
+  },
+  {
+    "opening_id": "novel-c162aa4c",
+    "name": "Self-Play Line novel-",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d7",
+      "f4",
+      "a7",
+      "g7",
+      "g4",
+      "f6",
+      "a1",
+      "a4",
+      "d1",
+      "g1",
+      "d3",
+      "d2",
+      "b4",
+      "f2",
+      "g4",
+      "b6",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "BB.......W.W............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "BBWB.....W.W............|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "BBWB..B..WWW............|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "BBWB.BBW.WWW............|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 3,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
+  },
+  {
+    "opening_id": "novel-e965cb40",
+    "name": "Self-Play Line novel-",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "d1",
+      "f4",
+      "g4",
+      "f2",
+      "b2",
+      "f6",
+      "d6",
+      "b4",
+      "g1",
+      "a7",
+      "g7",
+      "a1",
+      "a4",
+      "d7",
+      "e4",
+      "c4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....W...W.B.B..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...W.W...W.BBB..........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...W.W...WBBBBW.........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...W.W...WBBBBWB........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 2
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": ""
   }
 ]
