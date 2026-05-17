@@ -42,12 +42,25 @@ sys.path.insert(0, str(_ROOT))
 from game.game_engine import GameEngine
 from game.rules import get_all_legal_moves, get_game_phase
 from ai.game_ai import GameAI
+from ai.heuristics import HeuristicWeights
 from ai.memory_manager import MemoryManager
 from ai.mills_llm import MillsLLM
 from ai.coordinator import Coordinator
 from ai.opening_book import OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
 from ai.endgame_recognizer import EndgameRecognizer
+from ai.trajectory_db import TrajectoryDB
+
+# Load trajectory DB once at startup — updated incrementally as games complete.
+_trajectory_db = TrajectoryDB(_ROOT / "data" / "games")
+try:
+    _trajectory_db.load()
+    log.info(
+        "TrajectoryDB: %d games, %d prefix entries",
+        _trajectory_db.game_count, _trajectory_db.entry_count,
+    )
+except Exception as _exc:
+    log.warning("TrajectoryDB: load failed — %s", _exc)
 
 
 def _load_settings() -> dict:
@@ -88,9 +101,29 @@ app.mount("/static", StaticFiles(directory=str(_WEB / "static")), name="static")
 templates = Jinja2Templates(directory=str(_WEB / "templates"))
 
 
+_SETTINGS_PATH = _ROOT / "data" / "settings.json"
+
+
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/api/weights")
+async def get_weights():
+    from fastapi.responses import JSONResponse
+    settings = _load_settings()
+    return JSONResponse(settings.get("ai_weights", {}))
+
+
+@app.post("/api/weights")
+async def save_weights(request: Request):
+    from fastapi.responses import JSONResponse
+    body = await request.json()
+    settings = _load_settings()
+    settings["ai_weights"] = body
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    return JSONResponse({"ok": True})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -170,12 +203,13 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
 
 def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
     if total_pieces < 10:
-        return 2.0
-    if difficulty >= 10:
-        return 45.0
-    if difficulty >= 9:
-        return 20.0
-    estimates = {1: 1, 2: 1, 3: 2, 4: 3, 5: 5, 6: 8, 7: 12, 8: 20}
+        return 4.0
+    # Time-limited levels: return the actual budget so the UI countdown matches.
+    budgets = {5: 15, 6: 24, 7: 36, 8: 60, 9: 60, 10: 90}
+    if difficulty in budgets:
+        return float(budgets[difficulty])
+    # Fixed-depth levels (1–4): generous estimate so force_move doesn't fire mid-search.
+    estimates = {1: 3, 2: 3, 3: 6, 4: 9}
     return float(estimates.get(difficulty, 5))
 
 
@@ -205,6 +239,22 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
 
     elapsed = _time.time() - t0
     log.info("AI turn end    move=%s elapsed=%.2fs", move, elapsed)
+
+    # Resignation: human dominated for 3 consecutive AI turns
+    if session.coordinator and session.coordinator.resignation_offered:
+        session.coordinator.resignation_offered = False
+        session.engine.finished = True
+        session.engine.winner   = session.human_color
+        human_name = "White" if session.human_color == "W" else "Black"
+        await _commentary(ws, session)
+        await _send(ws, {
+            "type":       "game_over",
+            "winner":     session.human_color,
+            "draw_reason": None,
+            "result":     "ai_resignation",
+            "message":    f"{human_name} wins — AI resigns!",
+        })
+        return
 
     session.engine.apply_move(move)
 
@@ -238,6 +288,23 @@ async def ws_endpoint(websocket: WebSocket):
 
     async def _run_ai_background() -> None:
         nonlocal ai_thinking
+        # Compute expected duration so we can set a server-side safety deadline.
+        if session and session.engine and session.game_ai:
+            _board = session.engine.board
+            _diff  = session.game_ai.difficulty
+            _total = sum(_board.pieces_on_board.values())
+            _exp   = _expected_think_seconds(_diff, _total)
+        else:
+            _exp = 10.0
+        _grace = 5.0
+
+        async def _auto_force():
+            await asyncio.sleep(_exp + _grace)
+            if ai_thinking and session and session.game_ai:
+                log.info("Server auto-forcing AI move after %.1fs", _exp + _grace)
+                session.game_ai.force_stop()
+
+        auto_task = asyncio.create_task(_auto_force())
         try:
             await _ai_turn(websocket, session)
         except Exception as exc:
@@ -247,6 +314,7 @@ async def ws_endpoint(websocket: WebSocket):
             except Exception:
                 pass
         finally:
+            auto_task.cancel()
             ai_thinking = False
             log.debug("AI background task finished, ai_thinking=False")
 
@@ -286,7 +354,28 @@ async def ws_endpoint(websocket: WebSocket):
 
                 if not vs_human:
                     ai_color = "B" if hc == "W" else "W"
-                    game_ai  = GameAI(color=ai_color, difficulty=diff)
+                    _aw      = msg.get("ai_weights") or {}
+                    def _w(key, default): return int(_aw.get(key, default))
+                    _hw      = HeuristicWeights(
+                        close_mill=_w("close_mill", 500),
+                        cycling_mill=_w("cycling_mill", 300),
+                        block_opponent_mill=_w("block_opponent_mill", 400),
+                        stop_opponent_mills=_w("stop_opponent_mills", 450),
+                        feeder_diamond=_w("feeder_diamond", 200),
+                        mill_wrapping=_w("mill_wrapping", 150),
+                        cardinal_block=_w("cardinal_block", 400),
+                        scatter_placement=_w("scatter_placement", 100),
+                        long_term_position=_w("long_term_position", 100),
+                        mill_count_scale=_w("mill_count_scale", 100),
+                        mobility_scale=_w("mobility_scale", 100),
+                        blocked_scale=_w("blocked_scale", 100),
+                        make_mistakes=_w("make_mistakes", 0),
+                        opening_adherence=_w("opening_adherence", 50),
+                    )
+                    game_ai  = GameAI(
+                        color=ai_color, difficulty=diff, weights=_hw,
+                        blunder_probability=_hw.make_mistakes / 100.0,
+                    )
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")
@@ -305,6 +394,7 @@ async def ws_endpoint(websocket: WebSocket):
                             poor_move_threshold=settings.get("poor_move_threshold", 0.3),
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
+                            trajectory_db=_trajectory_db,
                         )
                         await asyncio.to_thread(coord.on_game_start)
 

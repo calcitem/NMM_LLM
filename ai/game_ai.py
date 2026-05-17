@@ -21,17 +21,26 @@ class _SearchAbort(Exception):
 
 from game.board import BoardState
 from game.rules import get_all_legal_moves, is_terminal
-from .heuristics import INF, evaluate
+from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus
 
-# Maps difficulty (1–10) to minimax search depth.
-# Difficulties 9–10 use iterative deepening; 9 gets 20 s, 10 gets 45 s.
-_DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9}
-_TIME_LIMIT = {5: 10.0, 9: 20.0, 10: 45.0}  # difficulty → iterative-deepening budget
+# Fixed-depth table for quick levels (1–4): search completes fast so no time cap needed.
+_DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5}
+
+# Iterative-deepening time budgets for levels 5–10.
+# Levels 6–8 are promoted from fixed-depth so force_move never fires mid-search.
+_TIME_LIMIT = {
+    5: 15.0,   # was 10 s
+    6: 24.0,   # was fixed depth-7 (no time cap)
+    7: 36.0,   # was fixed depth-8
+    8: 60.0,   # was fixed depth-9
+    9: 60.0,   # was 20 s
+    10: 90.0,  # was 45 s
+}
 
 # While fewer than this many pieces are on the board in total, use a short
 # time budget regardless of difficulty — the tree is tiny and deep search wastes time.
 _EARLY_GAME_PIECE_THRESHOLD = 10  # covers roughly the first 5 placements per side
-_EARLY_GAME_TIME            = 2.0  # seconds
+_EARLY_GAME_TIME            = 4.0  # seconds
 
 
 class GameAI:
@@ -55,10 +64,12 @@ class GameAI:
         color: str = "B",
         difficulty: int = 3,
         blunder_probability: float = 0.0,
+        weights: HeuristicWeights | None = None,
     ) -> None:
         self.color = color
         self.difficulty = max(1, min(10, difficulty))
         self.blunder_probability = max(0.0, min(1.0, blunder_probability))
+        self._weights: HeuristicWeights = weights if weights is not None else DEFAULT_WEIGHTS
         self._nodes = 0
         self._deadline: float = math.inf   # set by _iterative_deepen; checked in _negamax
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
@@ -77,8 +88,9 @@ class GameAI:
     def choose_move(
         self,
         board: BoardState,
-        recognition=None,   # RecognitionResult  — Stage 4
-        endgame_state=None, # EndgameState        — Stage 5
+        recognition=None,           # RecognitionResult  — Stage 4
+        endgame_state=None,         # EndgameState        — Stage 5
+        trajectory_hints=None,      # dict[str, float] from TrajectoryDB.query()
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
         self._force_stop = False
@@ -102,10 +114,16 @@ class GameAI:
         # tiny — cap the search to a short budget regardless of difficulty.
         total_on_board = sum(board.pieces_on_board.values())
         if total_on_board < _EARLY_GAME_PIECE_THRESHOLD:
-            return self._iterative_deepen(board, _EARLY_GAME_TIME)
+            return self._iterative_deepen(
+                board, _EARLY_GAME_TIME,
+                recognition=recognition, trajectory_hints=trajectory_hints,
+            )
 
         if self.difficulty in _TIME_LIMIT:
-            return self._iterative_deepen(board, _TIME_LIMIT[self.difficulty])
+            return self._iterative_deepen(
+                board, _TIME_LIMIT[self.difficulty],
+                recognition=recognition, trajectory_hints=trajectory_hints,
+            )
 
         depth = _DEPTH_TABLE[self.difficulty]
 
@@ -117,6 +135,9 @@ class GameAI:
 
         if recognition is not None:
             scored = self._apply_opening_adjustments(scored, recognition)
+
+        if trajectory_hints:
+            scored = self._apply_trajectory_hints(scored, trajectory_hints)
 
         return max(scored, key=lambda x: x[1])[0]
 
@@ -164,22 +185,64 @@ class GameAI:
             return 1.0
         return (my_score - lo) / (hi - lo)
 
-    # ── Opening book integration ──────────────────────────────────────────────
+    # ── Opening book + trajectory integration ────────────────────────────────
+
+    @staticmethod
+    def _move_notation(move: dict) -> str:
+        """Convert a move dict to its notation string (matches coordinator _move_str)."""
+        s = f"{move['from']}-{move['to']}" if move.get("from") else move.get("to", "")
+        if move.get("capture"):
+            s += f"x{move['capture']}"
+        return s
+
+    def _apply_trajectory_hints(
+        self,
+        scored: list[tuple[dict, int]],
+        hints: dict[str, float],
+    ) -> list[tuple[dict, int]]:
+        """Apply trajectory-database score deltas to a scored move list.
+
+        `hints` maps move notation → float in [-0.5, +0.5] where +0.5 means
+        that move won 100 % of sampled games for the current colour.
+
+        The absolute bonus at 50 % adherence is ±750, growing to ±1500 at
+        100 % — smaller than the opening-book bonus so book lines still
+        dominate in the opening phase, while trajectory hints fill the gap
+        in the mid/late game where the opening book has no opinion.
+        """
+        if not hints:
+            return scored
+        adherence = self._weights.opening_adherence
+        if adherence == 0:
+            return scored
+        scale = int(3000 * adherence / 100)   # max ±1500 at 50 % adherence
+        adjusted = []
+        for move, raw in scored:
+            notation = self._move_notation(move)
+            delta    = hints.get(notation, 0.0)
+            adjusted.append((move, raw + int(delta * scale)))
+        return adjusted
 
     def _apply_opening_adjustments(
         self,
         scored: list[tuple[dict, int]],
         recognition,
-        book_bonus: float = 0.2,
-        blunder_penalty: float = 0.3,
     ) -> list[tuple[dict, int]]:
-        """Apply opening-book bonus/penalty to a scored move list."""
+        """Apply opening-book bonus/penalty to a scored move list.
+
+        Uses absolute bonuses proportional to the opening_adherence slider so
+        the book preference always outweighs tactical noise at high adherence.
+        """
         if recognition.status in ("novel", "inactive"):
             return scored
 
-        all_scores = [s for _, s in scored]
-        lo, hi = min(all_scores), max(all_scores)
-        scale = max(1, hi - lo)
+        adherence = self._weights.opening_adherence
+        if adherence == 0:
+            return scored
+
+        # Absolute bonus scales linearly with adherence: 50 % -> 1500, 100 % -> 3000
+        book_bonus_abs    = int(3000 * adherence / 100)
+        blunder_penalty_abs = int(1500 * adherence / 100)
 
         book_dest = None
         if recognition.book_move:
@@ -195,9 +258,9 @@ class GameAI:
             dest = move.get("to", "")
             delta = 0
             if book_dest and dest == book_dest:
-                delta += book_bonus * scale
+                delta += book_bonus_abs
             if dest in blunder_dests:
-                delta -= blunder_penalty * scale
+                delta -= blunder_penalty_abs
             adjusted.append((move, raw + delta))
         return adjusted
 
@@ -212,8 +275,9 @@ class GameAI:
         alpha = -INF
 
         for move in moves:
-            nb = board.apply_move(move)
+            nb    = board.apply_move(move)
             score = -self._negamax(nb, depth - 1, -INF, -alpha)
+            score += tactical_move_bonus(board, nb, self.color, self._weights)
             if score > best_score:
                 best_score = score
                 best_move = move
@@ -245,7 +309,7 @@ class GameAI:
             return -(INF - depth)
 
         if depth == 0:
-            return evaluate(board, board.turn, endgame_state, self.force_aggressive)
+            return evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
 
         moves = get_all_legal_moves(board)
         if not moves:
@@ -277,6 +341,7 @@ class GameAI:
             nb = board.apply_move(move)
             try:
                 score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state)
+                score += tactical_move_bonus(board, nb, self.color, self._weights)
                 results.append((move, score))
             except _SearchAbort:
                 worst = min(s for _, s in results) if results else -INF
@@ -297,21 +362,44 @@ class GameAI:
         worst = scored[:cutoff]
         return random.choice(worst)[0]
 
-    def _iterative_deepen(self, board: BoardState, time_limit: float = 10.0) -> dict:
+    def _iterative_deepen(
+        self,
+        board: BoardState,
+        time_limit: float = 10.0,
+        recognition=None,
+        trajectory_hints=None,
+    ) -> dict:
         """
         Iterative deepening up to `time_limit` seconds.
-        Sets a hard deadline checked inside _negamax so the budget is respected
-        even when a single depth iteration takes longer than expected.
+
+        When opening recognition or trajectory hints are active, scores every
+        root move at each depth so the adjustments can be applied before
+        picking the best.  Otherwise uses the faster _root_search path.
         """
         self._deadline = time.time() + time_limit
-        moves = get_all_legal_moves(board)
-        best_move = moves[0]
+        moves         = get_all_legal_moves(board)
+        best_move     = moves[0]
+        use_adjustments = (
+            (
+                recognition is not None
+                and recognition.status not in ("novel", "inactive")
+            ) or bool(trajectory_hints)
+        ) and self._weights.opening_adherence > 0
+
         for depth in range(2, 20):
             if time.time() >= self._deadline:
                 break
             try:
-                move, _ = self._root_search(board, depth)
-                best_move = move          # only update if depth completed cleanly
+                if use_adjustments:
+                    scored = self._score_all(board, moves, depth)
+                    if recognition is not None:
+                        scored = self._apply_opening_adjustments(scored, recognition)
+                    if trajectory_hints:
+                        scored = self._apply_trajectory_hints(scored, trajectory_hints)
+                    best_move = max(scored, key=lambda x: x[1])[0]
+                else:
+                    move, _ = self._root_search(board, depth)
+                    best_move = move      # only update if depth completed cleanly
             except _SearchAbort:
                 break                     # deadline hit mid-depth; keep previous best
         self._deadline = math.inf

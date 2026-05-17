@@ -77,7 +77,8 @@
       "placement",
       "parallel"
     ],
-    "source_reference": "Chapter 15.2, Game 1a — parallel lines mill rush"
+    "source_reference": "Chapter 15.2, Game 1a — parallel lines mill rush",
+    "needs_llm_name": false
   },
   {
     "opening_id": "mill-rush-perpendicular",
@@ -136,7 +137,8 @@
       "placement",
       "perpendicular"
     ],
-    "source_reference": "Chapter 15.2, Game 2a — perpendicular lines mill rush"
+    "source_reference": "Chapter 15.2, Game 2a — perpendicular lines mill rush",
+    "needs_llm_name": false
   },
   {
     "opening_id": "mill-rush-parallel-alt",
@@ -199,7 +201,8 @@
       "placement",
       "parallel"
     ],
-    "source_reference": "Chapter 15.2, Game 1b — parallel lines (alt) mill rush"
+    "source_reference": "Chapter 15.2, Game 1b — parallel lines (alt) mill rush",
+    "needs_llm_name": false
   },
   {
     "opening_id": "mill-rush-perpendicular-alt",
@@ -256,7 +259,8 @@
       "placement",
       "perpendicular"
     ],
-    "source_reference": "Chapter 15.2, Game 2b — perpendicular lines (alt) mill rush"
+    "source_reference": "Chapter 15.2, Game 2b — perpendicular lines (alt) mill rush",
+    "needs_llm_name": false
   },
   {
     "opening_id": "mill-rush-extended-parallel",
@@ -320,7 +324,8 @@
       "parallel",
       "outer-ring"
     ],
-    "source_reference": "Chapter 15.2, Game 3 — extended parallel mill rush"
+    "source_reference": "Chapter 15.2, Game 3 — extended parallel mill rush",
+    "needs_llm_name": false
   },
   {
     "opening_id": "inverted-mill-rush-parallel",
@@ -379,7 +384,8 @@
       "parallel",
       "inverted"
     ],
-    "source_reference": "Chapter 15.3 — Inverted Mill Rush, parallel lines"
+    "source_reference": "Chapter 15.3 — Inverted Mill Rush, parallel lines",
+    "needs_llm_name": false
   },
   {
     "opening_id": "inverted-mill-rush-perpendicular",
@@ -437,7 +443,8 @@
       "perpendicular",
       "inverted"
     ],
-    "source_reference": "Chapter 15.3 — Inverted Mill Rush, perpendicular"
+    "source_reference": "Chapter 15.3 — Inverted Mill Rush, perpendicular",
+    "needs_llm_name": false
   },
   {
     "opening_id": "battle-lines",
@@ -504,7 +511,8 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.4 — Battle Lines"
+    "source_reference": "Chapter 15.4 — Battle Lines",
+    "needs_llm_name": false
   },
   {
     "opening_id": "z-mill-closed",
@@ -584,7 +592,8 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.5 — The Z Mill"
+    "source_reference": "Chapter 15.5 — The Z Mill",
+    "needs_llm_name": false
   },
   {
     "opening_id": "z-mill-open",
@@ -643,7 +652,8 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.6 — The Open Z Mill"
+    "source_reference": "Chapter 15.6 — The Open Z Mill",
+    "needs_llm_name": false
   },
   {
     "opening_id": "corner-gambit",
@@ -707,7 +717,8 @@
       "placement",
       "gambit"
     ],
-    "source_reference": "Chapter 15 — A Gambit"
+    "source_reference": "Chapter 15 — A Gambit",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-e69dc499",
@@ -771,7 +782,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-5f22d2bf",
@@ -835,7 +847,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-8102c4ae",
@@ -899,7 +912,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-c162aa4c",
@@ -963,7 +977,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-e965cb40",
@@ -1027,7 +1042,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-6f99d2f3",
@@ -1091,7 +1107,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-2438fb30",
@@ -1155,7 +1172,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-2e5e82ee",
@@ -1219,7 +1237,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-1081eef3",
@@ -1283,7 +1302,8 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-10ff0050",
@@ -1347,6 +1367,4357 @@
       "novel",
       "learned"
     ],
-    "source_reference": ""
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-dcbe2250",
+    "name": "Novel Opening novel-dcbe2250",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "g4",
+      "d7",
+      "g1",
+      "g7",
+      "a7",
+      "d3",
+      "d1",
+      "a1",
+      "d5",
+      "c4",
+      "e4",
+      "c5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.W.....WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".BBWW....WBBWB.W........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 8
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-277ca389",
+    "name": "The \"Distant Shield",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "d1",
+      "d7",
+      "g4",
+      "d5",
+      "g1",
+      "e3",
+      "a1",
+      "g7",
+      "a7",
+      "d3",
+      "c3",
+      "d2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B...W...WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-de557fed",
+    "name": "Novel Opening novel-de557fed",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "g4",
+      "d7",
+      "g1",
+      "g7",
+      "a7",
+      "d3",
+      "d1",
+      "a1",
+      "d5",
+      "c4",
+      "a4",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.W.....WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".BBWW....WBBWB.W........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-67e50622",
+    "name": "The Iron Fortress Opening",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "b2",
+      "c5",
+      "c4",
+      "e5",
+      "g7",
+      "d5",
+      "a7",
+      "d7",
+      "b2",
+      "e3",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBBWBB.......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 2,
+      "D": 0,
+      "human_wins": 1,
+      "ai_losses": 1
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-384e3db3",
+    "name": "The \"Diamond Citadel",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "d1",
+      "d7",
+      "g4",
+      "d5",
+      "g1",
+      "e3",
+      "a1",
+      "g7",
+      "a7",
+      "e5",
+      "e4",
+      "c5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B...W...WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-8b19aeea",
+    "name": "The \"Threefold Fortress",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "d1",
+      "d7",
+      "g4",
+      "d5",
+      "g1",
+      "g7",
+      "a1",
+      "e5",
+      "g7",
+      "e5",
+      "c5",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B...W...WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-f8fc8155",
+    "name": "Novel Opening novel-f8fc8155",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "d2",
+      "g4",
+      "d7",
+      "g1",
+      "g7",
+      "a7",
+      "d3",
+      "d1",
+      "a1",
+      "c4",
+      "a4",
+      "e4",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........WBB...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBBWB.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.W.....WBBWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".BBWW....WBBWB.W........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 8
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-8ed16912",
+    "name": "Five Elements Ascend",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "b2",
+      "c5",
+      "c4",
+      "e5",
+      "d5",
+      "d7",
+      "g4",
+      "e4",
+      "e3",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBBWBB.......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-8d21a59a",
+    "name": "Novel Opening novel-8d21a59a",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d1",
+      "d5",
+      "d6",
+      "a4",
+      "d3",
+      "d2",
+      "g4",
+      "c4",
+      "b4",
+      "e4",
+      "f4",
+      "b6",
+      "c5",
+      "g1",
+      "e3",
+      "c3",
+      "f2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W...B...B.......W......|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W...B.W.B.......W...B..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B.B.W.B...W...W...B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B.B.W.B...W.B.W...B.W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 3
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-72bd4dc4",
+    "name": "Novel Opening (d7...)",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d1",
+      "d5",
+      "d6",
+      "a4",
+      "d3",
+      "d2",
+      "g4",
+      "c4",
+      "b4",
+      "e4",
+      "f4",
+      "b6",
+      "g1",
+      "a1",
+      "g7",
+      "a4",
+      "a7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W...B...B.......W......|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W...B.W.B.......W...B..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B.B.W.B...W...W...B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B.B.W.B...W.B.W...B.W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-ea1d22c7",
+    "name": "The Morning March",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "g4",
+      "b4",
+      "e4",
+      "f4",
+      "d5",
+      "b6",
+      "f6",
+      "b2",
+      "f6",
+      "d3",
+      "e5",
+      "c5",
+      "a7",
+      "c3",
+      "d7",
+      "e3",
+      "a7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "...B.....W.....W...B....|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...B.....W.W...W.B.B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...B....WWBW...W.B.B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B....WWBW..WW.B.B....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-f0bb5cac",
+    "name": "The \"Cornerstone Gambit",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "g4",
+      "b4",
+      "e4",
+      "f4",
+      "d5",
+      "d3",
+      "d2",
+      "a7",
+      "c5",
+      "e5",
+      "c4",
+      "c3",
+      "e3",
+      "b6",
+      "b2",
+      "f6",
+      "f2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "...B.....W.....W...B....|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...B.....W.W...W.B.B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...B.....W.W.B.W.B.B.W..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "W..B.....W.W.B.WBB.B.W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-00-182e33",
+    "name": "Game One",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "c5",
+      "f4",
+      "e3",
+      "b4",
+      "e5",
+      "d5",
+      "e4",
+      "d5",
+      "c3",
+      "a4",
+      "c4",
+      "b4",
+      "d3",
+      "f4",
+      "d7",
+      "d2",
+      "f2",
+      "g7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "...........B...BW...W...|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...........B...BWBW.W...|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...........B...BWBWWW...|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".......B...B...BWBWWW.W.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-01-260f7b",
+    "name": "Try Try Again",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d2",
+      "d6",
+      "f4",
+      "b4",
+      "e3",
+      "e4",
+      "d3",
+      "d1",
+      "c3",
+      "e4",
+      "f2",
+      "f6",
+      "b2",
+      "f6",
+      "b6",
+      "a4",
+      "c4",
+      "c5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B.W.W.B...BW...|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....B...B.W.W.B...BWW..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".....B...B.W.W.B...BWWW.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-02-bc7264",
+    "name": "Alternate Game Two",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d2",
+      "d6",
+      "f4",
+      "b4",
+      "e3",
+      "e4",
+      "d3",
+      "d1",
+      "c3",
+      "e4",
+      "f2",
+      "b2",
+      "f6",
+      "b2",
+      "b6",
+      "c4",
+      "a4",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B.W.W.B...BW...|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....B...B.W.W.B...BWW..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".....B...B.W.W.B...BWWW.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-03-c687b2",
+    "name": "Game Three",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d2",
+      "d6",
+      "f4",
+      "b4",
+      "c4",
+      "e4",
+      "e5",
+      "d1",
+      "b6",
+      "d7",
+      "d5",
+      "f2",
+      "g1",
+      "a4",
+      "a7",
+      "c3",
+      "g7",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B.W.W.B...B...W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....B...B.W.W.B..WB...W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B...B..WB.W.W.B..WB...W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-04-979bbb",
+    "name": "Gambit Play",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "d2",
+      "b6",
+      "f6",
+      "b2",
+      "d2",
+      "f2",
+      "c4",
+      "a7",
+      "d5",
+      "c5",
+      "e3",
+      "d3",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.B.B.W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........WWBB.B.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWBB.BWW........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWBBWBWW.......B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-06-ec4029",
+    "name": "Game Four",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "b4",
+      "f4",
+      "g4",
+      "b6",
+      "f2",
+      "a4",
+      "e4",
+      "a7",
+      "a1",
+      "d3",
+      "d1",
+      "g1",
+      "c3",
+      "d5",
+      "d7",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.B.B.W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...W....BW.B.B.W........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...W...BBW.BWB.W........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "B..W...BBW.BWB.W...W....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-07-089d4a",
+    "name": "Game Five A",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "e3",
+      "g7",
+      "c3",
+      "a7",
+      "d3",
+      "c3",
+      "e5",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 2,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-08-214941",
+    "name": "Game Five B",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "e3",
+      "g7",
+      "c3",
+      "a7",
+      "d3",
+      "c3",
+      "e5",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-10-a47788",
+    "name": "Game Seven — Patience",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "b4",
+      "f4",
+      "d7",
+      "d5",
+      "a4",
+      "c4",
+      "f2",
+      "e3",
+      "c5",
+      "b6",
+      "d1",
+      "a1",
+      "e4",
+      "g7",
+      "d3",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.B.B.W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.......W.B.B.W.B......|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.....W.W.B.B.W.B.....B|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.....W.W.BWB.W.B..B..B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-11-6c94a1",
+    "name": "Creating Opportunities",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "f4",
+      "b4",
+      "d2",
+      "d6",
+      "d5",
+      "e4",
+      "d7",
+      "b6",
+      "b2",
+      "f6",
+      "b2",
+      "f2",
+      "a7",
+      "g7",
+      "c5",
+      "e5",
+      "e3",
+      "d3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B.W.W.B.W.B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W......BB.W.W.B.W.B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W......BBBW.WWB.W.B....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-12-7c2690",
+    "name": "Which Piece to Take",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "g4",
+      "c3",
+      "c5",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "e3",
+      "f2",
+      "a4",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".B.......W.W.B.B.......W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.B.....W.W.B.B.....W.W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.B.....W.W.B.BB....WWW|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-13-a3640f",
+    "name": "Right Angle Potential Mills",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "f2",
+      "b2",
+      "b4",
+      "g7",
+      "e4",
+      "d1",
+      "c3",
+      "c4",
+      "e3",
+      "d3",
+      "e5",
+      "d3",
+      "g4",
+      "d7",
+      "b6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.WBB..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........W.WBBWB........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "..W......W.WBBWB...B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "..W..W...W.WBBWB...B..B.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-14-31b94f",
+    "name": "End Play Placements",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "d5",
+      "d7",
+      "g4",
+      "e4",
+      "d1",
+      "e5",
+      "e3",
+      "b2",
+      "f2",
+      "f6",
+      "b6",
+      "c5",
+      "c4",
+      "g7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".B.......W.W.B.B.W......|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.W.....W.W.B.B.W.B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W...W.W.B.B.WBB....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-15-25ea09",
+    "name": "Early Game to Victory",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b6",
+      "c4",
+      "g4",
+      "d1",
+      "a7",
+      "b4",
+      "a4",
+      "a1",
+      "g1",
+      "g7",
+      "d5",
+      "f2",
+      "f6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "........BW.W.B..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...B....BW.W.B.........W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "B..B.W..BW.W.B.........W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "B..B.W.BBW.W.B.W.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-16-dc305f",
+    "name": "Cannon Fodder",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "c4",
+      "e4",
+      "d3",
+      "d7",
+      "a4",
+      "e5",
+      "e3",
+      "c3",
+      "d1",
+      "b2",
+      "f2",
+      "b6",
+      "f2",
+      "f6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........W.W.B.B...B...W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.......W.W.B.B...B.W.W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.....W.W.W.B.B..BB.W.W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-19-8d0e77",
+    "name": "Sacrificial Mills",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e4",
+      "c3",
+      "d3",
+      "c5",
+      "d3",
+      "d1",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-20-4be0ef",
+    "name": "Cardinal Point Abandonment",
+    "aliases": [],
+    "family": "Early Game",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e4",
+      "c3",
+      "d3",
+      "c5",
+      "d3",
+      "d1",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "early-game"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-22-06af3c",
+    "name": "Man-to-Man Marking",
+    "aliases": [],
+    "family": "Man-to-Man Marking",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "b2",
+      "f6",
+      "c4",
+      "e4",
+      "d1",
+      "d7",
+      "a7",
+      "g1",
+      "e3",
+      "c5",
+      "e5",
+      "c3",
+      "g4",
+      "a4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBW.BWB........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".........WBW.BWB...B...W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B...W...WBW.BWB...B...W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "man-to-man-marking"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-23-186c54",
+    "name": "Black Diamond",
+    "aliases": [],
+    "family": "Black Diamond",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "c4",
+      "e4",
+      "d3",
+      "d5",
+      "a4",
+      "g4",
+      "d1",
+      "b2",
+      "f2",
+      "f6",
+      "b6",
+      "e5",
+      "e3",
+      "c5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........W.W.B.B...B...W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".........W.W.B.B.B.B.W.W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B...W.W.W.B.B.B.B.W.W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "black-diamond"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-24-d5192b",
+    "name": "Mill Rush — Misplacement Loss",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d5",
+      "e4",
+      "g4",
+      "e3",
+      "g4",
+      "b2",
+      "d1",
+      "d3",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.BW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-25-f03c02",
+    "name": "Mill Rush — Parallel Lines",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "e4",
+      "d5",
+      "d7",
+      "c5",
+      "d7",
+      "a4",
+      "c4",
+      "b2",
+      "d1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B..WB....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-26-11476f",
+    "name": "Mill Rush — Parallel Lines (Alt)",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "e4",
+      "d5",
+      "d7",
+      "c5",
+      "d7",
+      "a4",
+      "b2",
+      "a1",
+      "c4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B..WB....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-27-54cdc5",
+    "name": "Mill Rush — Perpendicular Lines",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d5",
+      "e4",
+      "g4",
+      "e3",
+      "g4",
+      "d1",
+      "d3",
+      "a4",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.BW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-28-0180cc",
+    "name": "Mill Rush — Perpendicular Lines (Alt)",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d5",
+      "e4",
+      "g4",
+      "e3",
+      "g4",
+      "d1",
+      "b2",
+      "c5",
+      "d3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.BW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-29-72a62a",
+    "name": "Mill Rush — Extended Parallel",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d5",
+      "e4",
+      "e3",
+      "g4",
+      "e3",
+      "b2",
+      "d3",
+      "c3",
+      "d1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.BW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-30-c669f7",
+    "name": "Mill Rush — Alt Extended Parallel",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d7",
+      "e4",
+      "e3",
+      "g4",
+      "e3",
+      "b2",
+      "g1",
+      "c4",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B..W.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-31-173eb1",
+    "name": "Mill Rush — Black's Alternate Response",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "a4",
+      "c4",
+      "d1",
+      "d3",
+      "a1",
+      "g1",
+      "a7",
+      "g1",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".......BWWWWBB.B..W.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-32-7128af",
+    "name": "Mill Rush — Alternate Black Response",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "e5",
+      "d3",
+      "d1",
+      "c4",
+      "a4",
+      "c3",
+      "e3",
+      "c5",
+      "e3",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B..W..B..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-33-1b81cb",
+    "name": "Inverted Mill Rush — Parallel Lines",
+    "aliases": [],
+    "family": "Inverted Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "g7",
+      "g4",
+      "d7",
+      "d5",
+      "a7",
+      "d5",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "c4",
+      "a4",
+      "b2",
+      "c3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "..WB.....W.W.B.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".WWB.....W.W.B.B.B......|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "WWWB.....W.W.B.B.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "inverted-mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-34-ba238d",
+    "name": "Inverted Mill Rush — Perpendicular",
+    "aliases": [],
+    "family": "Inverted Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "g7",
+      "g4",
+      "d7",
+      "d5",
+      "a7",
+      "d5",
+      "f6",
+      "b6",
+      "f2",
+      "d2",
+      "c4",
+      "a4",
+      "d3",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "..WB.....W.W.B.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".WWB.....W.W.B.B.B......|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "WWWB.....W.W.B.B.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "inverted-mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-35-a7d107",
+    "name": "Inverted Mill Rush — White Mistake",
+    "aliases": [],
+    "family": "Inverted Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "g7",
+      "d7",
+      "g4",
+      "e4",
+      "g1",
+      "e4",
+      "b2",
+      "d3",
+      "d1",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".BW.....WWWWBB.B........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "inverted-mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-36-3fed69",
+    "name": "Mill Rush — Endgame Stalemate",
+    "aliases": [],
+    "family": "Mill Rush",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "b6",
+      "f2",
+      "b6",
+      "g7",
+      "g4",
+      "d7",
+      "d5",
+      "a7",
+      "d5",
+      "c4",
+      "d3",
+      "d1",
+      "a4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........BWWW.B.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........BWWWWB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "..WB....BWWWWB.B........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "mill-rush"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-37-56fc68",
+    "name": "Battle Lines — Black Loss",
+    "aliases": [],
+    "family": "Battle Lines",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b2",
+      "d3",
+      "g4",
+      "c4",
+      "c3",
+      "a4",
+      "b4",
+      "g7",
+      "d7",
+      "e5",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBBBB........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B....WWWWBBBB.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "battle-lines"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-38-e9e4be",
+    "name": "Battle Lines — Better Response",
+    "aliases": [],
+    "family": "Battle Lines",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b2",
+      "d3",
+      "g4",
+      "e4",
+      "d7",
+      "e3",
+      "a1",
+      "e5",
+      "g1",
+      "c3",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBBBB........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B....WWWWBBBB.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "battle-lines"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-39-aaaae3",
+    "name": "Closed Z Mill",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "b2",
+      "c5",
+      "c4",
+      "e5",
+      "d1",
+      "d5",
+      "c4",
+      "g4",
+      "e3",
+      "g7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBBWBB.......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-40-b80834",
+    "name": "Open Z Mill",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "d5",
+      "g1",
+      "e5",
+      "e3",
+      "c5",
+      "b2",
+      "a1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-41-42b007",
+    "name": "Z Mill — Variation A",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "d5",
+      "g1",
+      "g4",
+      "c3",
+      "e3",
+      "c5",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-42-de2d76",
+    "name": "Z Mill — Variation B",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "a7",
+      "e3",
+      "g7",
+      "d3",
+      "c3",
+      "e5",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-43-be2a34",
+    "name": "Z Mill — Variation C",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "e4",
+      "d3",
+      "d5",
+      "c3",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B...B...W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-44-630046",
+    "name": "Z Mill — Variation D",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "c5",
+      "e3",
+      "c3",
+      "g4",
+      "e4",
+      "b2",
+      "a1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-45-a6aab2",
+    "name": "Z Mill — Variation E",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "d3",
+      "c5",
+      "e3",
+      "c3",
+      "g4",
+      "e4",
+      "b2",
+      "a1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-47-6ce70d",
+    "name": "Z Mill c4/e3 — Parallel Mills",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e4",
+      "c3",
+      "c5",
+      "d3",
+      "c5",
+      "a1",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-48-dbe7b9",
+    "name": "Z Mill c4/e3 — Ring Round the Rosie",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e5",
+      "c5",
+      "c3",
+      "g4",
+      "e4",
+      "d1",
+      "a1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-49-4707ce",
+    "name": "Z Mill c4/e3 — All Along the Watchtower",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "a7",
+      "e3",
+      "g7",
+      "d7",
+      "d5",
+      "e4",
+      "g4",
+      "e5",
+      "b2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "B.......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-50-48b559",
+    "name": "Z Mill c4/e3 — Perpendicular Mills",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e4",
+      "c3",
+      "d3",
+      "c5",
+      "d3",
+      "d1",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-51-98d08e",
+    "name": "Z Mill c4/e3 — A Shoot-Out",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "e4",
+      "c3",
+      "d3",
+      "c5",
+      "d3",
+      "d1",
+      "b2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-52-40a6c0",
+    "name": "Z Mill c4/e3 — Misdirection",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "b2",
+      "c4",
+      "d3",
+      "d1",
+      "d7",
+      "e5",
+      "g7",
+      "a7",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBBBB.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-53-5ac589",
+    "name": "Z Mill c4/e3 — Cut the Bottom Out",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d5",
+      "e3",
+      "d1",
+      "d3",
+      "c3",
+      "g4",
+      "e4",
+      "a7",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B.B.....W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-54-8444f7",
+    "name": "Z Mill c4/e3 — Two L's",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "e3",
+      "g4",
+      "c3",
+      "c5",
+      "d3",
+      "c5",
+      "a4",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-55-da8bdf",
+    "name": "Z Mill c4/e3 — Hangman",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "e4",
+      "e3",
+      "c3",
+      "d1",
+      "d7",
+      "e5",
+      "d5",
+      "a1",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBB.B...B...W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-56-0da61a",
+    "name": "Z Mill c4/e3 — Perpendicular Mills 2",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "d7",
+      "e3",
+      "c3",
+      "e4",
+      "g4",
+      "e5",
+      "g4",
+      "b2",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-57-0351a0",
+    "name": "Z Mill c4/e3 — Roof Falls In",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b4",
+      "c4",
+      "a1",
+      "e3",
+      "d1",
+      "d3",
+      "g1",
+      "d3",
+      "c3",
+      "e5",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "......B.WWWWBB.B.......W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-58-b77e22",
+    "name": "Black L, White Wrap",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b6",
+      "c3",
+      "b2",
+      "f2",
+      "b4",
+      "f2",
+      "f6",
+      "c5",
+      "c4",
+      "a4",
+      "d5",
+      "e3",
+      "d3",
+      "d1",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "........BW.W.B..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........BW.W.BB.......W.|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........BW.WWBBB......W.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........BWBWWBBB......W.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "book-59-e63feb",
+    "name": "Into White — White to a1",
+    "aliases": [],
+    "family": "Z Mill",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b2",
+      "f2",
+      "f6",
+      "g7",
+      "d5",
+      "a4",
+      "c4",
+      "d1",
+      "c3",
+      "a7",
+      "c5",
+      "e5",
+      "d7",
+      "e4",
+      "g4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.BB.........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WBWWBB.........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "..W......WBWWBB..B......|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "..W....W.WBWWBB..B.....B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.8,
+    "tags": [
+      "book",
+      "z-mill"
+    ],
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-102aa21d",
+    "name": "Novel Opening (d6...)",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "f2",
+      "b2",
+      "c5",
+      "c4",
+      "e5",
+      "g7",
+      "d5",
+      "a7",
+      "d7",
+      "e4",
+      "f4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBB.B........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "........WWWWBBWBB.......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
   }
 ]

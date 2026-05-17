@@ -53,6 +53,7 @@ class Opening:
     confidence: float
     tags: list[str]
     source_reference: str = ""
+    needs_llm_name: bool = False        # True when auto-named without LLM; candidate for naming
 
     def opening_score(self, ai_color: str = "W") -> float:
         """
@@ -110,6 +111,7 @@ def _dict_to_opening(d: dict) -> Opening:
         confidence=d.get("confidence", 1.0),
         tags=d.get("tags", []),
         source_reference=d.get("source_reference", ""),
+        needs_llm_name=d.get("needs_llm_name", False),
     )
 
 
@@ -235,6 +237,10 @@ class OpeningBook:
         """Exact match on seed_source."""
         return [o for o in self._index.values() if o.seed_source == source]
 
+    def get_unnamed_openings(self) -> list[Opening]:
+        """Return all openings flagged needs_llm_name=True (queued for LLM naming)."""
+        return [o for o in self._index.values() if o.needs_llm_name]
+
     def values(self):
         """Iterate over all Opening objects in the index."""
         return self._index.values()
@@ -318,7 +324,12 @@ class OpeningBook:
         """
         import math
 
-        openings = list(self._index.values())
+        # Only consider openings where this AI colour plays the winning side.
+        # side='both' means the line is colour-neutral (e.g. draws, or unknown outcome).
+        openings = [
+            o for o in self._index.values()
+            if o.side in (ai_color, "both")
+        ]
         if not openings:
             return None
 
@@ -387,12 +398,15 @@ class OpeningBook:
         move_sequence: list[str],
         board_fen_signatures: list[dict],
         outcome: Optional[str] = None,
+        needs_llm_name: bool = False,
     ) -> Opening:
         """
         Create, persist, and return a new 'learned' Opening from an observed
         move sequence that didn't match any known opening.
 
         outcome, if provided, must be "W", "B", or "D".
+        needs_llm_name=True marks this opening as pending LLM naming (use when
+        no LLM is available at game time — run tools/name_openings.py later).
         """
         outcome_stats: dict[str, int] = {"W": 0, "B": 0, "D": 0}
         if outcome in outcome_stats:
@@ -416,6 +430,7 @@ class OpeningBook:
             confidence=0.3,
             tags=["novel", "learned"],
             source_reference="",
+            needs_llm_name=needs_llm_name,
         )
         self.save_opening(opening)
         return opening

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import random
 import time
 import uuid
 from datetime import datetime
@@ -17,6 +19,7 @@ from ai.memory_manager import MemoryManager
 from ai.opening_book import Opening
 from ai.opening_recognizer import OpeningRecognizer, RecognitionResult, INACTIVE_RESULT
 from ai.endgame_recognizer import EndgameRecognizer, INACTIVE_ENDGAME
+from ai.trajectory_db import TrajectoryDB
 from game.rules import get_all_legal_moves, get_game_phase
 
 
@@ -31,6 +34,7 @@ class Coordinator:
         max_poor_move_comments: int = 5,
         opening_recognizer: OpeningRecognizer | None = None,
         endgame_recognizer: EndgameRecognizer | None = None,
+        trajectory_db: TrajectoryDB | None = None,
     ) -> None:
         self.game_ai = game_ai
         self.mills_llm = mills_llm
@@ -40,6 +44,7 @@ class Coordinator:
         self.max_poor_move_comments = max_poor_move_comments
         self.opening_recognizer = opening_recognizer
         self.endgame_recognizer = endgame_recognizer
+        self.trajectory_db = trajectory_db
 
         self.dialogue_log: list[str] = []
         self._poor_move_count = 0
@@ -51,6 +56,8 @@ class Coordinator:
         self._game_moves: list[dict] = []
         self._endgame_state = INACTIVE_ENDGAME
         self._target_opening: Opening | None = None
+        self._dominant_turn_streak: int = 0
+        self.resignation_offered: bool = False
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -83,6 +90,8 @@ class Coordinator:
         self._turn_num = 0
         self._game_moves = []
         self._session_id = str(uuid.uuid4())
+        self._dominant_turn_streak = 0
+        self.resignation_offered = False
         self.dialogue_log.clear()
         self.mills_llm.conversation_history.clear()
         self.mills_llm.narrative_memory = ""
@@ -93,12 +102,15 @@ class Coordinator:
         self._endgame_state = INACTIVE_ENDGAME
 
         # Pick an opening to target this game using UCB-scored selection.
+        # select_opening() already filters by side, but double-check so a stale
+        # 'both' entry from an unknown-outcome game is accepted for either colour.
         self._target_opening = None
         if self.opening_recognizer:
-            self._target_opening = self.opening_recognizer.book.select_opening(
+            candidate = self.opening_recognizer.book.select_opening(
                 ai_color=self.game_ai.color,
             )
-            if self._target_opening:
+            if candidate and candidate.side in (self.game_ai.color, "both"):
+                self._target_opening = candidate
                 self.emit(
                     "GameAI",
                     f"Targeting opening: {self._target_opening.name} "
@@ -123,6 +135,8 @@ class Coordinator:
 
     def on_game_end(self, game_record: dict) -> None:
         self.memory.save_game_record(game_record)
+        if self.trajectory_db is not None:
+            self.trajectory_db.add_game(game_record)
 
         winner = game_record.get("winner")
         human_color = game_record.get("human_color", "W")
@@ -204,7 +218,11 @@ class Coordinator:
         ):
             ply = len(self._game_moves)
             line = self._target_opening.line_moves
-            if ply < len(line):
+            # Only synthesise recognition when the book destination is actually
+            # a legal placement in the current position — the book may have been
+            # recorded from a different colour perspective or contain stale data.
+            legal_dests = {m["to"] for m in legal}
+            if ply < len(line) and line[ply] in legal_dests:
                 recognition = RecognitionResult(
                     opening_id=self._target_opening.opening_id,
                     name=self._target_opening.name,
@@ -226,21 +244,31 @@ class Coordinator:
                 self.emit("MillsLLM", msg)
         endgame_state = self._endgame_state
 
-        # 2. GameAI picks its best move (with opening bonus and endgame depth boost)
+        # 2. Query trajectory DB for historical move-outcome hints
+        trajectory_hints: dict | None = None
+        if self.trajectory_db is not None and self._game_moves:
+            notations = [m.get("notation", "") for m in self._game_moves if m.get("notation")]
+            if notations:
+                trajectory_hints = self.trajectory_db.query(notations, board.turn) or None
+
+        # 3. GameAI picks its best move (with opening bonus, trajectory hints, endgame depth)
         ai_move = self.game_ai.choose_move(
-            board, recognition=recognition, endgame_state=endgame_state
+            board,
+            recognition=recognition,
+            endgame_state=endgame_state,
+            trajectory_hints=trajectory_hints,
         )
         ai_score = self.game_ai.score_move(board, ai_move)
 
-        # 3. Expose score hint to MillsLLM for its prompt
+        # 4. Expose score hint to MillsLLM for its prompt
         self.mills_llm._last_ai_score = ai_score
 
-        # 4. Ask MillsLLM for a recommendation (with opening + endgame context)
+        # 5. Ask MillsLLM for a recommendation (with opening + endgame context)
         opinion, llm_notation = self.mills_llm.ask_for_move_opinion(
             board, legal, ai_move, recognition=recognition, endgame_state=endgame_state
         )
 
-        # 4. Try to adopt the LLM's recommendation if it scores well enough
+        # 6. Try to adopt the LLM's recommendation if it scores well enough
         move = ai_move
         if llm_notation:
             from ai.mills_llm import _notation_to_move
@@ -270,6 +298,30 @@ class Coordinator:
 
         move_str = _move_str(move)
         self.emit("GameAI", f"Playing {move_str}")
+
+        # Resignation check: if human has dominated for 3 consecutive AI turns
+        if not self.resignation_offered:
+            try:
+                from ai.heuristics import evaluate, TANH_SCALE
+                human_color = "B" if self.game_ai.color == "W" else "W"
+                post = board.apply_move(move)
+                raw  = evaluate(post, human_color)
+                norm = math.tanh(raw / TANH_SCALE.get(get_game_phase(post, human_color), 180))
+                if norm > 0.95:
+                    self._dominant_turn_streak += 1
+                else:
+                    self._dominant_turn_streak = 0
+                if self._dominant_turn_streak >= 3:
+                    self.resignation_offered = True
+                    farewell = random.choice([
+                        "Your position is overwhelming — I concede. Well played.",
+                        "I see no path forward. A masterful performance.",
+                        "You've outplayed me completely. I yield.",
+                        "My position is beyond recovery. Congratulations.",
+                    ])
+                    self.emit("MillsLLM", farewell)
+            except Exception:
+                pass
 
         if self.game_ai.last_was_blunder:
             blunder_msg = self.mills_llm.announce_blunder(board, move)
