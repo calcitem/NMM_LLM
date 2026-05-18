@@ -771,9 +771,6 @@ function _buildWeightSliders() {
     input.step  = w.step ?? 25;
     input.addEventListener("input", () => {
       _updateSliderLabel(w.key, parseInt(input.value));
-      // Mark as custom when the user manually drags a slider
-      const ps = $("sel-personality");
-      if (ps) { ps.value = "custom"; }
     });
 
     row.appendChild(labelRow);
