@@ -176,6 +176,50 @@
         </div>
 
         <button id="btn-new-game">New Game</button>
+        <button id="btn-setup-toggle" class="btn-small" style="margin-top:6px;width:100%">&#x270E; Setup Position…</button>
+      </div>
+
+      <!-- Position Setup panel (shown when setup mode is active) -->
+      <div class="panel-box" id="setup-panel" hidden>
+        <h3>Position Setup</h3>
+        <p style="font-size:.78rem;color:var(--text-dim);margin-bottom:8px;">
+          Click any board node to cycle: empty → White → Black → empty.<br>
+          Set phase and whose turn, then start.
+        </p>
+
+        <div class="form-row">
+          <label>Piece palette</label>
+          <div id="setup-palette">
+            <button class="setup-swatch setup-swatch-active" data-piece="" title="Erase">✕</button>
+            <button class="setup-swatch" data-piece="W" title="White piece">⬜</button>
+            <button class="setup-swatch" data-piece="B" title="Black piece">⬛</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="sel-setup-phase">Phase</label>
+          <select id="sel-setup-phase">
+            <option value="move">Movement / Fly</option>
+            <option value="place">Placement</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="sel-setup-turn">Turn</label>
+          <select id="sel-setup-turn">
+            <option value="W">White</option>
+            <option value="B">Black</option>
+          </select>
+        </div>
+
+        <div id="setup-counts" style="font-size:.8rem;color:var(--text-dim);margin:6px 0;">
+          White: 0 &nbsp;|&nbsp; Black: 0
+        </div>
+        <div id="setup-error" style="font-size:.78rem;color:var(--red);min-height:1.2em;margin-bottom:4px;"></div>
+
+        <button id="btn-setup-start" disabled>&#x25B6; Start from Here</button>
+        <button id="btn-setup-clear" class="btn-small" style="margin-top:6px;width:100%">Clear Board</button>
+        <button id="btn-setup-cancel" class="btn-small" style="margin-top:4px;width:100%">Cancel</button>
       </div>
 
       <!-- AI Tuning panel (toggled via header button, stays open during play) -->

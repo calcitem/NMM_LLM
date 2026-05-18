@@ -23,6 +23,11 @@ let replayMoves       = [];   // moves with FEN data, populated when game ends
 let replayIdx         = -1;   // -1 = not replaying; 0..n-1 = ply index
 let _openingsData     = [];   // cached openings from /api/openings
 
+// ── Setup mode state ──────────────────────────────────────────────────────────
+let setupMode       = false;  // true while the position editor is open
+let setupGrid       = {};     // pos → "W"|"B"|"" for the editor board
+let setupBrush      = "";     // currently selected palette piece: ""|"W"|"B"
+
 // ── AI weight defaults (Stage 5.13) ──────────────────────────────────────────
 
 const WEIGHT_DEFAULTS = [
@@ -164,6 +169,27 @@ document.addEventListener("DOMContentLoaded", () => {
   _updatePersonalityRow();
 
   $("btn-new-game").addEventListener("click", startNewGame);
+
+  // Setup position controls
+  $("btn-setup-toggle").addEventListener("click", enterSetupMode);
+  $("btn-setup-cancel").addEventListener("click", exitSetupMode);
+  $("btn-setup-clear").addEventListener("click", () => {
+    setupGrid = {};
+    _renderSetupBoard();
+    _updateSetupUI();
+  });
+  $("btn-setup-start").addEventListener("click", startSetupGame);
+  document.querySelectorAll(".setup-swatch").forEach(btn => {
+    btn.addEventListener("click", () => {
+      setupBrush = btn.dataset.piece;
+      document.querySelectorAll(".setup-swatch").forEach(b =>
+        b.classList.toggle("setup-swatch-active", b === btn));
+    });
+  });
+
+  $("sel-setup-phase").addEventListener("change", _updateSetupUI);
+  $("sel-setup-turn").addEventListener("change", _updateSetupUI);
+
   $("toggle-settings").addEventListener("click", () => {
     const p = $("settings-panel");
     p.hidden = !p.hidden;
@@ -317,6 +343,159 @@ function startNewGame() {
   };
 }
 
+// ── Position setup ────────────────────────────────────────────────────────────
+
+const ALL_POSITIONS = [
+  "a7","d7","g7","g4","g1","d1","a1","a4",
+  "b6","d6","f6","f4","f2","d2","b2","b4",
+  "c5","d5","e5","e4","e3","d3","c3","c4",
+];
+
+function enterSetupMode() {
+  setupMode = true;
+  setupGrid = {};
+  // Seed from current live board if a game is in progress
+  if (gameState && gameState.board) {
+    for (const [pos, v] of Object.entries(gameState.board)) {
+      if (v) setupGrid[pos] = v;
+    }
+  }
+  setupBrush = "";  // default: eraser
+  document.querySelectorAll(".setup-swatch").forEach(b =>
+    b.classList.toggle("setup-swatch-active", b.dataset.piece === ""));
+
+  $("settings-panel").hidden = true;
+  $("setup-panel").hidden    = false;
+  $("toggle-settings").classList.remove("btn-active");
+
+  _renderSetupBoard();
+  _updateSetupUI();
+  setStatus("Setup mode — click nodes to place pieces.");
+}
+
+function exitSetupMode() {
+  setupMode = false;
+  $("setup-panel").hidden = true;
+  // Restore live board if game is running
+  if (gameState) {
+    board.render(gameState);
+    if (gameState.move_pairs) board.setMovePairs(gameState.move_pairs);
+    setStatus(phase === "playing" ? "Setup cancelled — game continues." : "");
+  } else {
+    renderIdle();
+  }
+}
+
+function _renderSetupBoard() {
+  const grid = {};
+  for (const pos of ALL_POSITIONS) grid[pos] = setupGrid[pos] || null;
+  board.grid        = grid;
+  board.legalDests  = new Set();
+  board.legalSrcs   = new Set();
+  board.selected    = null;
+  board._millNodes  = new Set();
+  board._hintGroup.innerHTML   = "";
+  board._hintOverlay.innerHTML = "";
+  board._drawPieces();
+  // Node circles retain their own click listeners from _init(), so no extra overlay needed
+}
+
+function _setupValidation() {
+  const w = ALL_POSITIONS.filter(p => setupGrid[p] === "W").length;
+  const b = ALL_POSITIONS.filter(p => setupGrid[p] === "B").length;
+  const phase = $("sel-setup-phase").value;
+  const errors = [];
+
+  if (w < 1 || b < 1) errors.push("Each side needs at least 1 piece.");
+  if (w > 9)          errors.push("White cannot have more than 9 pieces.");
+  if (b > 9)          errors.push("Black cannot have more than 9 pieces.");
+  if (phase === "move") {
+    if (w < 3) errors.push("Movement phase: White needs at least 3 pieces.");
+    if (b < 3) errors.push("Movement phase: Black needs at least 3 pieces.");
+  }
+  return { w, b, errors };
+}
+
+function _updateSetupUI() {
+  const { w, b, errors } = _setupValidation();
+  $("setup-counts").innerHTML = `White: ${w} &nbsp;|&nbsp; Black: ${b}`;
+  $("setup-error").textContent = errors[0] || "";
+  $("btn-setup-start").disabled = errors.length > 0;
+}
+
+function startSetupGame() {
+  const { errors } = _setupValidation();
+  if (errors.length) return;
+
+  const hc     = $("sel-human-color").value;
+  const diff   = parseInt($("sel-difficulty").value);
+  const vs     = $("sel-opponent").value === "human";
+  const useLlm = $("chk-llm").checked;
+
+  const gamePSelect = $("sel-game-personality");
+  if (gamePSelect && gamePSelect.value !== "current") {
+    let p = gamePSelect.value;
+    if (p === "random") {
+      const opts = PERSONALITIES.map(x => x.value);
+      p = opts[Math.floor(Math.random() * opts.length)];
+    }
+    _loadPersonality(p);
+  }
+
+  clearCommentary();
+  setStatus("Starting setup game…");
+  phase = "idle";
+  evalHistory = [];
+  hintsLeft = 3;
+  drawUnlocked = false;
+  forceAggressive = false;
+  replayMoves = [];
+  replayIdx   = -1;
+  _updateReplayLabel();
+  _setReplayButtonsDisabled(true);
+  $("btn-force-cap").classList.remove("btn-active");
+  $("btn-force-cap").disabled = true;
+  drawEvalGraph();
+  renderMoves([]);
+  $("btn-undo").disabled = true;
+  $("btn-force-move").hidden = true;
+  $("btn-bad-move").hidden = true;
+  canMarkBad = false;
+  stopThinkingTimer();
+  updateHintButton();
+  updateDrawButton();
+
+  if (ws) { ws.close(); ws = null; }
+
+  const wsUrl = `ws://${location.host}/ws`;
+  ws = new WebSocket(wsUrl);
+
+  const positions = {};
+  for (const pos of ALL_POSITIONS) positions[pos] = setupGrid[pos] || "";
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type:        "setup_game",
+      human_color:  hc,
+      difficulty:   diff,
+      vs_human:     vs,
+      use_llm:      useLlm,
+      ai_weights:   _getWeights(),
+      positions:    positions,
+      phase:        $("sel-setup-phase").value,
+      turn:         $("sel-setup-turn").value,
+    }));
+    setupMode = false;
+    $("setup-panel").hidden = true;
+  };
+
+  ws.onmessage = evt => handleMessage(JSON.parse(evt.data));
+  ws.onerror   = () => setStatus("Connection error.");
+  ws.onclose   = () => {
+    if (phase !== "game_over") setStatus("Disconnected.");
+  };
+}
+
 // ── Message handling ──────────────────────────────────────────────────────────
 
 function handleMessage(msg) {
@@ -448,6 +627,21 @@ function handleMessage(msg) {
 // ── Click handling ────────────────────────────────────────────────────────────
 
 function onNodeClick(name) {
+  // Setup mode: cycle the clicked node through empty→W→B→empty (or place brush)
+  if (setupMode) {
+    const cur = setupGrid[name] || "";
+    if (setupBrush !== undefined && setupBrush !== null) {
+      // Palette-driven: erase sets "", W/B sets that colour
+      setupGrid[name] = setupBrush;
+    } else {
+      // Cycle mode (fallback)
+      setupGrid[name] = cur === "" ? "W" : cur === "W" ? "B" : "";
+    }
+    _renderSetupBoard();
+    _updateSetupUI();
+    return;
+  }
+
   if (!ws || phase === "idle" || phase === "game_over" || !gameState) return;
   if (!gameState.is_human_turn) return;
 

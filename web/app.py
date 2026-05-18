@@ -39,6 +39,7 @@ log.info("=== Server started ===")
 import sys
 sys.path.insert(0, str(_ROOT))
 
+from game.board import BoardState
 from game.game_engine import GameEngine
 from game.rules import get_all_legal_moves, get_game_phase
 from ai.game_ai import GameAI
@@ -501,6 +502,88 @@ async def ws_endpoint(websocket: WebSocket):
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
                 log.info("New game  human=%s diff=%s vs_human=%s llm=%s", hc, diff, vs_human, use_llm)
+                await _send(websocket, _state(session))
+                await _commentary(websocket, session)
+                _maybe_start_ai()
+
+            # ── setup_game — start from an editor-supplied position ────────────
+            elif kind == "setup_game":
+                import random as _random
+                hc_raw   = msg.get("human_color", "W")
+                hc       = _random.choice(["W", "B"]) if hc_raw == "R" else hc_raw
+                diff     = max(1, min(10, int(msg.get("difficulty", 3))))
+                vs_human = bool(msg.get("vs_human", False))
+                use_llm  = bool(msg.get("use_llm", True))
+                setup_phase = msg.get("phase", "move")   # "place" | "move"
+                setup_turn  = msg.get("turn", "W")        # "W" | "B"
+                setup_pos   = msg.get("positions", {})    # {pos: "W"|"B"|""}
+
+                setup_board = BoardState.from_setup(setup_pos, setup_turn, setup_phase)
+                engine = GameEngine(human_color=hc)
+                engine.board = setup_board
+                engine.game_record["setup_game"] = True
+                engine.game_record["setup_fen"]  = setup_board.to_fen_string()
+
+                game_ai = None
+                coord   = None
+                settings = _load_settings()
+
+                if not vs_human:
+                    ai_color = "B" if hc == "W" else "W"
+                    _aw = msg.get("ai_weights") or {}
+                    def _w(key, default): return int(_aw.get(key, default))
+                    _hw = HeuristicWeights(
+                        close_mill=_w("close_mill", 500),
+                        cycling_mill=_w("cycling_mill", 300),
+                        block_opponent_mill=_w("block_opponent_mill", 400),
+                        stop_opponent_mills=_w("stop_opponent_mills", 450),
+                        feeder_diamond=_w("feeder_diamond", 200),
+                        mill_wrapping=_w("mill_wrapping", 150),
+                        cardinal_block=_w("cardinal_block", 400),
+                        scatter_placement=_w("scatter_placement", 100),
+                        setup_mill=_w("setup_mill", 150),
+                        mill_opening=_w("mill_opening", 200),
+                        long_term_position=_w("long_term_position", 100),
+                        mill_count_scale=_w("mill_count_scale", 100),
+                        mobility_scale=_w("mobility_scale", 100),
+                        blocked_scale=_w("blocked_scale", 100),
+                        make_mistakes=_w("make_mistakes", 0),
+                        opening_adherence=_w("opening_adherence", 50),
+                    )
+                    game_ai = GameAI(
+                        color=ai_color, difficulty=diff, weights=_hw,
+                        blunder_probability=_hw.make_mistakes / 100.0,
+                    )
+
+                    if use_llm:
+                        url   = settings.get("ollama_url",   "http://localhost:11434")
+                        model = settings.get("ollama_model", "llama3.1:8b")
+                        mem   = MemoryManager(ollama_url=url, ollama_model=model)
+                        llm   = MillsLLM(memory=mem, ollama_url=url, model=model)
+                        book  = OpeningBook()
+                        rec   = OpeningRecognizer(book)
+                        egr   = EndgameRecognizer(
+                            active_threshold=settings.get("endgame_active_threshold", 11),
+                            deep_threshold=settings.get("endgame_deep_threshold", 8),
+                            zugzwang_threshold=settings.get("endgame_zugzwang_threshold", 0.4),
+                        )
+                        coord = Coordinator(
+                            game_ai=game_ai, mills_llm=llm, memory=mem,
+                            poor_move_threshold=settings.get("poor_move_threshold", 0.3),
+                            max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
+                            opening_recognizer=rec, endgame_recognizer=egr,
+                            trajectory_db=_trajectory_db,
+                            vs_human=True,
+                            human_color=hc,
+                        )
+                        await asyncio.to_thread(coord.on_game_start)
+
+                session = Session(engine, game_ai, coord, hc, vs_human)
+                log.info(
+                    "Setup game  human=%s diff=%s phase=%s turn=%s W=%d B=%d",
+                    hc, diff, setup_phase, setup_turn,
+                    setup_board.pieces_on_board["W"], setup_board.pieces_on_board["B"],
+                )
                 await _send(websocket, _state(session))
                 await _commentary(websocket, session)
                 _maybe_start_ai()

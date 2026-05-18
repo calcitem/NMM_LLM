@@ -14,7 +14,7 @@
 | 5.7 | Force Move + Thinking Timer | ✅ Complete |
 | 5.8 | Enhanced LLM Commentary | ✅ Complete |
 | 5.9 | Move Replay Viewer | ✅ Complete |
-| 5.10 | Position Setup / Editor | ⬜ Planned |
+| 5.10 | Position Setup / Editor | ✅ Complete |
 | 5.11 | Bug Fixes & Hardening | ✅ Complete |
 | 5.12 | AI Tactical Imperatives | ✅ Complete |
 | 5.13 | AI Settings & Weight Tuning UI | ✅ Complete |
@@ -698,9 +698,19 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/heuristics.py` — Add a late-game danger penalty: when one side has ≤4 pieces and the opponent has ≥6 pieces with ≥2 open mills, apply a large negative adjustment (e.g. `−800`) to the weaker side's score before tanh normalisation.
 - `ai/heuristics.py` — Reduce `TANH_SCALE` for the fly phase from 280 to ~180 so extreme positions are less compressed near ±1.
 
+### Bug 5.11-H — Free Pieces Not Assembling Into Mills ⬜
+
+**Symptom:** In the move phase, isolated AI pieces with no nearby allies don't move toward forming mills unless there is an immediate threat. The AI leaves "stranded" pieces that never contribute to mill formations.
+
+**What should happen:** Any piece not contributing to a current or developing mill should move toward the nearest group of same-color pieces that could form a mill, unless it is needed to block a specific opponent threat. "Free piece assembly" is the book's term for this — pieces that are not blocking anything should gather into productive formations.
+
+**Fix:**
+- `ai/heuristics.py` — Add `_free_piece_assembly(board, color)`: for each own piece not participating in any 2-config or closed mill, measure its distance (in adjacency hops) to the nearest same-color piece that IS in a 2-config. Sum reciprocals (closer = higher score) to reward pieces gathering toward productive formations. Weight ~40 in move phase.
+- `ai/heuristics.py` — Add `_path_to_mill(board, color)`: count own pieces that are 2 adjacency hops from an empty slot in an existing own 2-config (enabling closure in 2 moves). Weight ~60 in move phase. This extends `setup_mill` semantics into the movement phase and catches pieces 2 moves away from joining a forming mill.
+
 ### Bug 5.11-E — AI Not Moving Toward Mill Closure or Block in Move Phase ⬜
 
-**Symptom:** During the move phase the AI sometimes ignores clear opportunities to approach a mill (e.g. c5→c4 to set up c3-c4-c5, or f4→g4 to set up g7-g4-g1) and instead moves another piece ineffectually. It also fails to move d3→d2 to block an opponent's b2-d2-f2 mill threat, choosing c3 instead.
+**Symptom:** During the move phase the AI sometimes fails to move a piece toward an open mill line (to form or complete it), or fails to move to block an opponent's developing mill. The issue can occur at any position — the examples below are illustrative only, not exhaustive.
 
 **Root cause (suspected):** The `_mill_threats` term only rewards mills closeable in **one** adjacency move from the current position. Pieces that are two hops away from joining a mill line contribute nothing. When positional value of a cross-node (c3 = 3-connection, high `_position_value`) competes with a blocking move that only triggers `block_opponent_mill` at moderate weight, the positional score can win incorrectly.
 

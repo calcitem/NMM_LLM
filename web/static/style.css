@@ -472,6 +472,31 @@ main {
 .move-row .move-w { color: var(--white-p); }
 .move-row .move-b { color: #9090cc; }
 
+/* ── Setup palette ───────────────────────────────────────────────────── */
+#setup-palette {
+  display: flex;
+  gap: 6px;
+}
+
+.setup-swatch {
+  flex: 1;
+  padding: 6px 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1.1rem;
+  text-align: center;
+  transition: border-color .15s, background .15s;
+}
+.setup-swatch:hover { border-color: var(--accent); }
+.setup-swatch-active {
+  border-color: var(--tan);
+  background: #2e2818;
+  color: var(--tan);
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 860px) {
   main {

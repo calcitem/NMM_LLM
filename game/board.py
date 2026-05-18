@@ -154,6 +154,36 @@ class BoardState:
             pieces_captured={"W": 0, "B": 0},
         )
 
+    @classmethod
+    def from_setup(
+        cls,
+        positions: Dict[str, str],
+        turn: str,
+        phase: str,
+    ) -> "BoardState":
+        """Create a BoardState from an arbitrary editor setup.
+
+        phase must be 'place' or 'move'.  In 'move' phase both players are
+        treated as having placed all 9 pieces (pieces_placed = 9 each), so the
+        board immediately enters movement/fly rules.  In 'place' phase
+        pieces_placed is set to the count currently on the board (allowing
+        continued placement).
+        """
+        pos = {p: positions.get(p, "") for p in POSITIONS}
+        w_on = sum(1 for v in pos.values() if v == "W")
+        b_on = sum(1 for v in pos.values() if v == "B")
+        if phase == "move":
+            placed = {"W": 9, "B": 9}
+        else:
+            placed = {"W": w_on, "B": b_on}
+        return cls(
+            positions=pos,
+            turn=turn,
+            pieces_on_board={"W": w_on, "B": b_on},
+            pieces_placed=placed,
+            pieces_captured={"W": 0, "B": 0},
+        )
+
     # ── Phase ─────────────────────────────────────────────────────────────────
 
     @property
