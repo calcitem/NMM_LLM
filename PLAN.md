@@ -31,7 +31,7 @@
 | 6 | Self-Play Training Loop | ✅ Complete |
 | 7 | Heuristic Parameter Evolution | ✅ Complete |
 | 8 | Adaptive Difficulty | ✅ Complete |
-| 9 | Tournament / Match Mode | ⬜ Planned |
+| 9 | Tournament / Match Mode | ✅ Complete |
 | 10 | Player Profiles & Persistent Stats | ⬜ Planned |
 | 11 | Advanced Search (MCTS / NN) | ⬜ Stretch |
 
@@ -1020,6 +1020,28 @@ If Ollama is already running but the model is missing, only the pull is needed. 
 - `data/game_count.json` — Persistent counter file.
 
 
+#### Bug 9-A — Bad Move Ban Should Be Position-Specific ⬜
+
+**Symptom:** When the user marks an AI move as "bad", the ban is stored in `TrajectoryDB` for any game reaching that move-sequence prefix — i.e. it persists into future games. But the move may be perfectly valid from a similar board position where pieces are in different squares. Banning by notation alone is too broad.
+
+**Desired behaviour:** The ban should apply only to the specific board position (FEN key) at which the move was made. Once the board changes significantly (pieces captured, moved), the move should be allowed again.
+
+**Planned fix:**
+1. Store bad-move bans keyed by `board_fen_before` rather than move-notation prefix in `_trajectory_db`.
+2. Provide a position-aware lookup in `TrajectoryDB.query()` that checks FEN key instead of notation prefix.
+3. Alternatively, ban only within the current game session (in-memory, via `GameAI.ban_move()`) and do not persist to `bad_moves.json`.
+
+#### Bug 9-B — "Offer Draw" Button Not Visible to Players ⬜
+
+**Symptom:** The "Offer Draw" button exists in the bottom bar but is disabled until 40 post-placement half-moves have passed. Players do not know it exists or why it's greyed out. They never see it active during a normal game.
+
+**Desired behaviour:** Button should be labelled clearly (e.g. "Offer Draw (available at move 40)"), and once unlocked it should be more prominent or a tooltip should explain it.
+
+**Planned fix:**
+1. Add a dynamic tooltip/title attribute showing how many moves remain until draw can be offered.
+2. Consider lowering the threshold or adding an early-draw option once one side is significantly behind.
+3. Update README to document the draw offer mechanic.
+
 ## Planned Stages
 
 ### Stage 5.9 — Move Replay Viewer ⬜
@@ -1191,37 +1213,29 @@ When adaptive difficulty lowers the AI's level and increases blunder rate, there
 
 **Additional protection (to implement):** Tag adaptive-softened games in the JSONL record with `"adaptive_softened": true`. TrajectoryDB and EndgameDB loaders should skip or down-weight these records so they don't pollute the opening/endgame library with beginner-level play patterns. See Bug 8-A below.
 
-#### Bug 8-A — Adaptive Games Polluting TrajectoryDB / EndgameDB ⬜
+#### Bug 8-A — Adaptive Games Polluting TrajectoryDB / EndgameDB ✅ Fixed
 
-**Symptom:** After many adaptive-softened games, TrajectoryDB move hints degrade as the AI "learns" from its own intentional blunders (even if negatively weighted, high-blunder games add noise).
+**Symptom:** After many adaptive-softened games, TrajectoryDB move hints degrade as the AI "learns" from its own intentional blunders.
 
-**Planned fix:**
-1. Add `"adaptive_softened": true` to the JSONL game record when `adaptive.extra_blunder > 0` at game start.
-2. In `TrajectoryDB.load()` and `EndgameDB.load()`, skip records where `adaptive_softened == true`.
-3. Expose a `--include-adaptive` flag in self-play and the DB loaders for analysis purposes.
+**Fix (implemented):**
+1. `_game_over()` in `web/app.py` tags the JSONL record with `"adaptive_softened": true` when `adaptive.extra_blunder > 0`.
+2. Both `TrajectoryDB._index_game()` and `EndgameDB._index_game()` skip records where `adaptive_softened == true`.
 
 
-### Stage 9 — Tournament / Match Mode ⬜
+### Stage 9 — Tournament / Match Mode ✅
 
-**Goal:** Let users run head-to-head matches between named difficulty configs and view results.
+**Goal:** Let players compete through a gauntlet of 6 AI personalities and earn a rank.
 
-**Approach:**
+**Delivered:**
 
-- New `/tournament` endpoint in `web/app.py`.
-
-- Match config: White difficulty, Black difficulty, number of games, colour swap.
-
-- Runs via `self\\\_play.py` as a subprocess (non-blocking, streamed progress).
-
-- Results stored in `data/tournaments/` and displayed in a new browser tab.
-
-**Deliverables:**
-
-- `web/templates/tournament.html` — Match config form + live results table.
-
-- `web/app.py` — `/tournament/start`, `/tournament/stream` (SSE), `/tournament/results/\\\{id\\\}`.
-
-- Results include per-opening breakdown, average game length, eval trajectory summary.
+- `web/app.py` — `TournamentState` class; `_PERSONALITY_WEIGHTS` dict (6 presets); `_after_game_end()` closure in `ws_endpoint`; `tournament_start` WebSocket handler.
+- Qualification gate: player must complete 3 normal games before tournament unlocks.
+- Tournament roster (weakest → strongest): Chaos (diff 2, Elo 720) → Aggressive (3, 850) → Scholar (3, 900) → Balanced (4, 960) → Defensive (4, 1020) → Positional (5, 1080).
+- Colours alternate: W/B/W/B/W/B for fairness.
+- K=32 Elo update after each game; rank labels: Apprentice / Beginner / Intermediate / Advanced / Master.
+- Tournament games use server-authoritative personality weights (no user-slider override).
+- `web/templates/index.html` — `#toggle-tournament` header button (disabled until 3 games played); `#tournament-panel` sidebar with scoreboard table and final rank display.
+- `web/static/game.js` — `sessionGames` counter; tournament unlock logic; handles `tournament_init`, `tournament_next`, `tournament_update`, `tournament_complete` WS messages; auto-sends `new_game` with `tournament_game: true` for each round.
 
 ### Stage 10 — Player Profiles & Persistent Stats ⬜
 

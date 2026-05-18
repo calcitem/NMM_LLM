@@ -27,6 +27,8 @@ let _openingsData     = [];   // cached openings from /api/openings
 let setupMode       = false;  // true while the position editor is open
 let setupGrid       = {};     // pos → "W"|"B"|"" for the editor board
 let setupBrush      = "";     // currently selected palette piece: ""|"W"|"B"
+let sessionGames    = 0;      // games finished this session; unlocks tournament at QUALIFY_GAMES
+const QUALIFY_GAMES = 3;      // mirror of server TournamentState.QUALIFY_GAMES
 
 // ── AI weight defaults (Stage 5.13) ──────────────────────────────────────────
 
@@ -288,6 +290,24 @@ document.addEventListener("DOMContentLoaded", () => {
   $("toggle-setup").addEventListener("click", () => {
     if (setupMode) exitSetupMode();
     else enterSetupMode();
+  });
+
+  // Header "Tournament" toggle
+  $("toggle-tournament").addEventListener("click", () => {
+    const p = $("tournament-panel");
+    p.hidden = !p.hidden;
+    $("toggle-tournament").classList.toggle("btn-active", !p.hidden);
+  });
+  $("btn-tournament-start").addEventListener("click", () => {
+    if (ws) ws.send(JSON.stringify({ type: "tournament_start" }));
+  });
+  $("btn-tournament-restart").addEventListener("click", () => {
+    $("tournament-complete-info").hidden = true;
+    $("tournament-rows").innerHTML = "";
+    $("tournament-active").hidden = true;
+    $("btn-tournament-start").hidden = false;
+    $("tournament-intro").hidden = false;
+    if (ws) ws.send(JSON.stringify({ type: "tournament_start" }));
   });
 });
 
@@ -652,6 +672,14 @@ function handleMessage(msg) {
           addCommentary("Adaptive", `You're on a ${AdaptiveTracker.HARDEN_SUGGEST}-game win streak! Consider trying difficulty ${ad.difficulty} for a tougher challenge.`, "ai");
         }
       }
+
+      // Session games counter — unlocks tournament button
+      sessionGames++;
+      if (sessionGames >= QUALIFY_GAMES) {
+        const tb = $("toggle-tournament");
+        tb.disabled = false;
+        tb.title = "Open Tournament Mode";
+      }
       break;
     }
 
@@ -662,6 +690,22 @@ function handleMessage(msg) {
     case "draw_rejected":
       addCommentary("Game", "Draw offer declined — the AI believes it can win.", "ai");
       updateDrawButton();
+      break;
+
+    case "tournament_init":
+      _renderTournamentInit(msg);
+      break;
+
+    case "tournament_next":
+      _handleTournamentNext(msg);
+      break;
+
+    case "tournament_update":
+      _updateTournamentScoreboard(msg);
+      break;
+
+    case "tournament_complete":
+      _handleTournamentComplete(msg);
       break;
 
     case "error":
@@ -1335,4 +1379,61 @@ function _matchPersonality(weights) {
     if (matches) return name;
   }
   return null;
+}
+
+// ── Tournament helpers ────────────────────────────────────────────────────────
+
+function _renderTournamentInit(msg) {
+  $("tournament-intro").hidden  = true;
+  $("tournament-active").hidden = false;
+  $("tournament-complete-info").hidden = true;
+  $("btn-tournament-start").hidden = true;
+  $("tournament-rows").innerHTML = "";
+  $("tournament-elo").textContent   = msg.player_elo;
+  $("tournament-total").textContent = "0";
+  $("tournament-max").textContent   = msg.roster.length * 2;
+  // Show panel
+  $("tournament-panel").hidden = false;
+  $("toggle-tournament").classList.add("btn-active");
+}
+
+function _handleTournamentNext(msg) {
+  const colorName = msg.human_color === "W" ? "White" : "Black";
+  $("tournament-opponent-info").innerHTML =
+    `Game ${msg.game_idx + 1} of 6: <strong>${msg.label}</strong><br>` +
+    `You play as <strong>${colorName}</strong>`;
+  addCommentary("Tournament", `Game ${msg.game_idx + 1}: ${msg.label} — you play as ${colorName}`, "ai");
+  // Auto-start the tournament game over the existing WebSocket
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type:           "new_game",
+      tournament_game: true,
+      use_llm:        $("chk-llm").checked,
+    }));
+  }
+}
+
+function _updateTournamentScoreboard(msg) {
+  $("tournament-elo").textContent   = msg.player_elo;
+  $("tournament-total").textContent = msg.points;
+  $("tournament-rows").innerHTML = (msg.results || []).map(r => {
+    const cls = r.result === "W" ? "t-win" : r.result === "L" ? "t-loss" : "t-draw";
+    const sym = r.result === "W" ? "Win" : r.result === "L" ? "Loss" : "Draw";
+    return `<tr class="${cls}">` +
+      `<td>${r.label}</td>` +
+      `<td style="text-align:center">${sym}</td>` +
+      `<td style="text-align:center">${r.points}</td>` +
+      `</tr>`;
+  }).join("");
+}
+
+function _handleTournamentComplete(msg) {
+  _updateTournamentScoreboard(msg);
+  $("tournament-opponent-info").textContent = "Tournament complete!";
+  $("tournament-complete-info").hidden = false;
+  $("tournament-rank").textContent      = msg.rank_label;
+  $("tournament-final-elo").textContent = `Final Elo: ${msg.player_elo}`;
+  addCommentary("Tournament",
+    `Tournament complete! Rank: ${msg.rank_label}  |  ` +
+    `Points: ${msg.points}/${msg.max_points}  |  Elo: ${msg.player_elo}`, "ai");
 }

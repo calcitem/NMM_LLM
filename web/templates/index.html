@@ -13,6 +13,7 @@
     <button id="toggle-moves" class="btn-active">Moves</button>
     <button id="toggle-openings">Openings</button>
     <button id="toggle-setup">Setup</button>
+    <button id="toggle-tournament" disabled title="Play 3 games to unlock Tournament Mode">&#127942; Tournament</button>
     <button id="btn-new-game-header">&#9658; New Game</button>
     <select id="hdr-personality" title="AI Personality">
       <option value="random" selected>Random</option>
@@ -244,6 +245,40 @@
         <button id="btn-setup-start" disabled>&#x25B6; Start from Here</button>
         <button id="btn-setup-clear" class="btn-small" style="margin-top:6px;width:100%">Clear Board</button>
         <button id="btn-setup-cancel" class="btn-small" style="margin-top:4px;width:100%">Cancel</button>
+      </div>
+
+      <!-- Tournament panel (toggled via header button) -->
+      <div class="panel-box" id="tournament-panel" hidden>
+        <h3>&#127942; Tournament Mode</h3>
+        <p id="tournament-intro" style="font-size:.78rem;color:var(--text-dim);margin-bottom:8px;line-height:1.4">
+          Play through 6 AI personalities from weakest to strongest.
+          You earn 2 pts for a win, 1 for a draw, 0 for a loss.
+        </p>
+        <div id="tournament-active" hidden>
+          <div id="tournament-opponent-info" style="margin-bottom:8px;font-size:.85rem;"></div>
+          <table id="tournament-scoreboard" style="width:100%;font-size:.78rem;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:2px 4px;color:var(--text-dim)">Opponent</th>
+                <th style="text-align:center;padding:2px 4px;color:var(--text-dim)">Result</th>
+                <th style="text-align:center;padding:2px 4px;color:var(--text-dim)">Pts</th>
+              </tr>
+            </thead>
+            <tbody id="tournament-rows"></tbody>
+          </table>
+          <div id="tournament-elo-row" style="margin-top:8px;font-size:.82rem;color:var(--text-dim)">
+            Your Elo: <strong id="tournament-elo">—</strong>
+          </div>
+          <div id="tournament-total-row" style="font-size:.82rem;color:var(--text-dim)">
+            Points: <strong id="tournament-total">0</strong> / <strong id="tournament-max">12</strong>
+          </div>
+        </div>
+        <div id="tournament-complete-info" hidden style="margin-top:8px;text-align:center">
+          <div id="tournament-rank" style="font-size:1.1rem;font-weight:600;color:var(--tan)"></div>
+          <div id="tournament-final-elo" style="font-size:.85rem;color:var(--text-dim);margin-top:4px"></div>
+          <button id="btn-tournament-restart" class="btn-small" style="margin-top:10px;width:100%">&#127942; Play Again</button>
+        </div>
+        <button id="btn-tournament-start" style="margin-top:8px;width:100%">&#9654; Start Tournament</button>
       </div>
 
       <!-- AI Tuning panel (toggled via header button, stays open during play) -->

@@ -192,6 +192,116 @@ class AdaptiveTracker:
         return {"action": None, "difficulty": self.current_difficulty}
 
 
+# ── Personality weight presets (server-side canonical values) ─────────────────
+# Used by tournament games so the server applies the correct style regardless
+# of client slider state. Keys mirror the personality names in the UI.
+
+_PERSONALITY_WEIGHTS: dict[str, dict] = {
+    "balanced":   {},  # defaults only
+    "aggressive": {
+        "close_mill": 700, "block_opponent_mill": 250, "cycling_mill": 500,
+        "feeder_diamond": 300, "mill_wrapping": 250, "setup_mill": 200,
+        "cardinal_block": 150, "make_mistakes": 5,
+    },
+    "defensive": {
+        "close_mill": 350, "block_opponent_mill": 600, "stop_opponent_mills": 700,
+        "cardinal_block": 550, "cycling_mill": 150, "feeder_diamond": 100,
+        "mill_wrapping": 80, "make_mistakes": 3,
+    },
+    "positional": {
+        "long_term_position": 180, "feeder_diamond": 320, "setup_mill": 200,
+        "mill_count_scale": 140, "mobility_scale": 130, "blocked_scale": 130,
+        "close_mill": 400, "block_opponent_mill": 350,
+    },
+    "scholar": {
+        "opening_adherence": 90, "setup_mill": 250, "feeder_diamond": 280,
+        "scatter_placement": 180, "close_mill": 450, "cycling_mill": 350,
+    },
+    "chaos": {
+        "make_mistakes": 25, "scatter_placement": 50, "cardinal_block": 50,
+        "feeder_diamond": 50, "cycling_mill": 100,
+    },
+}
+
+
+# ── Tournament ────────────────────────────────────────────────────────────────
+
+class TournamentState:
+    """Tracks one tournament run — 6 games vs the personality roster."""
+
+    QUALIFY_GAMES = 3  # games the human must play before unlocking
+
+    ROSTER: list[dict] = [  # ordered weakest → strongest
+        {"name": "chaos",      "label": "Chaos — The Trickster",      "diff": 2, "elo": 720},
+        {"name": "aggressive", "label": "Aggressive — The Crusher",    "diff": 3, "elo": 850},
+        {"name": "scholar",    "label": "Scholar — The Bookworm",      "diff": 3, "elo": 900},
+        {"name": "balanced",   "label": "Balanced",                    "diff": 4, "elo": 960},
+        {"name": "defensive",  "label": "Defensive — The Blocker",     "diff": 4, "elo": 1020},
+        {"name": "positional", "label": "Positional — The Strategist", "diff": 5, "elo": 1080},
+    ]
+    _COLORS = ["W", "B", "W", "B", "W", "B"]  # alternate for fairness
+
+    def __init__(self) -> None:
+        self.results: list[dict] = []
+        self.current_idx: int   = 0
+        self.player_elo: int    = 1000
+
+    @property
+    def complete(self) -> bool:
+        return self.current_idx >= len(self.ROSTER)
+
+    @property
+    def current(self) -> dict | None:
+        if self.complete:
+            return None
+        entry = self.ROSTER[self.current_idx]
+        return {
+            **entry,
+            "human_color": self._COLORS[self.current_idx],
+            "game_idx":    self.current_idx,
+        }
+
+    def record(self, winner: str | None, human_color: str) -> None:
+        entry     = self.ROSTER[self.current_idx]
+        human_won = (winner == human_color) if winner else None
+        pts       = 2 if human_won is True else (1 if human_won is None else 0)
+        self.results.append({
+            "personality": entry["name"],
+            "label":       entry["label"],
+            "difficulty":  entry["diff"],
+            "human_color": human_color,
+            "result":      "W" if human_won is True else ("D" if human_won is None else "L"),
+            "points":      pts,
+        })
+        # K=32 Elo update
+        expected        = 1.0 / (1.0 + 10.0 ** ((entry["elo"] - self.player_elo) / 400.0))
+        actual          = 1.0 if human_won is True else (0.5 if human_won is None else 0.0)
+        self.player_elo = max(100, int(self.player_elo + 32 * (actual - expected)))
+        self.current_idx += 1
+
+    def total_points(self) -> int:
+        return sum(r["points"] for r in self.results)
+
+    def rank_label(self) -> str:
+        pct = self.total_points() / (len(self.ROSTER) * 2)
+        if pct >= 0.80: return "Master"
+        if pct >= 0.60: return "Advanced"
+        if pct >= 0.40: return "Intermediate"
+        if pct >= 0.20: return "Beginner"
+        return "Apprentice"
+
+    def summary(self) -> dict:
+        return {
+            "results":     self.results,
+            "points":      self.total_points(),
+            "max_points":  len(self.ROSTER) * 2,
+            "player_elo":  self.player_elo,
+            "complete":    self.complete,
+            "current_idx": self.current_idx,
+            "rank_label":  self.rank_label() if self.complete else "",
+        }
+
+
 # ── Session ───────────────────────────────────────────────────────────────────
 
 _HINT_CAP = 3
@@ -223,6 +333,7 @@ class Session:
         self._last_ai_move: Optional[dict] = None
         self._can_undo_ai: bool = False        # True only right after an AI move
         self.adaptive: Optional[AdaptiveTracker] = None
+        self.is_tournament_game: bool = False
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -548,6 +659,30 @@ async def ws_endpoint(websocket: WebSocket):
     session: Optional[Session] = None
     ai_thinking: bool = False
     adaptive = AdaptiveTracker()   # persists across new_game messages on this connection
+    session_games: int = 0
+    tournament: Optional[TournamentState] = None
+
+    async def _after_game_end() -> None:
+        nonlocal session_games
+        session_games += 1
+        if tournament is None or session is None or not session.is_tournament_game:
+            return
+        if tournament.complete:
+            return
+        tournament.record(session.engine.winner, session.human_color)
+        if tournament.complete:
+            await _send(websocket, {"type": "tournament_complete", **tournament.summary()})
+        else:
+            nxt = tournament.current
+            await _send(websocket, {"type": "tournament_update", **tournament.summary()})
+            await _send(websocket, {
+                "type":        "tournament_next",
+                "game_idx":    nxt["game_idx"],
+                "personality": nxt["name"],
+                "label":       nxt["label"],
+                "difficulty":  nxt["diff"],
+                "human_color": nxt["human_color"],
+            })
 
     async def _run_ai_background() -> None:
         nonlocal ai_thinking
@@ -570,6 +705,8 @@ async def ws_endpoint(websocket: WebSocket):
         auto_task = asyncio.create_task(_auto_force())
         try:
             await _ai_turn(websocket, session)
+            if session and session.engine.finished:
+                await _after_game_end()
         except Exception as exc:
             log.error("AI background task failed: %s", exc, exc_info=True)
             try:
@@ -604,9 +741,21 @@ async def ws_endpoint(websocket: WebSocket):
             # ── new_game ──────────────────────────────────────────────────────
             if kind == "new_game":
                 import random as _random
-                hc_raw    = msg.get("human_color", "W")
-                hc        = _random.choice(["W", "B"]) if hc_raw == "R" else hc_raw
-                diff      = max(1, min(10, int(msg.get("difficulty", 3))))
+                is_tournament = (
+                    bool(msg.get("tournament_game", False))
+                    and tournament is not None
+                    and not tournament.complete
+                )
+                if is_tournament:
+                    _tnxt   = tournament.current
+                    hc      = _tnxt["human_color"]
+                    diff    = _tnxt["diff"]
+                    _t_pers = _tnxt["name"]
+                else:
+                    hc_raw  = msg.get("human_color", "W")
+                    hc      = _random.choice(["W", "B"]) if hc_raw == "R" else hc_raw
+                    diff    = max(1, min(10, int(msg.get("difficulty", 3))))
+                    _t_pers = ""
                 vs_human  = bool(msg.get("vs_human", False))
                 use_llm   = bool(msg.get("use_llm", True))
                 settings  = _load_settings()
@@ -618,9 +767,14 @@ async def ws_endpoint(websocket: WebSocket):
                 if not vs_human:
                     eff_diff = adaptive.on_new_game(diff)
                     ai_color = "B" if hc == "W" else "W"
-                    # Merge: evolved weights < user-saved weights < per-game weights
-                    _aw = {**_evolved_weights, **settings.get("ai_weights", {}),
-                           **(msg.get("ai_weights") or {})}
+                    # Merge: evolved < personality < user-saved < per-game weights
+                    # Tournament games use only evolved + personality (no user overrides).
+                    _p_w = _PERSONALITY_WEIGHTS.get(_t_pers, {}) if _t_pers else {}
+                    if is_tournament:
+                        _aw = {**_evolved_weights, **_p_w}
+                    else:
+                        _aw = {**_evolved_weights, **_p_w, **settings.get("ai_weights", {}),
+                               **(msg.get("ai_weights") or {})}
                     def _w(key, default): return int(_aw.get(key, default))
                     _hw      = HeuristicWeights(
                         close_mill=_w("close_mill", 500),
@@ -675,9 +829,11 @@ async def ws_endpoint(websocket: WebSocket):
                         await asyncio.to_thread(coord.on_game_start)
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
+                session.is_tournament_game = is_tournament
                 if not vs_human:
                     session.adaptive = adaptive
-                log.info("New game  human=%s diff=%s vs_human=%s llm=%s", hc, diff, vs_human, use_llm)
+                log.info("New game  human=%s diff=%s vs_human=%s llm=%s tournament=%s",
+                         hc, diff, vs_human, use_llm, is_tournament)
                 await _send(websocket, _state(session))
                 await _commentary(websocket, session)
                 _maybe_start_ai()
@@ -879,6 +1035,7 @@ async def ws_endpoint(websocket: WebSocket):
 
                 if session.engine.finished:
                     await _game_over(websocket, session)
+                    await _after_game_end()
                 else:
                     _maybe_start_ai()
 
@@ -912,6 +1069,7 @@ async def ws_endpoint(websocket: WebSocket):
 
                 if session.engine.finished:
                     await _game_over(websocket, session)
+                    await _after_game_end()
                 else:
                     _maybe_start_ai()
 
@@ -998,6 +1156,7 @@ async def ws_endpoint(websocket: WebSocket):
                     engine.game_record["draw_reason"] = "agreement"
                     await _send(websocket, {"type": "draw_accepted"})
                     await _game_over(websocket, session)
+                    await _after_game_end()
                 else:
                     await _send(websocket, {"type": "draw_rejected"})
 
@@ -1118,6 +1277,31 @@ async def ws_endpoint(websocket: WebSocket):
                         "text": "LLM not available — enable MillsAI commentary.",
                         "section": "human",
                     })
+
+            # ── tournament_start ──────────────────────────────────────────────
+            elif kind == "tournament_start":
+                if session_games < TournamentState.QUALIFY_GAMES:
+                    await _send(websocket, {
+                        "type":    "error",
+                        "message": f"Play {TournamentState.QUALIFY_GAMES} games first to unlock Tournament Mode.",
+                    })
+                    continue
+                tournament = TournamentState()
+                nxt = tournament.current
+                await _send(websocket, {
+                    "type":          "tournament_init",
+                    "roster":        TournamentState.ROSTER,
+                    "qualify_games": TournamentState.QUALIFY_GAMES,
+                    "player_elo":    tournament.player_elo,
+                })
+                await _send(websocket, {
+                    "type":        "tournament_next",
+                    "game_idx":    nxt["game_idx"],
+                    "personality": nxt["name"],
+                    "label":       nxt["label"],
+                    "difficulty":  nxt["diff"],
+                    "human_color": nxt["human_color"],
+                })
 
     except WebSocketDisconnect:
         log.info("WebSocket disconnected")

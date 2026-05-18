@@ -53,7 +53,8 @@ header h1 {
 #toggle-settings,
 #toggle-ai-tuning,
 #toggle-openings,
-#toggle-setup {
+#toggle-setup,
+#toggle-tournament {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -66,12 +67,20 @@ header h1 {
 #toggle-settings:hover,
 #toggle-ai-tuning:hover,
 #toggle-openings:hover,
-#toggle-setup:hover { border-color: var(--accent); color: var(--accent); }
+#toggle-setup:hover,
+#toggle-tournament:hover { border-color: var(--accent); color: var(--accent); }
 #toggle-moves.btn-active,
 #toggle-settings.btn-active,
 #toggle-ai-tuning.btn-active,
 #toggle-openings.btn-active,
-#toggle-setup.btn-active { border-color: var(--tan); color: var(--tan); }
+#toggle-setup.btn-active,
+#toggle-tournament.btn-active { border-color: var(--tan); color: var(--tan); }
+#toggle-tournament:disabled { opacity: .45; cursor: not-allowed; }
+#tournament-scoreboard td,
+#tournament-scoreboard th { border-bottom: 1px solid var(--border); padding: 3px 4px; }
+#tournament-scoreboard tr.t-win td   { color: var(--green, #6f9); }
+#tournament-scoreboard tr.t-loss td  { color: var(--red); }
+#tournament-scoreboard tr.t-draw td  { color: var(--text-dim); }
 #btn-new-game-header {
   background: var(--accent);
   color: var(--bg);
