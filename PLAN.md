@@ -895,6 +895,59 @@ Once enough self-play and human-play data exists, promote the variant store into
 4. Every completed game — including games where the human wins — is immediately added to the trajectory index, so the AI can attempt those same winning moves in future play.
 
 
+### Stage 5.24 — Endgame Position Memory ✅
+
+**Goal:** Give the AI a position-based endgame database so it can learn from historical endgame positions (≤11 total pieces, post-placement) independent of how those positions were reached — complementing TrajectoryDB's move-prefix index with exact board-state matching.
+
+**Problem addressed:** TrajectoryDB is prefix-based and only matches when the current game's move sequence appears verbatim in historical games. Endgame positions can be reached via many different routes; prefix matching often finds no match by the time both sides have ≤6 pieces. The AI had no endgame-specific move guidance.
+
+**Delivered:**
+
+- `ai/endgame_db.py` — `EndgameDB` class. Scans all JSONL game files; for each position with placement complete and ≤11 total pieces, indexes `board_string|turn → {notation: {W, B, D, total}}`. `query(board, color)` returns a score-delta dict (same ±0.5 scale as TrajectoryDB) for candidate moves from the exact current position. Position key: the 24-char board layout + whose turn it is (order-independent of how the position was reached).
+
+- `ai/coordinator.py` — Accepts `endgame_db` in constructor. In `deliberate()`, when `endgame_state.active`, queries `EndgameDB` and merges hints into `trajectory_hints` (averaged when both sources fire). In `on_game_end()`, calls `endgame_db.add_game()` so every completed game immediately updates the index.
+
+- `web/app.py` — Instantiates `_endgame_db` at startup alongside TrajectoryDB; passes it to every `Coordinator`.
+
+- `tools/self_play.py` — Loads `EndgameDB` once at startup; calls `endgame_db.add_game()` after each sequential fast-mode game. Added 50-half-move no-capture draw rule to prevent endgame stalling (analogous to chess 50-move rule). Now initialises from prior data so the first few games of a run can already benefit from historical endgame patterns.
+
+**How position-based endgame learning works:**
+
+1. The first time the AI encounters a position it has seen before in historical games, `EndgameDB.query()` returns positive deltas for historically winning moves and negative deltas for losing ones.
+2. These are merged with any `TrajectoryDB` hints: averaged when both fire, used alone when only one matches.
+3. The merged hints are passed to `choose_move()` as `trajectory_hints`, where they are scaled by `opening_adherence` and applied on top of the minimax score — nudging the AI toward historically effective continuations without overriding sound tactical play.
+4. As more games are played (self-play or human vs AI), new endgame positions accumulate automatically via `add_game()`, so the database grows richer with every game.
+
+**Known gaps:** Positional symmetry (rotation/reflection) is not exploited; two structurally equivalent positions in different board orientations will not match. Future work could add a symmetry-normalised key for deeper equivalence.
+
+
+#### Bug 5.24-A — Self-Play Stalling After Move ~36 (Slow, Not Infinite)
+
+**Symptom:** When running `python tools/self_play.py --games 40 --white 5 --black 5 --blunder 0.1 -v --no-llm`, games become very slow after move 36 (the start of the movement phase endgame). The script does not hang indefinitely — it eventually resolves via repetition detection — but individual moves can take 3–8 seconds at difficulty 5 in deep endgame positions.
+
+**Root cause:** At difficulty 5, the search uses iterative deepening with a time budget. In the fly phase (3v3), the branching factor is ~54 legal moves per side, which combined with a 2s budget and deep search causes each move to take several seconds. The `_REPEAT_DRAW = 3` repetition check and the new 100-half-move no-capture rule both fire correctly, but only after many slow moves.
+
+**Mitigation applied (Stage 5.24):** Added a 100-half-move no-capture draw rule as an analogue of the chess 50-move rule. This bounds game length in cyclic endgame positions without stopping decisive games prematurely.
+
+**Remaining fix:** Reduce self-play time budget at difficulty 5 when `fast_early_game=True` is set (or add a dedicated `fast_self_play_cap` to `_run_fast_game`). Target: ≤1s per move in self-play mode regardless of difficulty.
+
+
+#### Bug 5.24-B — Ollama / LLM Not Working in Self-Play
+
+**Symptom:** Running self-play with LLM mode (`python tools/self_play.py --games N --white 5 --black 5`) fails or stalls. LLM commentary in the web interface is also non-functional.
+
+**Root cause (suspected):** Ollama service is not running or the configured model has not been pulled. This is an environment/installation issue rather than a code bug.
+
+**Fix:** Before using LLM mode, run:
+```bash
+ollama serve &
+ollama pull llama3.1:8b   # or the model configured in data/settings.json
+```
+If Ollama is already running but the model is missing, only the pull is needed. The `install.sh` script should handle this automatically on first run.
+
+**Code-side investigation needed:** Add a pre-flight check in `tools/self_play.py` and `web/app.py` that pings the Ollama endpoint and logs a clear warning (not a crash) when it is unreachable.
+
+
 ## Planned Stages
 
 ### Stage 5.9 — Move Replay Viewer ⬜

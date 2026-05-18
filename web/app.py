@@ -51,6 +51,7 @@ from ai.opening_book import OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
+from ai.endgame_db import EndgameDB
 
 # Load trajectory DB once at startup — updated incrementally as games complete.
 _trajectory_db    = TrajectoryDB(_ROOT / "data" / "games")
@@ -63,6 +64,17 @@ try:
     )
 except Exception as _exc:
     log.warning("TrajectoryDB: load failed — %s", _exc)
+
+# Load endgame DB once at startup — provides position-exact move guidance.
+_endgame_db = EndgameDB(_ROOT / "data" / "games")
+try:
+    _endgame_db.load()
+    log.info(
+        "EndgameDB: %d games, %d position entries",
+        _endgame_db.game_count, _endgame_db.position_count,
+    )
+except Exception as _exc:
+    log.warning("EndgameDB: load failed — %s", _exc)
 
 
 def _load_settings() -> dict:
@@ -495,6 +507,7 @@ async def ws_endpoint(websocket: WebSocket):
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
                             trajectory_db=_trajectory_db,
+                            endgame_db=_endgame_db,
                             vs_human=True,  # coordinator always faces a human in web games
                             human_color=hc,
                         )
@@ -573,6 +586,7 @@ async def ws_endpoint(websocket: WebSocket):
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
                             trajectory_db=_trajectory_db,
+                            endgame_db=_endgame_db,
                             vs_human=True,
                             human_color=hc,
                         )

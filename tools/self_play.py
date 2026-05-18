@@ -79,6 +79,7 @@ from ai.opening_book import OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.memory_manager import MemoryManager
+from ai.endgame_db import EndgameDB
 
 
 # ── Personality presets (mirrors PERSONALITY_PRESETS in web/static/game.js) ──
@@ -202,6 +203,7 @@ def _run_fast_game(
     move_count = 0
     fen_counts: Counter = Counter()
     draw_by_repetition = False
+    moves_since_capture = 0          # 50-move-rule analogue: draw if no capture for 100 half-moves
 
     # How many placement moves we've made (used to index the forced-opening line)
     _placement_count = 0
@@ -213,6 +215,9 @@ def _run_fast_game(
 
         fen_counts[fen] += 1
         if fen_counts[fen] >= _REPEAT_DRAW:
+            draw_by_repetition = True
+            break
+        if moves_since_capture >= 100:   # no capture for 100 half-moves → draw
             draw_by_repetition = True
             break
 
@@ -260,6 +265,10 @@ def _run_fast_game(
 
         engine.apply_move(move)
         move_count += 1
+        if move.get("capture"):
+            moves_since_capture = 0
+        else:
+            moves_since_capture += 1
 
         white_rec.update(move.get("to", ""), engine.board)
         black_rec.update(move.get("to", ""), engine.board)
@@ -571,7 +580,9 @@ def main() -> None:
     all_records: list[dict] = []
 
     # ── Shared objects for sequential fast mode ───────────────────────────────
-    book = OpeningBook()
+    book        = OpeningBook()
+    endgame_db  = EndgameDB(ROOT / "data" / "games")
+    endgame_db.load()
     mem  = None
     if not use_llm:
         url   = settings.get("ollama_url",   "http://localhost:11434")
@@ -683,6 +694,7 @@ def main() -> None:
                         forced_opening=forced,
                     )
                     mem.save_game_record(record)  # type: ignore[union-attr]
+                    endgame_db.add_game(record)
             except KeyboardInterrupt:
                 print("\n  Interrupted.")
                 break

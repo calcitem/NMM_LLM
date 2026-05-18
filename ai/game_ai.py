@@ -480,13 +480,18 @@ class GameAI:
                 break
         return results
 
+    _BLUNDER_TIME = 2.0   # hard cap for blunder scoring — ranking doesn't need deep search
+    _BLUNDER_DEPTH = 3    # shallow depth is enough to distinguish good/bad moves
+
     def _pick_blunder(self, board: BoardState, moves: list) -> dict:
         """
         Select a deliberately poor move from the bottom quartile of scored moves.
-        Used by blunder mode to create teachable mistakes.
+        Uses a shallow fixed depth (3) with a hard time cap — blunders just need
+        to avoid picking the obviously best move, not evaluate perfectly.
         """
-        depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
-        scored = self._score_all(board, moves, depth)
+        self._deadline = time.time() + self._BLUNDER_TIME
+        scored = self._score_all(board, moves, self._BLUNDER_DEPTH)
+        self._deadline = math.inf
         scored.sort(key=lambda x: x[1])  # ascending: worst first
         cutoff = max(1, len(scored) // 4)
         worst = scored[:cutoff]

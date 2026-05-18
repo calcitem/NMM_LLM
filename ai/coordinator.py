@@ -20,6 +20,7 @@ from ai.opening_book import Opening
 from ai.opening_recognizer import OpeningRecognizer, RecognitionResult, INACTIVE_RESULT
 from ai.endgame_recognizer import EndgameRecognizer, INACTIVE_ENDGAME
 from ai.trajectory_db import TrajectoryDB
+from ai.endgame_db import EndgameDB
 from game.rules import get_all_legal_moves, get_game_phase
 
 
@@ -35,6 +36,7 @@ class Coordinator:
         opening_recognizer: OpeningRecognizer | None = None,
         endgame_recognizer: EndgameRecognizer | None = None,
         trajectory_db: TrajectoryDB | None = None,
+        endgame_db: EndgameDB | None = None,
         vs_human: bool = True,
         human_color: str = "W",
     ) -> None:
@@ -47,6 +49,7 @@ class Coordinator:
         self.opening_recognizer = opening_recognizer
         self.endgame_recognizer = endgame_recognizer
         self.trajectory_db = trajectory_db
+        self.endgame_db = endgame_db
         self.vs_human = vs_human
         self.human_color = human_color
 
@@ -141,6 +144,8 @@ class Coordinator:
         self.memory.save_game_record(game_record)
         if self.trajectory_db is not None:
             self.trajectory_db.add_game(game_record)
+        if self.endgame_db is not None:
+            self.endgame_db.add_game(game_record)
 
         winner = game_record.get("winner")
         human_color = game_record.get("human_color", "W")
@@ -317,6 +322,18 @@ class Coordinator:
             notations = [m.get("notation", "") for m in self._game_moves if m.get("notation")]
             if notations:
                 trajectory_hints = self.trajectory_db.query(notations, board.turn) or None
+
+        # 2b. Query endgame DB for position-based hints (merged on top of trajectory hints)
+        if self.endgame_db is not None and endgame_state.active:
+            eg_hints = self.endgame_db.query(board, board.turn)
+            if eg_hints:
+                if trajectory_hints:
+                    for notation, delta in eg_hints.items():
+                        trajectory_hints[notation] = (
+                            trajectory_hints.get(notation, 0.0) + delta
+                        ) / 2.0
+                else:
+                    trajectory_hints = eg_hints
 
         # 3. Tactical pre-screen: log urgency level so the AI and LLM know the context
         tac = self._tactical_situation(board)
