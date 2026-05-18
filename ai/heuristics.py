@@ -39,16 +39,17 @@ DEFAULT_WEIGHTS = HeuristicWeights()
 INF: int = 10_000_000
 
 # Phase weights: (closed_mills, blocked_opp, piece_diff, two_cfg, dbl_mill, win_cfg)
-# dbl_mill was 0 in fly — fixed: double-mill pivots are extremely powerful in fly phase.
 _WEIGHTS = {
-    "place": (14,  10, 11, 8,    0,    0),
-    "move":  (14,  43, 10, 7,   42,    0),
-    "fly":   (16, 350,  1, 0,   80, 1190),
+    "place": (16,  12, 11, 18,   0,    0),
+    "move":  (18,  48, 12, 16,  50,    0),
+    "fly":   (20, 350,  2,  0,  90, 1190),
 }
 
-# Mobility and threat term weights per phase
+# Mobility and threat term weights per phase.
+# _THREAT_WEIGHTS now weights CLOSEABLE mills (reachable in one move),
+# which is stricter than two_cfg and warrants a higher multiplier.
 _MOB_WEIGHTS    = {"place": 3,  "move": 8,  "fly": 20}
-_THREAT_WEIGHTS = {"place": 8,  "move": 12, "fly": 18}
+_THREAT_WEIGHTS = {"place": 16, "move": 20, "fly": 24}
 
 # tanh normalization scales per phase (used by position_eval display, not search)
 TANH_SCALE = {"place": 120, "move": 180, "fly": 280}
@@ -84,7 +85,7 @@ _FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 55}
 # Herding / encirclement: own pieces adjacent to each opponent piece.
 # Rewards progressively surrounding opponent pieces to shrink their escape space.
 # Irrelevant in fly phase (pieces can jump anywhere).
-_HERD_WEIGHTS  = {"place": 2, "move": 9,  "fly": 0}
+_HERD_WEIGHTS  = {"place": 2, "move": 12, "fly": 0}
 
 # Fly-phase asymmetry: reward entering fly (3 pieces) when the opponent hasn't yet,
 # and penalise giving the opponent fly while we remain in move phase.
@@ -146,7 +147,7 @@ def evaluate(
         + w[5]  *  win_cfg
         + mob_w                  * (our_mob - opp_mob)
         + _THREAT_WEIGHTS[phase] * (our_thr - opp_thr)
-        + 2 * (our_pos - opp_pos)
+        + 4 * (our_pos - opp_pos)
         + _CYCLE_WEIGHTS[phase]  * (our_cycle - opp_cycle)
         + _FORK_WEIGHTS[phase]   * (our_fork  - opp_fork)
         + _HERD_WEIGHTS[phase]   * (our_herd  - opp_herd)
@@ -224,12 +225,29 @@ def _mobility(board: BoardState, color: str) -> int:
 
 
 def _mill_threats(board: BoardState, color: str) -> int:
-    """Count 2-piece open mills (can be closed in one move)."""
+    """Count mills closeable in exactly one move (phase-aware reachability).
+
+    Stricter than _two_configs: in move phase only counts mills where a friendly
+    piece is actually adjacent to the empty closing square.  In place phase any
+    two-config is closeable (can always place there).  In fly any empty square
+    is reachable.  This makes the threat weight correctly reflect immediate danger
+    rather than mere structural presence.
+    """
+    phase = get_game_phase(board, color)
+    can_place = board.pieces_placed.get(color, 0) < 9
     count = 0
     for mill in MILLS:
         vals = [board.positions[p] for p in mill]
         if vals.count(color) == 2 and vals.count("") == 1:
-            count += 1
+            empty = next(p for p in mill if board.positions[p] == "")
+            if phase == "place":
+                reachable = can_place
+            elif phase == "fly":
+                reachable = True
+            else:
+                reachable = any(board.positions[nb] == color for nb in ADJACENCY[empty])
+            if reachable:
+                count += 1
     return count
 
 
@@ -321,21 +339,27 @@ def _encirclement(board: BoardState, color: str) -> int:
 def _late_game_danger(board: BoardState, color: str) -> int:
     """Penalty when the position is structurally hopeless despite surface mobility.
 
-    A side with ≤4 pieces facing an opponent with ≥6 pieces and ≥2 closed mills
-    is in severe danger even if it can fly (high surface mobility).  The normal
-    eval can under-report this because fly-phase mobility inflates the weaker
-    side's score.  Apply a large negative adjustment to correct for this.
+    Two danger patterns:
+    1. Material + mill imbalance: ≤5 own pieces vs opponent with ≥2 closed mills.
+       Fly mobility inflates the losing side's score; this corrects for that.
+    2. Cycling mill dominance: opponent has ≥2 cycling-ready mills (can force a
+       capture every 2 turns).  This is nearly always decisive.
     """
     opp = "B" if color == "W" else "W"
     our_pieces = board.pieces_on_board[color]
     opp_pieces = board.pieces_on_board[opp]
     opp_mills  = _closed_mills(board, opp)
+    penalty = 0
 
-    if our_pieces <= 4 and opp_pieces >= 6 and opp_mills >= 2:
-        severity = opp_mills * 150 + (opp_pieces - our_pieces) * 40
-        return -severity
+    if our_pieces <= 5 and opp_mills >= 2:
+        severity = opp_mills * 200 + max(0, opp_pieces - our_pieces) * 60
+        penalty -= severity
 
-    return 0
+    opp_cycle = _mill_cycle_ready(board, opp)
+    if opp_cycle >= 2:
+        penalty -= opp_cycle * 130
+
+    return penalty
 
 
 # ── Tactical urgency (Stage 5.12) ────────────────────────────────────────────
