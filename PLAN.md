@@ -27,12 +27,12 @@
 | 5.24 | Endgame Position Memory | ✅ Complete |
 | 5.25 | AI Personality Selector in Header | ✅ Complete |
 | 5.26 | Setup Position Button in Header | ✅ Complete |
-| 5.27 | Game Counter & Automatic Library Consolidation | ⬜ Planned |
+| 5.27 | Game Counter & Automatic Library Consolidation | ✅ Complete |
 | 6 | Self-Play Training Loop | ✅ Complete |
 | 7 | Heuristic Parameter Evolution | ✅ Complete |
 | 8 | Adaptive Difficulty | ✅ Complete |
 | 9 | Tournament / Match Mode | ✅ Complete |
-| 10 | Player Profiles & Persistent Stats | ⬜ Planned |
+| 10 | Player Profiles & Persistent Stats | ✅ Complete |
 | 11 | Endgame Self-Play | ✅ Complete |
 | 12 | Advanced Search (MCTS / NN) | ⬜ Stretch |
 

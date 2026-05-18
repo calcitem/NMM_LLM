@@ -30,6 +30,9 @@ let setupBrush      = "";     // currently selected palette piece: ""|"W"|"B"
 let sessionGames    = 0;      // games finished this session; unlocks tournament at QUALIFY_GAMES
 const QUALIFY_GAMES = 3;      // mirror of server TournamentState.QUALIFY_GAMES
 
+// ── Player profile state ──────────────────────────────────────────────────────
+let playerName = localStorage.getItem("nmm_player_name") || "";
+
 // ── AI weight defaults (Stage 5.13) ──────────────────────────────────────────
 
 const WEIGHT_DEFAULTS = [
@@ -283,6 +286,25 @@ document.addEventListener("DOMContentLoaded", () => {
   renderIdle();
   _loadOpenings();
 
+  // ── Left column tab toggle ────────────────────────────────────────────
+  $("tab-chat").addEventListener("click", () => _switchLeftTab("chat"));
+  $("tab-profile").addEventListener("click", () => _switchLeftTab("profile"));
+
+  // ── Player profile ────────────────────────────────────────────────────
+  if (playerName) {
+    $("player-name-input").value = playerName;
+    _fetchAndRenderProfile(playerName);
+  }
+  $("btn-save-profile").addEventListener("click", () => {
+    const name = $("player-name-input").value.trim();
+    if (!name) return;
+    playerName = name;
+    localStorage.setItem("nmm_player_name", name);
+    $("profile-empty-msg").hidden = true;
+    _fetchAndRenderProfile(name);
+    addCommentary("Game", `Profile saved for "${name}".`, "ai");
+  });
+
   // Header "New Game" button mirrors sidebar button
   $("btn-new-game-header").addEventListener("click", () => $("btn-new-game").click());
 
@@ -365,12 +387,13 @@ function startNewGame() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({
-      type:       "new_game",
-      human_color: hc,
-      difficulty:  diff,
-      vs_human:    vs,
-      use_llm:     useLlm,
-      ai_weights:  _getWeights(),
+      type:        "new_game",
+      human_color:  hc,
+      difficulty:   diff,
+      vs_human:     vs,
+      use_llm:      useLlm,
+      ai_weights:   _getWeights(),
+      player_name:  playerName,
     }));
     $("settings-panel").hidden = true;
   };
@@ -706,6 +729,16 @@ function handleMessage(msg) {
 
     case "tournament_complete":
       _handleTournamentComplete(msg);
+      break;
+
+    case "profile_update":
+      _renderProfile(msg);
+      break;
+
+    case "library_reload":
+      addCommentary("Game",
+        `Library updated: ${msg.game_count} games, ${msg.traj_entries} trajectory entries, ` +
+        `${msg.endgame_positions} endgame positions.`, "ai");
       break;
 
     case "error":
@@ -1436,4 +1469,44 @@ function _handleTournamentComplete(msg) {
   addCommentary("Tournament",
     `Tournament complete! Rank: ${msg.rank_label}  |  ` +
     `Points: ${msg.points}/${msg.max_points}  |  Elo: ${msg.player_elo}`, "ai");
+}
+
+// ── Left column tab toggle ────────────────────────────────────────────────────
+
+function _switchLeftTab(tab) {
+  const isChat = tab === "chat";
+  $("chat-view").hidden    = !isChat;
+  $("profile-view").hidden = isChat;
+  $("tab-chat").classList.toggle("left-tab-active", isChat);
+  $("tab-profile").classList.toggle("left-tab-active", !isChat);
+}
+
+// ── Player profile helpers ────────────────────────────────────────────────────
+
+function _fetchAndRenderProfile(name) {
+  fetch(`/api/profile/${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(p => { if (!p.error) _renderProfile(p); })
+    .catch(() => {});
+}
+
+function _renderProfile(p) {
+  const stats = $("profile-stats");
+  const empty = $("profile-empty-msg");
+  if (!stats) return;
+  stats.hidden = false;
+  if (empty) empty.hidden = true;
+
+  $("profile-elo").textContent     = p.elo ?? 1000;
+  $("profile-games").textContent   = p.games_played ?? 0;
+  $("profile-wins").textContent    = p.wins ?? 0;
+  $("profile-losses").textContent  = p.losses ?? 0;
+  $("profile-draws").textContent   = p.draws ?? 0;
+
+  const gp = p.games_played ?? 0;
+  const wr = gp > 0 ? Math.round(((p.wins ?? 0) / gp) * 100) + "%" : "—";
+  $("profile-winrate").textContent    = wr;
+  $("profile-difficulty").textContent = p.current_difficulty ?? 3;
+  $("profile-last-played").textContent = p.last_played ?? "—";
+  $("profile-created").textContent     = p.created_at ?? "—";
 }

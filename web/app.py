@@ -53,6 +53,7 @@ from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
 from ai.endgame_db import EndgameDB
 from ai.starting_play import combined_family_summary
+from ai.player_profile import PlayerProfile, load_profile, save_profile, is_valid_name
 
 # Load trajectory DB once at startup — updated incrementally as games complete.
 _trajectory_db    = TrajectoryDB(_ROOT / "data" / "games")
@@ -99,6 +100,56 @@ def _load_settings() -> dict:
         return json.loads((_ROOT / "data" / "settings.json").read_text())
     except Exception:
         return {}
+
+
+# ── Library consolidation (Stage 5.27) ───────────────────────────────────────
+
+_CONSOLIDATION_INTERVAL = 50  # games between automatic DB reloads
+_GAME_COUNT_PATH = _ROOT / "data" / "game_count.json"
+
+
+def _get_consolidated_count() -> int:
+    try:
+        return json.loads(_GAME_COUNT_PATH.read_text()).get("last_consolidated", 0)
+    except Exception:
+        return 0
+
+
+async def _maybe_consolidate(ws: "WebSocket") -> None:
+    games_dir = _ROOT / "data" / "games"
+    count = len(list(games_dir.glob("*.jsonl")))
+    last  = await asyncio.to_thread(_get_consolidated_count)
+    if count > 0 and (count - last) >= _CONSOLIDATION_INTERVAL:
+        asyncio.create_task(_consolidate_libraries(ws, count))
+
+
+async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
+    global _trajectory_db, _endgame_db
+    try:
+        log.info("Library consolidation: %d games", game_count)
+        new_tdb = TrajectoryDB(_ROOT / "data" / "games")
+        await asyncio.to_thread(new_tdb.load, bad_moves_path=_BAD_MOVES_PATH)
+        _trajectory_db = new_tdb
+
+        new_edb = EndgameDB(_ROOT / "data" / "games")
+        await asyncio.to_thread(new_edb.load)
+        _endgame_db = new_edb
+
+        _GAME_COUNT_PATH.write_text(json.dumps(
+            {"total": game_count, "last_consolidated": game_count}, indent=2
+        ))
+        log.info(
+            "Library reload done: %d traj entries, %d endgame positions",
+            _trajectory_db.entry_count, _endgame_db.position_count,
+        )
+        await _send(ws, {
+            "type":              "library_reload",
+            "game_count":        game_count,
+            "traj_entries":      _trajectory_db.entry_count,
+            "endgame_positions": _endgame_db.position_count,
+        })
+    except Exception as exc:
+        log.error("Library consolidation failed: %s", exc, exc_info=True)
 
 
 # ── Adaptive Difficulty Tracker ───────────────────────────────────────────────
@@ -396,6 +447,30 @@ async def save_personality(name: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/profile/{name}")
+async def get_profile(name: str):
+    from fastapi.responses import JSONResponse
+    if not is_valid_name(name):
+        return JSONResponse({"error": "Invalid name"}, status_code=400)
+    profile = await asyncio.to_thread(load_profile, name)
+    return JSONResponse(profile.to_dict())
+
+
+@app.post("/api/profile/{name}")
+async def post_profile(name: str, request: Request):
+    from fastapi.responses import JSONResponse
+    if not is_valid_name(name):
+        return JSONResponse({"error": "Invalid name"}, status_code=400)
+    body = await request.json()
+    profile = await asyncio.to_thread(load_profile, name)
+    for field in ("elo", "wins", "losses", "draws", "current_difficulty",
+                  "win_streak", "loss_streak", "extra_blunder"):
+        if field in body:
+            setattr(profile, field, type(getattr(profile, field))(body[field]))
+    await asyncio.to_thread(save_profile, profile)
+    return JSONResponse(profile.to_dict())
+
+
 @app.get("/api/openings")
 async def list_openings():
     from fastapi.responses import JSONResponse
@@ -562,6 +637,7 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
             record["adaptive_softened"] = True
         await asyncio.to_thread(session.coordinator.on_game_end, record)
         await _commentary(ws, session)
+        asyncio.create_task(_maybe_consolidate(ws))
 
 
 def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
@@ -661,10 +737,26 @@ async def ws_endpoint(websocket: WebSocket):
     adaptive = AdaptiveTracker()   # persists across new_game messages on this connection
     session_games: int = 0
     tournament: Optional[TournamentState] = None
+    player_name: str = ""          # set from new_game; persists for the connection
 
     async def _after_game_end() -> None:
         nonlocal session_games
         session_games += 1
+
+        # Update player profile on every non-tournament human-vs-AI game
+        if player_name and session and not session.vs_human and not session.is_tournament_game:
+            human_won = (
+                None if not session.engine.winner
+                else session.engine.winner == session.human_color
+            )
+            diff = session.game_ai.difficulty if session.game_ai else 3
+            profile = await asyncio.to_thread(load_profile, player_name)
+            profile.record_result(human_won, diff)
+            if session.adaptive:
+                profile.sync_adaptive(session.adaptive)
+            await asyncio.to_thread(save_profile, profile)
+            await _send(websocket, {"type": "profile_update", **profile.to_dict()})
+
         if tournament is None or session is None or not session.is_tournament_game:
             return
         if tournament.complete:
@@ -746,6 +838,21 @@ async def ws_endpoint(websocket: WebSocket):
                     and tournament is not None
                     and not tournament.complete
                 )
+
+                # Player profile — load once per connection on first named game
+                _name_in_msg = msg.get("player_name", "").strip()[:50]
+                if _name_in_msg and is_valid_name(_name_in_msg):
+                    player_name = _name_in_msg
+                    if not adaptive._ever_played:
+                        _profile = await asyncio.to_thread(load_profile, player_name)
+                        # Restore only the difficulty level — streaks/blunder reset per session.
+                        adaptive.base_difficulty    = _profile.current_difficulty
+                        adaptive.current_difficulty = _profile.current_difficulty
+                        log.info(
+                            "Profile loaded: player=%r elo=%d diff=%d",
+                            player_name, _profile.elo, _profile.current_difficulty,
+                        )
+
                 if is_tournament:
                     _tnxt   = tournament.current
                     hc      = _tnxt["human_color"]
@@ -754,7 +861,7 @@ async def ws_endpoint(websocket: WebSocket):
                 else:
                     hc_raw  = msg.get("human_color", "W")
                     hc      = _random.choice(["W", "B"]) if hc_raw == "R" else hc_raw
-                    diff    = max(1, min(10, int(msg.get("difficulty", 3))))
+                    diff    = max(1, min(10, int(msg.get("difficulty", adaptive.current_difficulty))))
                     _t_pers = ""
                 vs_human  = bool(msg.get("vs_human", False))
                 use_llm   = bool(msg.get("use_llm", True))

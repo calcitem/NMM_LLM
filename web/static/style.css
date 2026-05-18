@@ -112,6 +112,47 @@ main {
   overflow: hidden;
 }
 
+/* ── Left column tabs ───────────────────────────────────────────────── */
+#left-tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.left-tab {
+  flex: 1;
+  padding: 5px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: .82rem;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.left-tab:hover { border-color: var(--accent); color: var(--accent); }
+.left-tab-active {
+  border-color: var(--tan);
+  color: var(--tan);
+  background: #1e1a12;
+}
+
+/* Chat view and profile view fill the remaining column height */
+#chat-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+#profile-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* ── Commentary column (left) ────────────────────────────────────────── */
 #commentary-col {
   display: flex;
