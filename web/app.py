@@ -135,6 +135,32 @@ async def save_weights(request: Request):
     return JSONResponse({"ok": True})
 
 
+_PERSONALITIES_DIR = _ROOT / "data" / "personalities"
+_VALID_PERSONALITIES = {"balanced", "aggressive", "defensive", "positional", "scholar", "chaos", "custom"}
+
+
+@app.get("/api/personalities/{name}")
+async def get_personality(name: str):
+    from fastapi.responses import JSONResponse
+    if name not in _VALID_PERSONALITIES:
+        return JSONResponse({}, status_code=404)
+    path = _PERSONALITIES_DIR / f"{name}.json"
+    if path.exists():
+        return JSONResponse(json.loads(path.read_text()))
+    return JSONResponse({})
+
+
+@app.post("/api/personalities/{name}")
+async def save_personality(name: str, request: Request):
+    from fastapi.responses import JSONResponse
+    if name not in _VALID_PERSONALITIES:
+        return JSONResponse({"error": "unknown personality"}, status_code=400)
+    _PERSONALITIES_DIR.mkdir(parents=True, exist_ok=True)
+    body = await request.json()
+    (_PERSONALITIES_DIR / f"{name}.json").write_text(json.dumps(body, indent=2))
+    return JSONResponse({"ok": True})
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _state(session: Session) -> dict:

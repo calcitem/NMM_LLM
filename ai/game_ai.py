@@ -91,6 +91,8 @@ class GameAI:
         recognition=None,           # RecognitionResult  — Stage 4
         endgame_state=None,         # EndgameState        — Stage 5
         trajectory_hints=None,      # dict[str, float] from TrajectoryDB.query()
+        top_n: int = 1,             # if >1, pick randomly from top-N moves (self-play noise)
+        fast_early_game: bool = False,  # skip the 4s early-game budget (self-play mode)
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
         self._force_stop = False
@@ -113,33 +115,43 @@ class GameAI:
         # Early-game fast path: while few pieces are on the board the tree is
         # tiny — cap the search to a short budget regardless of difficulty.
         total_on_board = sum(board.pieces_on_board.values())
-        if total_on_board < _EARLY_GAME_PIECE_THRESHOLD:
+        if total_on_board < _EARLY_GAME_PIECE_THRESHOLD and not fast_early_game:
             return self._iterative_deepen(
                 board, _EARLY_GAME_TIME,
-                recognition=recognition, trajectory_hints=trajectory_hints,
+                recognition=recognition, trajectory_hints=trajectory_hints, top_n=top_n,
             )
 
         if self.difficulty in _TIME_LIMIT:
+            time_budget = 2.0 if fast_early_game else _TIME_LIMIT[self.difficulty]
             return self._iterative_deepen(
-                board, _TIME_LIMIT[self.difficulty],
-                recognition=recognition, trajectory_hints=trajectory_hints,
+                board, time_budget,
+                recognition=recognition, trajectory_hints=trajectory_hints, top_n=top_n,
             )
 
         depth = _DEPTH_TABLE[self.difficulty]
 
         # Deeper search in endgame for better tactical accuracy.
-        if endgame_state is not None and endgame_state.active:
+        # Skip in fast self-play mode to keep per-move time bounded.
+        if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
 
-        scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
+        use_adjustments = (
+            (recognition is not None and recognition.status not in ("novel", "inactive"))
+            or bool(trajectory_hints)
+        ) and self._weights.opening_adherence > 0
+        if use_adjustments:
+            scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
+            if recognition is not None:
+                scored = self._apply_opening_adjustments(scored, recognition)
+            if trajectory_hints:
+                scored = self._apply_trajectory_hints(scored, trajectory_hints)
+            if top_n > 1:
+                scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
+                return random.choice(scored_sorted[:top_n])[0]
+            return max(scored, key=lambda x: x[1])[0]
 
-        if recognition is not None:
-            scored = self._apply_opening_adjustments(scored, recognition)
-
-        if trajectory_hints:
-            scored = self._apply_trajectory_hints(scored, trajectory_hints)
-
-        return max(scored, key=lambda x: x[1])[0]
+        move, _ = self._root_search(board, depth, top_n=top_n)
+        return move
 
     # Time budget for score_move() — kept short because it is only used for relative
     # ranking (is this move good or bad?), not for the actual played move.
@@ -266,24 +278,32 @@ class GameAI:
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    def _root_search(self, board: BoardState, depth: int) -> Tuple[dict, int]:
-        """Search all root moves and return (best_move, best_score)."""
+    def _root_search(self, board: BoardState, depth: int,
+                     top_n: int = 1) -> Tuple[dict, int]:
+        """Search all root moves and return (best_move, best_score).
+        When top_n > 1, pick randomly from the top-N scoring moves."""
         moves = get_all_legal_moves(board)
         self._nodes = 0
         best_move = moves[0]
         best_score = -INF
         alpha = -INF
+        all_scored: list[Tuple[dict, int]] = []
 
         for move in moves:
             nb    = board.apply_move(move)
             score = -self._negamax(nb, depth - 1, -INF, -alpha)
             score += tactical_move_bonus(board, nb, self.color, self._weights)
+            if top_n > 1:
+                all_scored.append((move, score))
             if score > best_score:
                 best_score = score
                 best_move = move
             if best_score > alpha:
                 alpha = best_score
 
+        if top_n > 1 and all_scored:
+            top = sorted(all_scored, key=lambda x: x[1], reverse=True)[:top_n]
+            best_move = random.choice(top)[0]
         return best_move, best_score
 
     def _negamax(
@@ -368,6 +388,7 @@ class GameAI:
         time_limit: float = 10.0,
         recognition=None,
         trajectory_hints=None,
+        top_n: int = 1,
     ) -> dict:
         """
         Iterative deepening up to `time_limit` seconds.
@@ -396,9 +417,13 @@ class GameAI:
                         scored = self._apply_opening_adjustments(scored, recognition)
                     if trajectory_hints:
                         scored = self._apply_trajectory_hints(scored, trajectory_hints)
-                    best_move = max(scored, key=lambda x: x[1])[0]
+                    if top_n > 1:
+                        scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
+                        best_move = random.choice(scored_sorted[:top_n])[0]
+                    else:
+                        best_move = max(scored, key=lambda x: x[1])[0]
                 else:
-                    move, _ = self._root_search(board, depth)
+                    move, _ = self._root_search(board, depth, top_n=top_n)
                     best_move = move      # only update if depth completed cleanly
             except _SearchAbort:
                 break                     # deadline hit mid-depth; keep previous best

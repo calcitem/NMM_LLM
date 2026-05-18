@@ -644,6 +644,65 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 
 - `tools/self\\\_test.py` — Updated to use shared Ollama URL config (see Stage 5.11-A).
 
+### Stage 5.18 — Per-Personality Saved Settings ⬜
+
+**Goal:** Every named personality (and "Custom") has its own persistent settings file. Editing weights and clicking Save stores them to that personality's file; loading a personality restores from its file.
+
+**User flow:**
+1. Select a personality from the AI Tuning panel.
+2. Move any sliders; click **Save Settings** — values are written to `data/personalities/<name>.json`.
+3. Next session: selecting the same personality auto-loads the saved file, not the coded defaults.
+4. **Custom** personality works the same way — independent file from any named preset.
+5. Reset button restores the *original* coded defaults (not the saved file).
+
+**Implementation:**
+- `web/app.py` — `GET /api/personalities/<name>` returns the saved personality JSON (or built-in defaults if no file exists). `POST /api/personalities/<name>` writes the JSON to `data/personalities/<name>.json`.
+- `web/static/game.js` — On personality selection: `fetch('/api/personalities/<name>')` and apply the returned weights to all sliders. On Save Settings: `fetch POST /api/personalities/<personality>` with current slider values.
+- `data/personalities/` directory (auto-created on first save).
+
+**Deliverables:**
+- `web/app.py` — GET/POST `/api/personalities/<name>` endpoints.
+- `web/static/game.js` — Personality load/save wiring.
+- `data/personalities/` directory support.
+
+### Stage 5.19 — Commentary Feed Improvements ⬜
+
+**Goal:** New commentary messages appear at the top (most-recent-first). The feed is split into two sections: AI internal monologue (AI vs AI strategy discussion) and Player Chat (AI ↔ human conversation).
+
+**Implementation:**
+- `web/static/game.js` — `addCommentaryLine()` prepends to `commentary-feed` instead of appending (`insertBefore(el, feed.firstChild)`). Separate containers: `#commentary-ai-feed` and `#commentary-chat-feed`.
+- `web/templates/index.html` — Two labelled sub-sections inside the commentary panel.
+- `web/static/style.css` — Divider styling between the two feeds.
+
+### Stage 5.20 — Position Strength Late-Game Fix ⬜
+
+**Goal:** When a player is down to 3–4 pieces and the opponent has 6–7 pieces with 3 open mills or a double-parallel mill, the position-strength eval should reflect the losing side's danger (not give false hope from mobility).
+
+**Root cause:** The tanh normalisation uses a flat scale per phase; a 3-piece player who can fly anywhere scores high mobility, which inflates their eval beyond what the real material+threat situation warrants.
+
+**Fix:**
+- `ai/heuristics.py` — Add a late-game danger penalty: when one side has ≤4 pieces and the opponent has ≥6 pieces with ≥2 open mills, apply a large negative adjustment (e.g. `−800`) to the weaker side's score before tanh normalisation.
+- `ai/heuristics.py` — Reduce `TANH_SCALE` for the fly phase from 280 to ~180 so extreme positions are less compressed near ±1.
+
+### Stage 5.21 — Bad Move Button Fix ⬜
+
+**Goal:** After pressing "Bad Move", the AI must not replay the same bad move in its next attempt. Currently the ban is saved to `bad_moves.json` but the in-memory TrajectoryDB in the running server instance is not queried for bans when the coordinator re-runs `deliberate()`.
+
+**Root cause:** The coordinator queries the TrajectoryDB via `trajectory_hints` before scoring, but the ban only applies as a −0.5 override *within* the TrajectoryDB. If the AI's root search at depth ≥5 finds the banned move optimal through pure alpha-beta, the trajectory hint penalty (scaled from −0.5) may not be large enough to override the heuristic score.
+
+**Fix:**
+- `web/app.py` `bad_move` handler — after restoring engine state, pass `banned_moves: set[str]` to the coordinator so it can be injected as a hard exclusion (not just a score penalty).
+- `ai/coordinator.py` — Accept `banned_moves` in `deliberate()`; filter them from `get_all_legal_moves()` result before scoring.
+- `ai/game_ai.py` — Accept `excluded_moves: set[str]` in `choose_move()`; skip any move whose notation matches.
+
+### Stage 5.22 — Self-Play Book Variety ⬜
+
+**Goal:** Self-play games should start from different opening positions, not all converge on the single highest-UCB1 opening. Each game should force a different book start.
+
+**Implementation:**
+- `tools/self_play.py` — Before each game, call `book.select_opening(ai_color='W', exploration_rate=1.5)` (high exploration) and lock the first 4 placement moves to that opening's sequence. Both AIs follow the forced start, then play freely.
+- Or: keep a round-robin index over all openings for the session and cycle through them.
+
 ### Stage 5.16 — Starting Play Variants & Opening Database ⬜
 
 **Goal:** Extend opening recognition into a richer, staged starting-play system that identifies early deviations, stores named variant lines, and lays the groundwork for a searchable opening database the AI can consult by structure, move sequence, and outcome.

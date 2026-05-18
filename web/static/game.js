@@ -69,47 +69,47 @@ const PERSONALITIES = [
 
 const PERSONALITY_PRESETS = {
   balanced: {
-    close_mill: 500, cycling_mill: 300, block_opponent_mill: 400,
+    close_mill: 500, cycling_mill: 50, block_opponent_mill: 400,
     stop_opponent_mills: 450, feeder_diamond: 200, mill_wrapping: 150,
     cardinal_block: 400, scatter_placement: 100, long_term_position: 100,
     mill_count_scale: 100, mobility_scale: 100, blocked_scale: 100,
-    make_mistakes: 0, opening_adherence: 50,
+    make_mistakes: 0, opening_adherence: 30,
   },
-  // Hunts mills relentlessly, builds cycling setups, ignores wrapping defense.
+  // Hunts mills relentlessly; ignores cycling in favour of immediate mill closure.
   aggressive: {
-    close_mill: 900, cycling_mill: 600, block_opponent_mill: 150,
+    close_mill: 900, cycling_mill: 75, block_opponent_mill: 150,
     stop_opponent_mills: 150, feeder_diamond: 350, mill_wrapping: 50,
     cardinal_block: 500, scatter_placement: 25, long_term_position: 70,
     mill_count_scale: 180, mobility_scale: 50, blocked_scale: 80,
-    make_mistakes: 0, opening_adherence: 30,
+    make_mistakes: 0, opening_adherence: 15,
   },
   // Smothers every opponent threat; wraps opponent mills; builds resilient diamond setups.
   defensive: {
-    close_mill: 300, cycling_mill: 200, block_opponent_mill: 850,
+    close_mill: 300, cycling_mill: 25, block_opponent_mill: 850,
     stop_opponent_mills: 800, feeder_diamond: 350, mill_wrapping: 350,
     cardinal_block: 275, scatter_placement: 100, long_term_position: 150,
     mill_count_scale: 75, mobility_scale: 200, blocked_scale: 250,
-    make_mistakes: 0, opening_adherence: 60,
+    make_mistakes: 0, opening_adherence: 25,
   },
-  // Spreads out, controls cross nodes, builds long-term cycling structures.
+  // Spreads out, controls cross nodes, builds long-term structures.
   positional: {
-    close_mill: 400, cycling_mill: 400, block_opponent_mill: 350,
+    close_mill: 400, cycling_mill: 60, block_opponent_mill: 350,
     stop_opponent_mills: 350, feeder_diamond: 300, mill_wrapping: 250,
     cardinal_block: 500, scatter_placement: 450, long_term_position: 200,
     mill_count_scale: 80, mobility_scale: 300, blocked_scale: 150,
-    make_mistakes: 0, opening_adherence: 80,
+    make_mistakes: 0, opening_adherence: 40,
   },
   // Methodical opening, solid diamond structures, balanced wrapping awareness.
   scholar: {
-    close_mill: 450, cycling_mill: 350, block_opponent_mill: 400,
+    close_mill: 450, cycling_mill: 50, block_opponent_mill: 400,
     stop_opponent_mills: 400, feeder_diamond: 250, mill_wrapping: 200,
     cardinal_block: 450, scatter_placement: 400, long_term_position: 175,
     mill_count_scale: 100, mobility_scale: 200, blocked_scale: 125,
-    make_mistakes: 0, opening_adherence: 90,
+    make_mistakes: 0, opening_adherence: 50,
   },
   // Scatters pieces randomly, ignores strategy, makes frequent blunders.
   chaos: {
-    close_mill: 150, cycling_mill: 100, block_opponent_mill: 150,
+    close_mill: 150, cycling_mill: 25, block_opponent_mill: 150,
     stop_opponent_mills: 150, feeder_diamond: 75, mill_wrapping: 25,
     cardinal_block: 0, scatter_placement: 500, long_term_position: 10,
     mill_count_scale: 50, mobility_scale: 50, blocked_scale: 50,
@@ -122,33 +122,29 @@ const PERSONALITY_PRESETS = {
 document.addEventListener("DOMContentLoaded", () => {
   board = new Board($("board-svg"), onNodeClick);
 
-  // Render AI weight sliders then apply any previously-saved weights from server.
+  // Render AI weight sliders then load saved weights for the active personality.
   _buildWeightSliders();
   fetch("/api/weights").then(r => r.json()).then(saved => {
-    if (saved && Object.keys(saved).length > 0) {
-      WEIGHT_DEFAULTS.forEach(w => {
-        if (w.key in saved) {
-          const el = $(`slider-${w.key}`);
-          if (el) { el.value = saved[w.key]; _updateSliderLabel(w.key, saved[w.key]); }
-        }
-      });
-      const ps = $("sel-personality");
-      if (ps) ps.value = _matchPersonality(saved) ?? "custom";
-    }
-  }).catch(() => {});
+    const personality = (saved && _matchPersonality(saved)) ?? "balanced";
+    _loadPersonality(personality);
+  }).catch(() => _loadPersonality("balanced"));
 
   $("btn-reset-weights").addEventListener("click", () => {
-    _applyPersonality("balanced");
     const ps = $("sel-personality");
-    if (ps) ps.value = "balanced";
+    const name = ps?.value ?? "balanced";
+    _applyPersonality(name !== "custom" ? name : "balanced");
+    if (ps && name === "custom") ps.value = "balanced";
   });
   $("btn-save-weights").addEventListener("click", () => {
-    fetch("/api/weights", {
+    const ps    = $("sel-personality");
+    const name  = ps?.value ?? "custom";
+    const body  = _getWeights();
+    fetch(`/api/personalities/${name}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(_getWeights()),
+      body: JSON.stringify(body),
     }).then(r => r.json()).then(() => {
-      addCommentary("Game", "AI settings saved — will apply from next new game.");
+      addCommentary("Game", `Settings saved for "${name}" — applied from next new game.`);
     }).catch(() => addCommentary("Error", "Could not save settings."));
   });
 
@@ -716,12 +712,9 @@ function _buildWeightSliders() {
   const pSelect = document.createElement("select");
   pSelect.id = "sel-personality";
 
-  // "Custom" option appears only when sliders are tweaked manually
   const customOpt = document.createElement("option");
   customOpt.value = "custom";
-  customOpt.textContent = "Custom";
-  customOpt.disabled = true;
-  customOpt.hidden   = true;
+  customOpt.textContent = "Custom (saved separately)";
   pSelect.appendChild(customOpt);
 
   PERSONALITIES.forEach(p => {
@@ -733,7 +726,7 @@ function _buildWeightSliders() {
   pSelect.value = "balanced";
 
   pSelect.addEventListener("change", () => {
-    if (pSelect.value !== "custom") _applyPersonality(pSelect.value);
+    if (pSelect.value !== "custom") _loadPersonality(pSelect.value);
   });
 
   pRow.appendChild(pLabel);
@@ -797,6 +790,26 @@ function _applyPersonality(name) {
     const el  = $(`slider-${w.key}`);
     if (el) { el.value = val; _updateSliderLabel(w.key, val); }
   });
+}
+
+function _loadPersonality(name) {
+  fetch(`/api/personalities/${name}`)
+    .then(r => r.json())
+    .then(saved => {
+      if (saved && Object.keys(saved).length > 0) {
+        WEIGHT_DEFAULTS.forEach(w => {
+          if (w.key in saved) {
+            const el = $(`slider-${w.key}`);
+            if (el) { el.value = saved[w.key]; _updateSliderLabel(w.key, saved[w.key]); }
+          }
+        });
+      } else if (name !== "custom") {
+        _applyPersonality(name);
+      }
+      const ps = $("sel-personality");
+      if (ps) ps.value = name;
+    })
+    .catch(() => { if (name !== "custom") _applyPersonality(name); });
 }
 
 function _updateSliderLabel(key, value) {

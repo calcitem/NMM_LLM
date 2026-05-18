@@ -82,42 +82,42 @@ from ai.memory_manager import MemoryManager
 
 PERSONALITIES: dict[str, dict] = {
     "balanced": {
-        "close_mill": 500, "cycling_mill": 300, "block_opponent_mill": 400,
+        "close_mill": 500, "cycling_mill": 50, "block_opponent_mill": 400,
         "stop_opponent_mills": 450, "feeder_diamond": 200, "mill_wrapping": 150,
         "cardinal_block": 400, "scatter_placement": 100, "long_term_position": 100,
         "mill_count_scale": 100, "mobility_scale": 100, "blocked_scale": 100,
-        "make_mistakes": 0, "opening_adherence": 50,
+        "make_mistakes": 0, "opening_adherence": 30,
     },
     "aggressive": {
-        "close_mill": 900, "cycling_mill": 600, "block_opponent_mill": 150,
+        "close_mill": 900, "cycling_mill": 75, "block_opponent_mill": 150,
         "stop_opponent_mills": 150, "feeder_diamond": 350, "mill_wrapping": 50,
         "cardinal_block": 500, "scatter_placement": 25, "long_term_position": 70,
         "mill_count_scale": 180, "mobility_scale": 50, "blocked_scale": 80,
-        "make_mistakes": 0, "opening_adherence": 30,
+        "make_mistakes": 0, "opening_adherence": 15,
     },
     "defensive": {
-        "close_mill": 300, "cycling_mill": 200, "block_opponent_mill": 850,
+        "close_mill": 300, "cycling_mill": 25, "block_opponent_mill": 850,
         "stop_opponent_mills": 800, "feeder_diamond": 350, "mill_wrapping": 350,
         "cardinal_block": 275, "scatter_placement": 100, "long_term_position": 150,
         "mill_count_scale": 75, "mobility_scale": 200, "blocked_scale": 250,
-        "make_mistakes": 0, "opening_adherence": 60,
+        "make_mistakes": 0, "opening_adherence": 25,
     },
     "positional": {
-        "close_mill": 400, "cycling_mill": 400, "block_opponent_mill": 350,
+        "close_mill": 400, "cycling_mill": 60, "block_opponent_mill": 350,
         "stop_opponent_mills": 350, "feeder_diamond": 300, "mill_wrapping": 250,
         "cardinal_block": 500, "scatter_placement": 450, "long_term_position": 200,
         "mill_count_scale": 80, "mobility_scale": 300, "blocked_scale": 150,
-        "make_mistakes": 0, "opening_adherence": 80,
+        "make_mistakes": 0, "opening_adherence": 40,
     },
     "scholar": {
-        "close_mill": 450, "cycling_mill": 350, "block_opponent_mill": 400,
+        "close_mill": 450, "cycling_mill": 50, "block_opponent_mill": 400,
         "stop_opponent_mills": 400, "feeder_diamond": 250, "mill_wrapping": 200,
         "cardinal_block": 450, "scatter_placement": 400, "long_term_position": 175,
         "mill_count_scale": 100, "mobility_scale": 200, "blocked_scale": 125,
-        "make_mistakes": 0, "opening_adherence": 90,
+        "make_mistakes": 0, "opening_adherence": 50,
     },
     "chaos": {
-        "close_mill": 150, "cycling_mill": 100, "block_opponent_mill": 150,
+        "close_mill": 150, "cycling_mill": 25, "block_opponent_mill": 150,
         "stop_opponent_mills": 150, "feeder_diamond": 75, "mill_wrapping": 25,
         "cardinal_block": 0, "scatter_placement": 500, "long_term_position": 10,
         "mill_count_scale": 50, "mobility_scale": 50, "blocked_scale": 50,
@@ -213,7 +213,8 @@ def _run_fast_game(
         endgame_state = egr.update(board)
 
         t_move = time.perf_counter()
-        move   = ai.choose_move(board, recognition=recognition, endgame_state=endgame_state)
+        move   = ai.choose_move(board, recognition=recognition, endgame_state=endgame_state,
+                                top_n=2, fast_early_game=True)
         elapsed_move = time.perf_counter() - t_move
 
         moves_log.append({
