@@ -114,8 +114,13 @@ class GameAI:
 
         # Early-game fast path: while few pieces are on the board the tree is
         # tiny — cap the search to a short budget regardless of difficulty.
+        # Early-game cap: for time-limited difficulties only (5+), use a shorter
+        # budget before enough pieces are placed for the full time budget to be useful.
+        # Fixed-depth difficulties (1–4) don't need this; their tree is already small.
         total_on_board = sum(board.pieces_on_board.values())
-        if total_on_board < _EARLY_GAME_PIECE_THRESHOLD and not fast_early_game:
+        if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
+                and not fast_early_game
+                and self.difficulty in _TIME_LIMIT):
             return self._iterative_deepen(
                 board, _EARLY_GAME_TIME,
                 recognition=recognition, trajectory_hints=trajectory_hints, top_n=top_n,

@@ -39,11 +39,11 @@ DEFAULT_WEIGHTS = HeuristicWeights()
 INF: int = 10_000_000
 
 # Phase weights: (closed_mills, blocked_opp, piece_diff, two_cfg, dbl_mill, win_cfg)
-# Classic Kukreja weights — double-mill pivot (1086) only in move phase, not place.
+# dbl_mill was 0 in fly — fixed: double-mill pivots are extremely powerful in fly phase.
 _WEIGHTS = {
     "place": (14,  10, 11, 8,    0,    0),
     "move":  (14,  43, 10, 7,   42,    0),
-    "fly":   (16, 350,  1, 0,    0, 1190),
+    "fly":   (16, 350,  1, 0,   80, 1190),
 }
 
 # Mobility and threat term weights per phase
@@ -53,21 +53,33 @@ _THREAT_WEIGHTS = {"place": 8,  "move": 12, "fly": 18}
 # tanh normalization scales per phase (used by position_eval display, not search)
 TANH_SCALE = {"place": 120, "move": 180, "fly": 280}
 
-# Cross/cardinal nodes have 3 neighbours → more mobile and flexible
-_CROSS_NODES = frozenset({
-    "d7", "d6", "d5",
-    "g4", "f4", "e4",
-    "d1", "d2", "d3",
-    "a4", "b4", "c4",
-})
+# Cardinal nodes: 4 connections each — highest mobility AND participate in 2 mills.
+# These are the middle-ring midpoints: b4, d2, d6, f4.
+_CARDINAL_NODES = frozenset({"b4", "d2", "d6", "f4"})
+
+# Cross nodes: 3 connections each — outer and inner ring midpoints.
+_CROSS_NODES_3 = frozenset({"d7", "g4", "d1", "a4", "d5", "e4", "d3", "c4"})
+
+# Union used for cardinal_block bonus (rewards placing on any high-mobility node).
+_CROSS_NODES = _CARDINAL_NODES | _CROSS_NODES_3
+
+# Inner-ring mills: entirely on the innermost square.  Closing one of these
+# confines your pieces to the inner ring and reduces long-term mobility, so
+# late-placement mill urgency is NOT boosted for these.
+_INNER_MILLS = frozenset(
+    frozenset(m) for m in [
+        ("c5", "d5", "e5"), ("e5", "e4", "e3"),
+        ("e3", "d3", "c3"), ("c3", "c4", "c5"),
+    ]
+)
 
 # Mill-cycle readiness: a closed mill with a slide-out square enables repeated
 # captures (open/close each cycle).  Highest value in fly; still relevant in move.
-_CYCLE_WEIGHTS = {"place": 8, "move": 22, "fly": 45}
+_CYCLE_WEIGHTS = {"place": 8, "move": 22, "fly": 80}
 
 # Fork-threat: a piece in 2+ open mills simultaneously.  Opponent cannot defend
 # both in one move, so one mill closes next turn regardless.
-_FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 28}
+_FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 55}
 
 # Herding / encirclement: own pieces adjacent to each opponent piece.
 # Rewards progressively surrounding opponent pieces to shrink their escape space.
@@ -145,7 +157,7 @@ def evaluate(
     if weights and weights.long_term_position != 100:
         base = int(base * weights.long_term_position / 100)
 
-    return base + endgame_score(board, color, endgame_state)
+    return base + _late_game_danger(board, color) + endgame_score(board, color, endgame_state)
 
 
 # ── Feature helpers ───────────────────────────────────────────────────────────
@@ -222,11 +234,16 @@ def _mill_threats(board: BoardState, color: str) -> int:
 
 
 def _position_value(board: BoardState, color: str) -> int:
-    """Sum of positional scores: cross nodes = 3, corner nodes = 2."""
+    """Positional score: cardinal (4-conn) = 5, cross (3-conn) = 3, corner (2-conn) = 2."""
     total = 0
     for pos in POSITIONS:
         if board.positions[pos] == color:
-            total += 3 if pos in _CROSS_NODES else 2
+            if pos in _CARDINAL_NODES:
+                total += 5
+            elif pos in _CROSS_NODES_3:
+                total += 3
+            else:
+                total += 2
     return total
 
 
@@ -301,6 +318,26 @@ def _encirclement(board: BoardState, color: str) -> int:
     return count
 
 
+def _late_game_danger(board: BoardState, color: str) -> int:
+    """Penalty when the position is structurally hopeless despite surface mobility.
+
+    A side with ≤4 pieces facing an opponent with ≥6 pieces and ≥2 closed mills
+    is in severe danger even if it can fly (high surface mobility).  The normal
+    eval can under-report this because fly-phase mobility inflates the weaker
+    side's score.  Apply a large negative adjustment to correct for this.
+    """
+    opp = "B" if color == "W" else "W"
+    our_pieces = board.pieces_on_board[color]
+    opp_pieces = board.pieces_on_board[opp]
+    opp_mills  = _closed_mills(board, opp)
+
+    if our_pieces <= 4 and opp_pieces >= 6 and opp_mills >= 2:
+        severity = opp_mills * 150 + (opp_pieces - our_pieces) * 40
+        return -severity
+
+    return 0
+
+
 # ── Tactical urgency (Stage 5.12) ────────────────────────────────────────────
 
 def _closeable_mills(board: BoardState, color: str) -> int:
@@ -326,11 +363,14 @@ def _closeable_mills(board: BoardState, color: str) -> int:
 def _cycling_mill_setup(board: BoardState, color: str) -> int:
     """Count pairs of own 2-configs whose empty closing squares are adjacent.
 
-    The classic cycling mill: two mills share a common pivot position.  The pivot
-    slides from E1 (closing mill M1, forcing a capture) to E2 (closing M2, forcing
-    another capture), then back — a capture every two turns.  E1 and E2 must be
-    adjacent so a single piece can shuttle between them.  In fly phase every empty
-    square is reachable so all pairs of 2-configs qualify.
+    This measures the STRUCTURAL SETUP for cycling, not the act of moving back and
+    forth.  A cycling setup exists when two open mills (each needing only one more
+    piece) share adjacent empty closing squares E1 and E2: one piece can slide
+    E1→E2→E1 to force a capture every two turns.  The tactical bonus is only given
+    when this setup is GAINED (delta > 0 between before and after the move), so
+    simply moving a piece back and forth between already-existing positions scores
+    zero.  In fly phase every empty square is reachable so all pairs of 2-configs
+    qualify as potential cycling setups.
     """
     phase = get_game_phase(board, color)
     empties = []
@@ -442,6 +482,21 @@ def tactical_move_bonus(
                     scatter = weights.scatter_placement
                 break
 
+    # Late-placement mill urgency (pieces 7-9, i.e. pieces_placed >= 6).
+    # Closing a mill on the OUTER or MIDDLE ring in this window is critical —
+    # it's likely the last chance to form a mill with good piece placement.
+    # Inner-ring mills are excluded: they confine pieces to the smallest square
+    # and reduce long-term mobility more than they gain from the mill itself.
+    late_mill_bonus = 0
+    if (mills_delta > 0 and get_game_phase(before, color) == "place"
+            and before.pieces_placed.get(color, 0) >= 6):
+        for mill in MILLS:
+            if (all(after.positions[p] == color for p in mill)
+                    and not all(before.positions[p] == color for p in mill)):
+                if frozenset(mill) not in _INNER_MILLS:
+                    late_mill_bonus += 1
+        late_mill_bonus *= int(weights.close_mill * 0.6)  # 60% extra urgency
+
     return (
         weights.close_mill            * mills_delta
         + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
@@ -451,6 +506,7 @@ def tactical_move_bonus(
         + weights.mill_wrapping       * wrap_gain
         + weights.cardinal_block      * (our_cross_gained + opp_cross_lost)
         + scatter
+        + late_mill_bonus
     )
 
 
