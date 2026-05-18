@@ -18,13 +18,19 @@
   <main>
     <!-- Left column: commentary feed + player chat -->
     <div id="commentary-col">
-      <div class="panel-box commentary-panel">
-        <h3>Commentary</h3>
-        <div id="commentary-feed"></div>
+      <!-- Human ↔ LLM section (top) -->
+      <div class="panel-box commentary-panel" id="commentary-human-panel">
+        <h3>MillsAI Chat</h3>
+        <div id="commentary-human"></div>
         <div id="player-chat-row">
           <input type="text" id="player-chat-input" placeholder="Ask MillsAI…" maxlength="300" autocomplete="off">
           <button id="player-chat-send">Send</button>
         </div>
+      </div>
+      <!-- AI ↔ AI discussion section (bottom) -->
+      <div class="panel-box commentary-panel" id="commentary-ai-panel">
+        <h3>AI Discussion</h3>
+        <div id="commentary-ai"></div>
       </div>
     </div>
 
@@ -91,6 +97,20 @@
           <select id="sel-opponent">
             <option value="ai">AI</option>
             <option value="human">Human (local)</option>
+          </select>
+        </div>
+
+        <div class="form-row" id="row-personality">
+          <label for="sel-game-personality">AI Personality</label>
+          <select id="sel-game-personality">
+            <option value="random">Random each game</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="aggressive">Aggressive — The Crusher</option>
+            <option value="defensive">Defensive — The Blocker</option>
+            <option value="positional">Positional — The Strategist</option>
+            <option value="scholar">Scholar — The Bookworm</option>
+            <option value="chaos">Chaos — The Trickster</option>
+            <option value="current">Use current AI Tuning sliders</option>
           </select>
         </div>
 

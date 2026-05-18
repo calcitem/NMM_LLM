@@ -145,7 +145,7 @@ class TrajectoryDB:
             result: dict[str, float] = {}
             for notation, stats in candidates.items():
                 if _norm(notation) in banned:
-                    result[notation] = -0.5   # maximum penalty for explicitly bad moves
+                    result[notation] = -1.0   # hard-ban sentinel (outside statistical range)
                     continue
                 total = stats["total"]
                 if total == 0:
@@ -158,7 +158,7 @@ class TrajectoryDB:
             # Surface any bans that don't appear in statistical data yet
             for bad_n in banned:
                 if bad_n not in result:
-                    result[bad_n] = -0.5
+                    result[bad_n] = -1.0   # hard-ban sentinel
             return result
 
         # Even with no statistical match, surface bans at the shortest depth
@@ -169,7 +169,7 @@ class TrajectoryDB:
             prefix = "|".join(normed[:depth])
             banned = self._bans.get(prefix, set())
             if banned:
-                return {n: -0.5 for n in banned}
+                return {n: -1.0 for n in banned}   # hard-ban sentinel
 
         return {}
 

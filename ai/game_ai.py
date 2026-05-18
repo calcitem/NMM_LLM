@@ -140,10 +140,13 @@ class GameAI:
         if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
 
+        _has_hard_bans = bool(trajectory_hints and any(
+            d <= -1.0 for d in trajectory_hints.values()
+        ))
         use_adjustments = (
             (recognition is not None and recognition.status not in ("novel", "inactive"))
-            or bool(trajectory_hints)
-        ) and self._weights.opening_adherence > 0
+            or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
+        ) or _has_hard_bans
         if use_adjustments:
             scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
             if recognition is not None:
@@ -212,6 +215,8 @@ class GameAI:
             s += f"x{move['capture']}"
         return s
 
+    _HARD_BAN_THRESHOLD = -1.0  # sentinel from TrajectoryDB for user-marked bad moves
+
     def _apply_trajectory_hints(
         self,
         scored: list[tuple[dict, int]],
@@ -219,25 +224,23 @@ class GameAI:
     ) -> list[tuple[dict, int]]:
         """Apply trajectory-database score deltas to a scored move list.
 
-        `hints` maps move notation → float in [-0.5, +0.5] where +0.5 means
-        that move won 100 % of sampled games for the current colour.
-
-        The absolute bonus at 50 % adherence is ±750, growing to ±1500 at
-        100 % — smaller than the opening-book bonus so book lines still
-        dominate in the opening phase, while trajectory hints fill the gap
-        in the mid/late game where the opening book has no opinion.
+        Deltas in [-0.5, +0.5] are statistical hints scaled by opening_adherence.
+        Delta == -1.0 is a hard-ban sentinel from the user's bad-move button:
+        the move receives -INF+1 so it is never chosen regardless of adherence.
         """
         if not hints:
             return scored
         adherence = self._weights.opening_adherence
-        if adherence == 0:
-            return scored
-        scale = int(3000 * adherence / 100)   # max ±1500 at 50 % adherence
+        scale = int(3000 * adherence / 100) if adherence > 0 else 0
         adjusted = []
         for move, raw in scored:
             notation = self._move_notation(move)
             delta    = hints.get(notation, 0.0)
-            adjusted.append((move, raw + int(delta * scale)))
+            if delta <= self._HARD_BAN_THRESHOLD:
+                adjusted.append((move, -INF + 1))  # always last; still legal
+                continue
+            bonus = int(delta * scale) if scale else 0
+            adjusted.append((move, raw + bonus))
         return adjusted
 
     def _apply_opening_adjustments(
@@ -405,12 +408,15 @@ class GameAI:
         self._deadline = time.time() + time_limit
         moves         = get_all_legal_moves(board)
         best_move     = moves[0]
+        _has_hard_bans = bool(trajectory_hints and any(
+            d <= -1.0 for d in trajectory_hints.values()
+        ))
         use_adjustments = (
             (
                 recognition is not None
                 and recognition.status not in ("novel", "inactive")
-            ) or bool(trajectory_hints)
-        ) and self._weights.opening_adherence > 0
+            ) or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
+        ) or _has_hard_bans
 
         for depth in range(2, 20):
             if time.time() >= self._deadline:

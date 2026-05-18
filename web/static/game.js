@@ -36,10 +36,14 @@ const WEIGHT_DEFAULTS = [
     tip: "Bonus for building a diamond/fork structure: four pieces all adjacent to one empty square, forming two simultaneous mill threats. If one anchor is captured, another piece slides in to close the remaining mill." },
   { key: "mill_wrapping",        group: "Tactical",   label: "Mill wrapping",               def: 150, min: 0,   max: 500,  step: 25,
     tip: "Bonus for occupying exit squares around opponent closed mills — wrapping the mill so the opponent's pivot piece has nowhere to slide. High values let the AI accept an opponent mill if it can surround it." },
-  { key: "cardinal_block",       group: "Tactical",   label: "Block cardinal mills",        def: 400, min: 0,   max: 500,  step: 25,
+  { key: "cardinal_block",       group: "Tactical",   label: "Block cardinal mills",        def: 200, min: 0,   max: 500,  step: 25,
     tip: "Bonus for occupying or evicting opponent pieces from cross-node (d-row/column) squares" },
-  { key: "scatter_placement",    group: "Tactical",   label: "Early spread placement",      def: 100, min: 0,   max: 500,  step: 25,
+  { key: "scatter_placement",    group: "Tactical",   label: "Early spread placement",      def: 75,  min: 0,   max: 500,  step: 25,
     tip: "Bonus for placing pieces not adjacent to existing own pieces in the first 6 placements" },
+  { key: "setup_mill",          group: "Tactical",   label: "Setup mill bonus",            def: 100, min: 0,   max: 500,  step: 25,
+    tip: "Bonus per new two-config (open mill setup) gained this move during placement — rewards building toward future mills" },
+  { key: "mill_opening",        group: "Tactical",   label: "Mill opening bonus",          def: 200, min: 0,   max: 600,  step: 25,
+    tip: "Bonus for deliberately opening a closed mill when another cycling mill remains — enables recapture next turn" },
   // ── Positional base weights ───────────────────────────────────────────
   { key: "long_term_position",   group: "Positional", label: "Positional weight %",         def: 100, min: 10,  max: 200,  step: 5,
     tip: "Overall multiplier on non-tactical positional scoring (100 = normal)" },
@@ -71,48 +75,48 @@ const PERSONALITY_PRESETS = {
   balanced: {
     close_mill: 500, cycling_mill: 50, block_opponent_mill: 400,
     stop_opponent_mills: 450, feeder_diamond: 200, mill_wrapping: 150,
-    cardinal_block: 400, scatter_placement: 100, long_term_position: 100,
-    mill_count_scale: 100, mobility_scale: 100, blocked_scale: 100,
+    cardinal_block: 200, scatter_placement: 75, setup_mill: 100, mill_opening: 200,
+    long_term_position: 100, mill_count_scale: 100, mobility_scale: 100, blocked_scale: 100,
     make_mistakes: 0, opening_adherence: 30,
   },
   // Hunts mills relentlessly; ignores cycling in favour of immediate mill closure.
   aggressive: {
     close_mill: 900, cycling_mill: 75, block_opponent_mill: 150,
     stop_opponent_mills: 150, feeder_diamond: 350, mill_wrapping: 50,
-    cardinal_block: 500, scatter_placement: 25, long_term_position: 70,
-    mill_count_scale: 180, mobility_scale: 50, blocked_scale: 80,
+    cardinal_block: 300, scatter_placement: 25, setup_mill: 200, mill_opening: 350,
+    long_term_position: 70, mill_count_scale: 180, mobility_scale: 50, blocked_scale: 80,
     make_mistakes: 0, opening_adherence: 15,
   },
   // Smothers every opponent threat; wraps opponent mills; builds resilient diamond setups.
   defensive: {
     close_mill: 300, cycling_mill: 25, block_opponent_mill: 850,
     stop_opponent_mills: 800, feeder_diamond: 350, mill_wrapping: 350,
-    cardinal_block: 275, scatter_placement: 100, long_term_position: 150,
-    mill_count_scale: 75, mobility_scale: 200, blocked_scale: 250,
+    cardinal_block: 150, scatter_placement: 75, setup_mill: 100, mill_opening: 100,
+    long_term_position: 150, mill_count_scale: 75, mobility_scale: 200, blocked_scale: 250,
     make_mistakes: 0, opening_adherence: 25,
   },
   // Spreads out, controls cross nodes, builds long-term structures.
   positional: {
     close_mill: 400, cycling_mill: 60, block_opponent_mill: 350,
     stop_opponent_mills: 350, feeder_diamond: 300, mill_wrapping: 250,
-    cardinal_block: 500, scatter_placement: 450, long_term_position: 200,
-    mill_count_scale: 80, mobility_scale: 300, blocked_scale: 150,
+    cardinal_block: 400, scatter_placement: 350, setup_mill: 175, mill_opening: 175,
+    long_term_position: 200, mill_count_scale: 80, mobility_scale: 300, blocked_scale: 150,
     make_mistakes: 0, opening_adherence: 40,
   },
   // Methodical opening, solid diamond structures, balanced wrapping awareness.
   scholar: {
     close_mill: 450, cycling_mill: 50, block_opponent_mill: 400,
     stop_opponent_mills: 400, feeder_diamond: 250, mill_wrapping: 200,
-    cardinal_block: 450, scatter_placement: 400, long_term_position: 175,
-    mill_count_scale: 100, mobility_scale: 200, blocked_scale: 125,
+    cardinal_block: 300, scatter_placement: 300, setup_mill: 150, mill_opening: 225,
+    long_term_position: 175, mill_count_scale: 100, mobility_scale: 200, blocked_scale: 125,
     make_mistakes: 0, opening_adherence: 50,
   },
   // Scatters pieces randomly, ignores strategy, makes frequent blunders.
   chaos: {
     close_mill: 150, cycling_mill: 25, block_opponent_mill: 150,
     stop_opponent_mills: 150, feeder_diamond: 75, mill_wrapping: 25,
-    cardinal_block: 0, scatter_placement: 500, long_term_position: 10,
-    mill_count_scale: 50, mobility_scale: 50, blocked_scale: 50,
+    cardinal_block: 0, scatter_placement: 500, setup_mill: 50, mill_opening: 75,
+    long_term_position: 10, mill_count_scale: 50, mobility_scale: 50, blocked_scale: 50,
     make_mistakes: 45, opening_adherence: 0,
   },
 };
@@ -144,9 +148,17 @@ document.addEventListener("DOMContentLoaded", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(r => r.json()).then(() => {
-      addCommentary("Game", `Settings saved for "${name}" — applied from next new game.`);
-    }).catch(() => addCommentary("Error", "Could not save settings."));
+      addCommentary("Game", `Settings saved for "${name}" — applied from next new game.`, "ai");
+    }).catch(() => addCommentary("Error", "Could not save settings.", "ai"));
   });
+
+  // Show/hide personality row based on opponent type
+  function _updatePersonalityRow() {
+    const row = $("row-personality");
+    if (row) row.hidden = $("sel-opponent").value === "human";
+  }
+  $("sel-opponent").addEventListener("change", _updatePersonalityRow);
+  _updatePersonalityRow();
 
   $("btn-new-game").addEventListener("click", startNewGame);
   $("toggle-settings").addEventListener("click", () => {
@@ -186,8 +198,8 @@ document.addEventListener("DOMContentLoaded", () => {
     ws.send(JSON.stringify({ type: "force_aggressive", active: forceAggressive }));
     addCommentary("Game", forceAggressive
       ? "Force Capture ON — AI will capture aggressively even in 4v4."
-      : "Force Capture OFF — AI returns to fly-sacrifice strategy."
-    );
+      : "Force Capture OFF — AI returns to fly-sacrifice strategy.",
+    "ai");
   });
   $("btn-force-move").addEventListener("click", () => {
     if (!ws) return;
@@ -223,6 +235,17 @@ function startNewGame() {
   const diff   = parseInt($("sel-difficulty").value);
   const vs     = $("sel-opponent").value === "human";
   const useLlm = $("chk-llm").checked;
+
+  // Apply personality for this game (overrides current sliders unless "current")
+  const gamePSelect = $("sel-game-personality");
+  if (gamePSelect && gamePSelect.value !== "current") {
+    let chosenPersonality = gamePSelect.value;
+    if (chosenPersonality === "random") {
+      const opts = PERSONALITIES.map(p => p.value);
+      chosenPersonality = opts[Math.floor(Math.random() * opts.length)];
+    }
+    _loadPersonality(chosenPersonality);
+  }
 
   clearCommentary();
   setStatus("Starting…");
@@ -321,7 +344,7 @@ function handleMessage(msg) {
       const to      = msg.to;
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
-      addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`);
+      addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
       if (msg.can_mark_bad) {
         canMarkBad = true;
         $("btn-bad-move").hidden = false;
@@ -330,13 +353,13 @@ function handleMessage(msg) {
     }
 
     case "bad_move_ack":
-      addCommentary("[Training]", `"${msg.bad_notation}" marked bad — AI retrying.`);
+      addCommentary("[Training]", `"${msg.bad_notation}" marked bad — AI retrying.`, "ai");
       canMarkBad = false;
       $("btn-bad-move").hidden = true;
       break;
 
     case "commentary":
-      addCommentary("MillsAI", msg.text);
+      addCommentary(msg.speaker ?? "MillsAI", msg.text, msg.section);
       break;
 
     case "hint":
@@ -344,10 +367,10 @@ function handleMessage(msg) {
       hintsLeft = msg.hints_left;
       updateHintButton(true);
       if (msg.explanation) {
-        addCommentary("[Hint]", msg.explanation);
+        addCommentary("[Hint]", msg.explanation, "human");
       } else {
         const dest = msg.from ? `${msg.from} → ${msg.to}` : msg.to;
-        addCommentary("[Hint]", `Suggested move: ${dest}`);
+        addCommentary("[Hint]", `Suggested move: ${dest}`, "human");
       }
       break;
 
@@ -363,7 +386,7 @@ function handleMessage(msg) {
         : msg.message;
       setStatus(statusText);
       setTurnBadge(null, msg.winner);
-      addCommentary("Game", msg.message);
+      addCommentary("Game", msg.message, "ai");
       $("btn-undo").disabled = true;
       $("btn-force-cap").disabled = true;
       updateHintButton(false);
@@ -372,16 +395,16 @@ function handleMessage(msg) {
     }
 
     case "draw_accepted":
-      addCommentary("Game", "Draw offer accepted.");
+      addCommentary("Game", "Draw offer accepted.", "ai");
       break;
 
     case "draw_rejected":
-      addCommentary("Game", "Draw offer declined — the AI believes it can win.");
+      addCommentary("Game", "Draw offer declined — the AI believes it can win.", "ai");
       updateDrawButton();
       break;
 
     case "error":
-      addCommentary("Error", msg.message);
+      addCommentary("Error", msg.message, "ai");
       break;
   }
 }
@@ -675,22 +698,34 @@ function setTurnBadge(name, winner) {
   }
 }
 
-function addCommentary(speaker, text) {
+// Speakers that belong to the AI discussion box (bottom).
+// All others go to the human-facing box (top).
+const _AI_SPEAKERS = new Set(["GameAI", "Game", "Error"]);
+
+function addCommentary(speaker, text, section) {
   if (!text) return;
-  const feed  = $("commentary-feed");
-  const div   = document.createElement("div");
+  // Determine target box: explicit section override, or classify by speaker
+  const isAi  = section === "ai"  || (!section && _AI_SPEAKERS.has(speaker));
+  const feedId = isAi ? "commentary-ai" : "commentary-human";
+  const feed   = $(feedId);
+  if (!feed) return;
+
+  const div = document.createElement("div");
   div.className = "commentary-line";
   const label = document.createElement("span");
   label.className   = "speaker";
   label.textContent = speaker + ": ";
   div.appendChild(label);
   div.appendChild(document.createTextNode(text));
-  feed.appendChild(div);
-  feed.scrollTop = feed.scrollHeight;
+  // Prepend so newest appears at top
+  feed.insertBefore(div, feed.firstChild);
 }
 
 function clearCommentary() {
-  $("commentary-feed").innerHTML = "";
+  const h = $("commentary-human");
+  const a = $("commentary-ai");
+  if (h) h.innerHTML = "";
+  if (a) a.innerHTML = "";
 }
 
 // ── AI weight sliders (Stage 5.13) ────────────────────────────────────────────

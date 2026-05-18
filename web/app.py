@@ -211,10 +211,33 @@ async def _send(ws: WebSocket, obj: dict) -> None:
     await ws.send_text(json.dumps(obj))
 
 
+def _classify_commentary(line: str) -> tuple[str, str, str]:
+    """Parse '[Speaker] text' and return (speaker, text, section).
+
+    Section is 'human' (top box, LLM↔human) or 'ai' (bottom box, AI↔AI).
+    """
+    AI_SPEAKERS = {"GameAI", "Game"}
+    if line.startswith("[") and "]" in line:
+        end = line.index("]")
+        speaker = line[1:end]
+        text    = line[end + 2:]  # skip '] '
+    else:
+        speaker = "MillsAI"
+        text    = line
+    section = "ai" if speaker in AI_SPEAKERS else "human"
+    return speaker, text, section
+
+
 async def _commentary(ws: WebSocket, session: Session) -> None:
     if session.coordinator:
         for line in session.coordinator.flush_dialogue():
-            await _send(ws, {"type": "commentary", "text": line})
+            speaker, text, section = _classify_commentary(line)
+            await _send(ws, {
+                "type": "commentary",
+                "speaker": speaker,
+                "text": text,
+                "section": section,
+            })
 
 
 async def _game_over(ws: WebSocket, session: Session) -> None:
@@ -410,6 +433,8 @@ async def ws_endpoint(websocket: WebSocket):
                         mill_wrapping=_w("mill_wrapping", 150),
                         cardinal_block=_w("cardinal_block", 400),
                         scatter_placement=_w("scatter_placement", 100),
+                        setup_mill=_w("setup_mill", 150),
+                        mill_opening=_w("mill_opening", 200),
                         long_term_position=_w("long_term_position", 100),
                         mill_count_scale=_w("mill_count_scale", 100),
                         mobility_scale=_w("mobility_scale", 100),
@@ -440,6 +465,7 @@ async def ws_endpoint(websocket: WebSocket):
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
                             trajectory_db=_trajectory_db,
+                            vs_human=True,  # coordinator always faces a human in web games
                         )
                         await asyncio.to_thread(coord.on_game_start)
 
@@ -702,8 +728,11 @@ async def ws_endpoint(websocket: WebSocket):
                         {"turn": session.engine._turn_num, "message": text, "response": response}
                     )
                 else:
-                    await _send(websocket, {"type": "commentary",
-                                            "text": "LLM not available — enable MillsAI commentary."})
+                    await _send(websocket, {
+                        "type": "commentary", "speaker": "Game",
+                        "text": "LLM not available — enable MillsAI commentary.",
+                        "section": "human",
+                    })
 
     except WebSocketDisconnect:
         log.info("WebSocket disconnected")

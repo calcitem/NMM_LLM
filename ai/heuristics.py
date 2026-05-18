@@ -22,8 +22,10 @@ class HeuristicWeights:
     stop_opponent_mills: int   = 450   # bonus per opponent 2-config dismantled
     feeder_diamond: int        = 200   # bonus for gaining a diamond/fork structure (capped at 1 per move)
     mill_wrapping: int         = 150   # bonus per own piece surrounding an opponent closed mill
-    cardinal_block: int        = 400   # bonus for taking/clearing cross-node squares
-    scatter_placement: int    = 100   # bonus for non-adjacent placement in first 6 moves
+    cardinal_block: int        = 200   # bonus for taking/clearing cross-node squares
+    scatter_placement: int    = 75    # bonus for non-adjacent placement in first 6 moves
+    setup_mill: int           = 100   # bonus per new two-config gained this move (placement phase)
+    mill_opening: int         = 200   # bonus for opening a cycling-ready mill (enables next capture)
     # ── Positional base scale (applied inside evaluate) ──────────────────
     long_term_position: int   = 100   # % multiplier on entire positional base score
     mill_count_scale: int     = 100   # % multiplier on mill-count weights
@@ -39,17 +41,23 @@ DEFAULT_WEIGHTS = HeuristicWeights()
 INF: int = 10_000_000
 
 # Phase weights: (closed_mills, blocked_opp, piece_diff, two_cfg, dbl_mill, win_cfg)
+#
+# KEY INVARIANT: mill_w > two_cfg + THREAT_WEIGHT
+# Closing a mill consumes a two-config, so the net gain from closing must be
+# positive: mill_w - (two_cfg + THREAT) > 0.  Here: 30 > (5+15)=20 ✓
+# two_cfg is kept small so the primary two-config signal comes from the
+# reachability-aware THREAT term (closeable mills only).
 _WEIGHTS = {
-    "place": (16,  12, 11, 18,   0,    0),
-    "move":  (18,  48, 12, 16,  50,    0),
-    "fly":   (20, 350,  2,  0,  90, 1190),
+    "place": (30,  12, 12,  5,   0,    0),
+    "move":  (30,  48, 12,  5,  50,    0),
+    "fly":   (32, 350,  2,  0,  90, 1190),
 }
 
 # Mobility and threat term weights per phase.
-# _THREAT_WEIGHTS now weights CLOSEABLE mills (reachable in one move),
-# which is stricter than two_cfg and warrants a higher multiplier.
+# _THREAT_WEIGHTS weights CLOSEABLE mills (reachable in one move only),
+# giving an additional urgency signal on top of the structural two_cfg baseline.
 _MOB_WEIGHTS    = {"place": 3,  "move": 8,  "fly": 20}
-_THREAT_WEIGHTS = {"place": 16, "move": 20, "fly": 24}
+_THREAT_WEIGHTS = {"place": 15, "move": 18, "fly": 22}
 
 # tanh normalization scales per phase (used by position_eval display, not search)
 TANH_SCALE = {"place": 120, "move": 180, "fly": 280}
@@ -506,6 +514,22 @@ def tactical_move_bonus(
                     scatter = weights.scatter_placement
                 break
 
+    # New two-configs gained this move (setup for future mill opportunities).
+    # Only counted during placement phase when the player still has pieces to place,
+    # so it incentivises building toward mills rather than random placement.
+    setup_mill_bonus = 0
+    if get_game_phase(before, color) == "place" and before.pieces_placed.get(color, 0) < 9:
+        two_cfg_gained = max(0, _two_configs(after, color) - _two_configs(before, color))
+        setup_mill_bonus = weights.setup_mill * two_cfg_gained
+
+    # Mill-opening bonus: reward sliding out of a closed mill when the position
+    # still has a cycling-ready mill (i.e. the move enables a future recapture).
+    # This encourages deliberate opening/closing cycles rather than passivity.
+    mill_opened = max(0, _closed_mills(before, color) - _closed_mills(after, color))
+    mill_open_bonus = 0
+    if mill_opened > 0 and _mill_cycle_ready(after, color) > 0:
+        mill_open_bonus = weights.mill_opening * mill_opened
+
     # Late-placement mill urgency (pieces 7-9, i.e. pieces_placed >= 6).
     # Closing a mill on the OUTER or MIDDLE ring in this window is critical —
     # it's likely the last chance to form a mill with good piece placement.
@@ -530,6 +554,8 @@ def tactical_move_bonus(
         + weights.mill_wrapping       * wrap_gain
         + weights.cardinal_block      * (our_cross_gained + opp_cross_lost)
         + scatter
+        + setup_mill_bonus
+        + mill_open_bonus
         + late_mill_bonus
     )
 

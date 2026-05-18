@@ -35,6 +35,7 @@ class Coordinator:
         opening_recognizer: OpeningRecognizer | None = None,
         endgame_recognizer: EndgameRecognizer | None = None,
         trajectory_db: TrajectoryDB | None = None,
+        vs_human: bool = True,
     ) -> None:
         self.game_ai = game_ai
         self.mills_llm = mills_llm
@@ -45,6 +46,7 @@ class Coordinator:
         self.opening_recognizer = opening_recognizer
         self.endgame_recognizer = endgame_recognizer
         self.trajectory_db = trajectory_db
+        self.vs_human = vs_human
 
         self.dialogue_log: list[str] = []
         self._poor_move_count = 0
@@ -265,7 +267,8 @@ class Coordinator:
 
         # 5. Ask MillsLLM for a recommendation (with opening + endgame context)
         opinion, llm_notation = self.mills_llm.ask_for_move_opinion(
-            board, legal, ai_move, recognition=recognition, endgame_state=endgame_state
+            board, legal, ai_move, recognition=recognition, endgame_state=endgame_state,
+            audience="human" if self.vs_human else "ai",
         )
 
         # 6. Try to adopt the LLM's recommendation if it scores well enough

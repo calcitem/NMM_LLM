@@ -354,6 +354,7 @@ class MillsLLM:
         game_ai_suggestion: dict,
         recognition=None,
         endgame_state=None,
+        audience: str = "human",  # "human" or "ai"
     ) -> tuple[str, str | None]:
         notations = [_move_to_notation(m) for m in legal_moves]
         ai_notation = _move_to_notation(game_ai_suggestion)
@@ -390,8 +391,14 @@ class MillsLLM:
             "REASON: <one short sentence>",
         ])
 
+        audience_note = (
+            "\nAUDIENCE: You are playing against a human player. Keep commentary engaging and accessible."
+            if audience == "human"
+            else "\nAUDIENCE: You are playing against another AI engine. Use precise technical language."
+        )
+        system = _MOVE_SYSTEM + audience_note
         user = "\n".join(user_parts)
-        reply = self._chat(_MOVE_SYSTEM, user, keep_history=False)
+        reply = self._chat(system, user, keep_history=False)
         notation = self._parse_move(reply, notations)
 
         if notation is None and self._client is not None:
