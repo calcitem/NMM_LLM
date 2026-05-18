@@ -33,7 +33,8 @@
 | 8 | Adaptive Difficulty | ✅ Complete |
 | 9 | Tournament / Match Mode | ✅ Complete |
 | 10 | Player Profiles & Persistent Stats | ⬜ Planned |
-| 11 | Advanced Search (MCTS / NN) | ⬜ Stretch |
+| 11 | Endgame Self-Play | ⬜ Planned |
+| 12 | Advanced Search (MCTS / NN) | ⬜ Stretch |
 
 
 ## Completed Stages
@@ -1257,7 +1258,35 @@ When adaptive difficulty lowers the AI's level and increases blunder rate, there
 - Tournament: player clicks "Enter Tournament" → server queues 6 games (one per personality) at the player's current Elo-mapped difficulty → results panel shows standings.
 
 
-### Stage 11 — Advanced Search (MCTS / Neural Evaluation) ⬜ *(Stretch)*
+### Stage 11 — Endgame Self-Play ⬜
+
+**Goal:** Rapidly build up EndgameDB with high-quality position data by running self-play games that start directly from generated endgame positions, bypassing the placement and mid-game phases entirely.
+
+**Motivation:** Full-game self-play generates relatively few endgame positions per game (only the last dozen or so half-moves tend to fall below the 11-piece threshold). Dedicated endgame self-play can generate hundreds of tagged endgame positions per minute, making EndgameDB much more useful for move guidance.
+
+**Approach:**
+
+- `tools/endgame_play.py` — new tool that generates random valid endgame starting positions (total pieces ≤11, both sides ≥3) and plays them out with the same headless engine used by `self_play.py`.
+- Positions should be plausible (not degenerate): both sides have pieces spread across rings, no side already in a lost position.
+- Each completed game is saved to `data/games/` in the standard JSONL format so EndgameDB picks it up on the next server start (or incremental reload).
+- Supports `--parallel N` and a `--positions FILE` flag to seed from a JSON list of specific FEN strings (useful for practising known problem positions).
+
+**Deliverables:**
+
+- `tools/endgame_play.py` — position generator + headless self-play loop.
+- Optional: `--seed-from-games` flag that extracts real endgame positions from existing `data/games/` JSONL files rather than generating random ones — ensures positions are always reachable.
+- README section under **Self-Play Training** explaining endgame self-play and its effect on EndgameDB.
+
+**Examples (planned):**
+```bash
+# 500 random endgame positions, 4 workers, difficulty 5
+python tools/endgame_play.py --positions 500 --parallel 4 --difficulty 5
+
+# Replay real endgame positions extracted from existing game records
+python tools/endgame_play.py --seed-from-games --positions 200 --parallel 4
+```
+
+### Stage 12 — Advanced Search (MCTS / Neural Evaluation) ⬜ *(Stretch)*
 
 **Goal:** Replace or augment negamax with Monte Carlo Tree Search, optionally with a learned value function.
 
