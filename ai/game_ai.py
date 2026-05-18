@@ -289,7 +289,9 @@ class GameAI:
     def _root_search(self, board: BoardState, depth: int,
                      top_n: int = 1) -> Tuple[dict, int]:
         """Search all root moves and return (best_move, best_score).
-        When top_n > 1, pick randomly from the top-N scoring moves."""
+        When top_n > 1, pick randomly from the top-N scoring moves.
+        If _SearchAbort fires (force_stop called mid-search), returns the
+        best move found so far rather than propagating the exception."""
         moves = get_all_legal_moves(board)
         self._nodes = 0
         best_move = moves[0]
@@ -298,8 +300,11 @@ class GameAI:
         all_scored: list[Tuple[dict, int]] = []
 
         for move in moves:
-            nb    = board.apply_move(move)
-            score = -self._negamax(nb, depth - 1, -INF, -alpha)
+            nb = board.apply_move(move)
+            try:
+                score = -self._negamax(nb, depth - 1, -INF, -alpha)
+            except _SearchAbort:
+                break
             score += tactical_move_bonus(board, nb, self.color, self._weights)
             if top_n > 1:
                 all_scored.append((move, score))

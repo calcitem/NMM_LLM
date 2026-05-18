@@ -360,6 +360,11 @@ function enterSetupMode() {
       if (v) setupGrid[pos] = v;
     }
   }
+  // Inherit human colour from the main settings selector
+  const mainHc = $("sel-human-color").value;
+  const setupHc = $("sel-setup-human-color");
+  if (setupHc && mainHc !== "R") setupHc.value = mainHc;
+
   setupBrush = "";  // default: eraser
   document.querySelectorAll(".setup-swatch").forEach(b =>
     b.classList.toggle("setup-swatch-active", b.dataset.piece === ""));
@@ -427,7 +432,7 @@ function startSetupGame() {
   const { errors } = _setupValidation();
   if (errors.length) return;
 
-  const hc     = $("sel-human-color").value;
+  const hc     = $("sel-setup-human-color").value;
   const diff   = parseInt($("sel-difficulty").value);
   const vs     = $("sel-opponent").value === "human";
   const useLlm = $("chk-llm").checked;
