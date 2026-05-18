@@ -232,6 +232,32 @@ python tools/self_play.py --games 20 --no-llm --personalities aggressive,defensi
 python tools/self_play.py --games 1 --white 5 --black 1 -v --white-personality scholar
 ```
 
+### Weight Evolution
+
+```bash
+python tools/evolve_weights.py --generations 20 --parallel 4
+```
+
+Runs a (1+1) evolution strategy: each generation mutates the current best heuristic weights by Gaussian noise, plays the candidate against the baseline, and promotes the candidate if its win rate reaches ≥ 55 %. Best weights are saved to `data/weights/best.json` and loaded automatically on the next server restart.
+
+| Flag | Description |
+|------|-------------|
+| `--generations N` | Number of evolution generations (default: 20) |
+| `--games-per-gen G` | Games played per generation to measure win rate |
+| `--difficulty D` | AI difficulty used for both sides |
+| `--parallel N` | Run N games simultaneously per generation |
+| `--from-best` | Seed the starting weights from `data/weights/best.json` |
+
+**Examples:**
+
+```bash
+# Quick 20-generation run with 4 parallel games
+python tools/evolve_weights.py --generations 20 --parallel 4
+
+# Longer run continuing from the current best weights
+python tools/evolve_weights.py --generations 50 --from-best --parallel 4
+```
+
 ---
 
 ## Board Coordinate System
@@ -311,6 +337,7 @@ NMM_ollama/
 │   └── templates/index.html
 ├── tools/
 │   ├── self_play.py             # AI vs AI training loop
+│   ├── evolve_weights.py        # (1+1) evolution strategy to tune heuristic weights
 │   ├── import_openings.py       # Import openings from strategy book text file
 │   ├── import_book_games.py     # Import games into opening book
 │   ├── name_openings.py         # LLM-name novel openings
