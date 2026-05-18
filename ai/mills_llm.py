@@ -242,6 +242,18 @@ OUTPUT RULES:
 """
 
 
+def _move_history_block(notations: list[str], limit: int = 40) -> str:
+    """Format recent move notations as a compact numbered move list."""
+    if not notations:
+        return ""
+    recent = notations[-limit:]
+    offset = len(notations) - len(recent)
+    lines = []
+    for i, n in enumerate(recent, start=offset + 1):
+        lines.append(f"{i}. {n}")
+    return "\n--- GAME MOVES SO FAR ---\n" + "  ".join(lines) + "\n---"
+
+
 def _endgame_context_block(endgame_state) -> str:
     lines = [
         "",
@@ -300,7 +312,7 @@ class MillsLLM:
         self,
         memory: "MemoryManager",
         ollama_url: str = "http://localhost:11434",
-        model: str = "llama3.2",
+        model: str = "llama3.1:8b",
     ) -> None:
         self.model = model
         self._url = ollama_url
@@ -355,6 +367,7 @@ class MillsLLM:
         recognition=None,
         endgame_state=None,
         audience: str = "human",  # "human" or "ai"
+        move_history: list[str] | None = None,
     ) -> tuple[str, str | None]:
         notations = [_move_to_notation(m) for m in legal_moves]
         ai_notation = _move_to_notation(game_ai_suggestion)
@@ -373,6 +386,9 @@ class MillsLLM:
             "BOARD:",
             board.to_display_grid(),
         ]
+
+        if move_history:
+            user_parts.append(_move_history_block(move_history))
 
         if recognition and recognition.status not in ("inactive", "novel"):
             user_parts.append(_opening_context_block(recognition))
@@ -449,19 +465,24 @@ No other text.
         score_after: float,
         score_drop_threshold: float = 0.3,
         recognition=None,
+        human_color: str = "",
+        move_history: list[str] | None = None,
     ) -> str | None:
         delta = score_after - score_before
         if delta > -score_drop_threshold:
             return None
 
         move_notation = _move_to_notation(human_move)
+        color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
         user_parts = [
-            f"HUMAN MOVE: {move_notation}",
+            f"{color_ctx}HUMAN MOVE: {move_notation}",
             f"SCORE CHANGE: {delta:+.2f}",
             "",
             "BOARD AFTER MOVE:",
             board_before.to_display_grid(),
         ]
+        if move_history:
+            user_parts.append(_move_history_block(move_history))
         if recognition and recognition.status not in ("inactive", "novel"):
             user_parts.append(_opening_context_block(recognition))
         reply = self._chat(_COMMENT_SYSTEM, "\n".join(user_parts), keep_history=False)
@@ -469,9 +490,12 @@ No other text.
             return None
         return reply.strip()
 
-    def announce_blunder(self, board: "BoardState", move: dict) -> str:
+    def announce_blunder(
+        self, board: "BoardState", move: dict, move_history: list[str] | None = None
+    ) -> str:
         move_notation = _move_to_notation(move)
-        user = f"Deliberate bad move played: {move_notation}\n\nBOARD:\n{board.to_display_grid()}"
+        history_block = _move_history_block(move_history) if move_history else ""
+        user = f"Deliberate bad move played: {move_notation}{history_block}\n\nBOARD:\n{board.to_display_grid()}"
         return self._chat(_BLUNDER_SYSTEM, user, keep_history=False)
 
     def record_human_feedback(self, board: "BoardState", move: dict, reason: str) -> None:
@@ -486,12 +510,16 @@ No other text.
         )
 
     def comment_on_good_move(
-        self, board: "BoardState", move: dict, score: float
+        self, board: "BoardState", move: dict, score: float,
+        human_color: str = "", move_history: list[str] | None = None,
     ) -> str | None:
         move_notation = _move_to_notation(move)
+        color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
+        history_block = _move_history_block(move_history) if move_history else ""
         user = (
-            f"HUMAN MOVE: {move_notation}\n"
-            f"MOVE QUALITY (0=worst, 1=best): {score:.2f}\n\n"
+            f"{color_ctx}HUMAN MOVE: {move_notation}\n"
+            f"MOVE QUALITY (0=worst, 1=best): {score:.2f}\n"
+            f"{history_block}\n"
             f"BOARD:\n{board.to_display_grid()}"
         )
         reply = self._chat(_POSITIVE_COMMENT_SYSTEM, user, keep_history=False)
@@ -499,14 +527,23 @@ No other text.
             return None
         return reply.strip()
 
-    def comment_on_mill(self, board: "BoardState", move: dict) -> str | None:
+    def comment_on_mill(
+        self, board: "BoardState", move: dict,
+        human_color: str = "", move_history: list[str] | None = None,
+    ) -> str | None:
         move_notation = _move_to_notation(move)
-        user = f"HUMAN MILL + CAPTURE: {move_notation}\n\nBOARD:\n{board.to_display_grid()}"
+        color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
+        history_block = _move_history_block(move_history) if move_history else ""
+        user = f"{color_ctx}HUMAN MILL + CAPTURE: {move_notation}{history_block}\n\nBOARD:\n{board.to_display_grid()}"
         reply = self._chat(_MILL_COMMENT_SYSTEM, user, keep_history=False)
         return reply.strip() if reply else None
 
-    def ask_strategic_question(self, board: "BoardState") -> str | None:
-        user = f"BOARD:\n{board.to_display_grid()}"
+    def ask_strategic_question(
+        self, board: "BoardState", human_color: str = "", move_history: list[str] | None = None,
+    ) -> str | None:
+        color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
+        history_block = _move_history_block(move_history) if move_history else ""
+        user = f"{color_ctx}{history_block}\nBOARD:\n{board.to_display_grid()}"
         reply = self._chat(_POSITION_QUESTION_SYSTEM, user, keep_history=False)
         return reply.strip() if reply.strip() else None
 
@@ -515,9 +552,12 @@ No other text.
         reply = self._chat(_QUESTION_SYSTEM, user, keep_history=False)
         return reply.strip() if reply.strip() else None
 
-    def player_chat(self, message: str, board: "BoardState") -> str:
+    def player_chat(
+        self, message: str, board: "BoardState", move_history: list[str] | None = None,
+    ) -> str:
         """Respond to an in-game message from the human player."""
-        user = f"Player: {message}\n\nCURRENT BOARD:\n{board.to_display_grid()}"
+        history_block = _move_history_block(move_history) if move_history else ""
+        user = f"Player: {message}{history_block}\n\nCURRENT BOARD:\n{board.to_display_grid()}"
         reply = self._chat(_PLAYER_CHAT_SYSTEM, user, keep_history=True)
         return reply.strip() if reply else ""
 

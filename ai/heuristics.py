@@ -370,7 +370,83 @@ def _late_game_danger(board: BoardState, color: str) -> int:
     return penalty
 
 
-# ── Tactical urgency (Stage 5.12) ────────────────────────────────────────────
+# ── Public tactical detectors (Stage 5.12) ───────────────────────────────────
+
+def detect_double_mills(board: BoardState, color: str) -> list[str]:
+    """Return positions that are pivot pieces belonging to 2+ closed mills."""
+    return [
+        pos for pos in POSITIONS
+        if board.positions[pos] == color
+        and sum(
+            1 for mill in MILLS
+            if pos in mill and all(board.positions[p] == color for p in mill)
+        ) >= 2
+    ]
+
+
+def detect_feeder_mills(board: BoardState, color: str) -> list[tuple[str, ...]]:
+    """Return closed mills that have at least one same-color adjacent feeder piece.
+
+    A feeder piece is a same-color piece adjacent to the mill but not part of it.
+    Its presence means the mill can be cycled: slide a mill piece out, slide the
+    feeder in to re-form the mill, capturing again next turn.
+    """
+    result = []
+    for mill in MILLS:
+        if all(board.positions[p] == color for p in mill):
+            mill_set = set(mill)
+            if any(
+                board.positions[nb] == color
+                for pos in mill
+                for nb in ADJACENCY[pos]
+                if nb not in mill_set
+            ):
+                result.append(tuple(mill))
+    return result
+
+
+def detect_diamonds(board: BoardState, color: str) -> list[str]:
+    """Return empty squares that are the closing square for 2+ own two-configs.
+
+    Placing on any returned square would close two mills simultaneously (a fork),
+    which the opponent cannot fully defend in a single response.
+    """
+    closing: dict[str, int] = {}
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 2 and vals.count("") == 1:
+            empty = next(p for p in mill if board.positions[p] == "")
+            closing[empty] = closing.get(empty, 0) + 1
+    return [pos for pos, count in closing.items() if count >= 2]
+
+
+def opponent_mills_in_n_moves(board: BoardState, color: str, n: int = 2) -> int:
+    """Count mills `color` can form within `n` moves (1 or 2).
+
+    n=1: mills closeable this turn (= _closeable_mills).
+    n=2: adds mills reachable in two moves (one own piece + two reachable empties).
+    """
+    if n < 1:
+        return 0
+    count = _closeable_mills(board, color)
+    if n >= 2:
+        phase = get_game_phase(board, color)
+        for mill in MILLS:
+            vals = [board.positions[p] for p in mill]
+            if vals.count(color) == 1 and vals.count("") == 2:
+                if phase in ("place", "fly"):
+                    count += 1
+                else:
+                    empties = [p for p in mill if board.positions[p] == ""]
+                    if any(
+                        any(board.positions[nb] == color for nb in ADJACENCY[e])
+                        for e in empties
+                    ):
+                        count += 1
+    return count
+
+
+# ── Tactical urgency (internal helpers) ──────────────────────────────────────
 
 def _closeable_mills(board: BoardState, color: str) -> int:
     """Count 2-config mills that color can close in exactly one move."""

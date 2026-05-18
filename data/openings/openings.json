@@ -191,7 +191,7 @@
       ]
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 2,
       "B": 0,
       "D": 0
     },
@@ -375,7 +375,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 1.0,
     "tags": [
@@ -644,7 +644,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 1.0,
     "tags": [
@@ -773,9 +773,15 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 1,
+      "W": 2,
       "B": 0,
-      "D": 0
+      "D": 0,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -838,139 +844,15 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 1,
+      "W": 4,
       "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-8102c4ae",
-    "name": "Self-Play Line novel-",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d7",
-      "f4",
-      "a7",
-      "g7",
-      "g4",
-      "a4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "d2",
-      "d1",
-      "g1",
-      "d5",
-      "a1",
-      "e4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BB.......W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BBWB.....W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BBWB...W.W.W...B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BBWB...W.WWWB..B........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 8
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-c162aa4c",
-    "name": "Self-Play Line novel-",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d7",
-      "f4",
-      "a7",
-      "g7",
-      "g4",
-      "f6",
-      "a1",
-      "a4",
-      "d1",
-      "g1",
-      "d3",
-      "d2",
-      "b4",
-      "f2",
-      "g4",
-      "b6",
-      "g4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BB.......W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BBWB.....W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BBWB..B..WWW............|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BBWB.BBW.WWW............|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 3,
-      "B": 0,
-      "D": 0
+      "D": 8,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -982,7 +864,7 @@
   },
   {
     "opening_id": "novel-e965cb40",
-    "name": "Self-Play Line novel-",
+    "name": "The \"Triple Fortification",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -1111,73 +993,8 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-2438fb30",
-    "name": "Self-Play Line novel-",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d1",
-      "f4",
-      "a1",
-      "g1",
-      "a4",
-      "a7",
-      "d2",
-      "d3",
-      "b4",
-      "c4",
-      "b6",
-      "b2",
-      "d7",
-      "g7",
-      "g4",
-      "e4",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".....BB..W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "....WBBB.W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "W...WBBB.W.W.B..........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "W...WBBB.W.W.B.B.....W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
     "opening_id": "novel-2e5e82ee",
-    "name": "Self-Play Line novel-",
+    "name": "The \"Auroral Surge",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -1230,7 +1047,13 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 6
+      "D": 8,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -1371,71 +1194,6 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-dcbe2250",
-    "name": "Novel Opening novel-dcbe2250",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "g4",
-      "d7",
-      "g1",
-      "g7",
-      "a7",
-      "d3",
-      "d1",
-      "a1",
-      "d5",
-      "c4",
-      "e4",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.....WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".BBWW....WBBWB.W........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 8
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
     "opening_id": "novel-277ca389",
     "name": "The \"Distant Shield",
     "aliases": [],
@@ -1501,71 +1259,6 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-de557fed",
-    "name": "Novel Opening novel-de557fed",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "g4",
-      "d7",
-      "g1",
-      "g7",
-      "a7",
-      "d3",
-      "d1",
-      "a1",
-      "d5",
-      "c4",
-      "a4",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.....WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".BBWW....WBBWB.W........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
     "opening_id": "novel-67e50622",
     "name": "The Iron Fortress Opening",
     "aliases": [],
@@ -1623,7 +1316,11 @@
       "B": 2,
       "D": 0,
       "human_wins": 1,
-      "ai_losses": 1
+      "ai_losses": 1,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -1687,8 +1384,14 @@
     },
     "outcome_stats": {
       "W": 1,
-      "B": 0,
-      "D": 0
+      "B": 2,
+      "D": 16,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -1764,71 +1467,6 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-f8fc8155",
-    "name": "Novel Opening novel-f8fc8155",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "g4",
-      "d7",
-      "g1",
-      "g7",
-      "a7",
-      "d3",
-      "d1",
-      "a1",
-      "c4",
-      "a4",
-      "e4",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.....WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".BBWW....WBBWB.W........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 8
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
     "opening_id": "novel-8ed16912",
     "name": "Five Elements Ascend",
     "aliases": [],
@@ -1895,7 +1533,7 @@
   },
   {
     "opening_id": "novel-8d21a59a",
-    "name": "Novel Opening novel-8d21a59a",
+    "name": "King's Edge Setup",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -1946,74 +1584,15 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 4,
+      "W": 3,
       "B": 2,
-      "D": 7
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-72bd4dc4",
-    "name": "Novel Opening (d7...)",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "d5",
-      "d6",
-      "a4",
-      "d3",
-      "d2",
-      "g4",
-      "c4",
-      "b4",
-      "e4",
-      "f4",
-      "b6",
-      "g1",
-      "a1",
-      "g7",
-      "a4",
-      "a7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...B...B.......W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W...B.W.B.......W...B..|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.B.B.W.B...W...W...B..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.B.B.W.B...W.B.W...B.W|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
+      "D": 17,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
     },
     "confidence": 0.3,
     "tags": [
@@ -2143,7 +1722,7 @@
     "outcome_stats": {
       "W": 1,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 0.3,
     "tags": [
@@ -5656,71 +5235,6 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-102aa21d",
-    "name": "Novel Opening (d6...)",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "g7",
-      "d5",
-      "a7",
-      "d7",
-      "e4",
-      "f4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "........WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
     "opening_id": "novel-4950bfde",
     "name": "The Morning March",
     "aliases": [],
@@ -5851,49 +5365,315 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-4014756a",
-    "name": "The Golden Rampart",
+    "opening_id": "novel-97edfd40",
+    "name": "The \"Ancient Citadel",
     "aliases": [],
     "family": "novel",
     "side": "both",
     "seed_source": "learned",
     "line_moves": [
       "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "c5",
-      "e4",
+      "a7",
       "g4",
+      "a4",
+      "a1",
+      "f4",
+      "d7",
+      "g1",
       "g7",
       "d1",
-      "d7",
-      "a7",
       "d5",
+      "f6",
+      "d3",
       "c5",
-      "c3",
-      "e3"
+      "b4",
+      "f4",
+      "d2",
+      "f2"
     ],
     "branch_moves": [],
     "opening_fen_signatures": [
       {
         "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
+        "fen": "B..W...B.W..............|W|2|2"
       },
       {
         "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
+        "fen": "B..W..WB.W.B............|W|3|3"
       },
       {
         "ply": 8,
-        "fen": "........WWWWBB.BB.......|W|4|4"
+        "fen": "BW.WB.WB.W.B............|W|4|4"
       },
       {
         "ply": 10,
-        "fen": "...B....WWWWBB.BB..W....|W|5|5"
+        "fen": "BWWWBBWB.W.B............|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-fa0c6050",
+    "name": "Garden of Three Stones",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "g4",
+      "a4",
+      "d6",
+      "d7",
+      "d1",
+      "c4",
+      "e4",
+      "b4",
+      "e4",
+      "d2",
+      "f4",
+      "d5",
+      "d2",
+      "d3",
+      "b6",
+      "e5",
+      "f6",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".B.W...B.W..............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".B.W.W.B.W.............B|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B.W.W.B.W.....B...W...B|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W.W.B.W...B.B...W...B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 2,
+      "B": 0,
+      "D": 0,
+      "human_wins": 0,
+      "human_losses": 0,
+      "human_draws": 0,
+      "ai_wins": 0,
+      "ai_losses": 0,
+      "ai_draws": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-4fecbb67",
+    "name": "The Golden Core Emerges",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "a4",
+      "d2",
+      "d5",
+      "b4",
+      "c5",
+      "f4",
+      "e5",
+      "d6",
+      "d3",
+      "c4",
+      "e4",
+      "c3",
+      "e3",
+      "d6",
+      "a1",
+      "a7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.....W.B...B..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.....W.B...B.B.W......|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.....W.B.B.B.BWW......|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.....W.B.B.B.BWWW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-569c8e46",
+    "name": "The \"Triple Crown Gambit",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "g4",
+      "a4",
+      "d7",
+      "c4",
+      "d5",
+      "b4",
+      "e4",
+      "f4",
+      "d1",
+      "d2",
+      "d5",
+      "d3",
+      "d6",
+      "d3",
+      "a1",
+      "g1",
+      "c5",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.W...B...............B|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.W...B.......B.W.....B|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.W...B...B...B.W.W...B|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.W.W.B...B.B.B.W.W...B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-b21bfa7b",
+    "name": "Cornerstone Opening",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "f4",
+      "a4",
+      "d5",
+      "d2",
+      "e4",
+      "g4",
+      "e3",
+      "e5",
+      "d1",
+      "c4",
+      "b4",
+      "c5",
+      "d3",
+      "c3",
+      "b2",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.....B.B.W............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.....B.B.W.B...W......|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B...B.B.W.B...W.W....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B...B.B.W.B...WBWW...|W|5|5"
       }
     ],
     "strategic_notes": "",
@@ -5916,179 +5696,49 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-7140cc35",
-    "name": "Novel Opening novel-7140cc35",
+    "opening_id": "novel-2107af76",
+    "name": "The \"Four-Corner Fissure",
     "aliases": [],
     "family": "novel",
     "side": "both",
     "seed_source": "learned",
     "line_moves": [
-      "a7",
-      "d6",
-      "g7",
-      "b6",
-      "d7",
       "g4",
-      "f4",
       "a4",
-      "g1",
-      "d1",
-      "d2",
+      "d6",
       "c4",
-      "d5",
+      "e4",
       "b4",
       "d2",
-      "e3",
-      "d3",
-      "e4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "W.W.....BB..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "WWWB....BB..............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "WWWB...BBB.W............|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WWWBWB.BBB.W............|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-e318caf2",
-    "name": "Novel Opening novel-e318caf2",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "d5",
-      "d6",
-      "a4",
-      "a7",
-      "g1",
-      "g4",
-      "g7",
-      "f2",
-      "c4",
-      "b4",
-      "d2",
-      "d3",
       "f4",
       "e4",
-      "e3",
-      "f6"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...B...B.......W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BW...B.W.B.......W......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BW.BWB.W.B.......W......|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BWWBWB.W.B..B....W......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-0cd9a3b7",
-    "name": "Novel Opening novel-0cd9a3b7",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d7",
       "d1",
-      "g1",
-      "f4",
-      "g4",
-      "g7",
-      "b6",
-      "d2",
-      "a1",
+      "c3",
       "d3",
-      "d5",
-      "b4",
-      "e4",
-      "a4",
+      "b6",
+      "f6",
       "f2",
-      "c4",
-      "d7"
+      "d7",
+      "b2",
+      "d5"
     ],
     "branch_moves": [],
     "opening_fen_signatures": [
       {
         "ply": 4,
-        "fen": ".B..BW...W..............|W|2|2"
+        "fen": "...W...B.W.............B|W|2|2"
       },
       {
         "ply": 6,
-        "fen": ".B.BBW...W.W............|W|3|3"
+        "fen": "...W...B.W.....B...W...B|W|3|3"
       },
       {
         "ply": 8,
-        "fen": ".BWBBW..BW.W............|W|4|4"
+        "fen": "...W...B.W.B.W.B...W...B|W|4|4"
       },
       {
         "ply": 10,
-        "fen": ".BWBBWB.BW.W.W..........|W|5|5"
+        "fen": "...W.B.B.W.B.W.B...W...B|W|5|5"
       }
     ],
     "strategic_notes": "",
@@ -6108,117 +5758,52 @@
       "learned"
     ],
     "source_reference": "",
-    "needs_llm_name": true
+    "needs_llm_name": false
   },
   {
-    "opening_id": "novel-cf85b827",
-    "name": "Novel Opening novel-cf85b827",
+    "opening_id": "novel-4cfbd49a",
+    "name": "The Royal Guard Rise",
     "aliases": [],
     "family": "novel",
     "side": "both",
     "seed_source": "learned",
     "line_moves": [
-      "a7",
-      "g4",
       "d7",
-      "g7",
-      "f4",
-      "g1",
-      "f4",
-      "d5",
+      "d6",
       "a4",
-      "d2",
+      "b4",
+      "g4",
+      "f4",
       "d1",
-      "b4",
-      "a1",
-      "b4",
       "d3",
+      "e4",
+      "d5",
       "c4",
-      "e3",
+      "b6",
+      "f6",
+      "b2",
+      "d7",
+      "c5",
+      "e5",
       "c3"
     ],
     "branch_moves": [],
     "opening_fen_signatures": [
       {
         "ply": 4,
-        "fen": "WWBB....................|W|2|2"
+        "fen": ".W.....W.B.....B........|W|2|2"
       },
       {
         "ply": 6,
-        "fen": "WWBBB......W............|W|3|3"
+        "fen": ".W.W...W.B.B...B........|W|3|3"
       },
       {
         "ply": 8,
-        "fen": "WWBBB......W.....B......|W|4|4"
+        "fen": ".W.W.W.W.B.B...B.....B..|W|4|4"
       },
       {
         "ply": 10,
-        "fen": "WWBBB..W...W.B...B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-e5b1264a",
-    "name": "Novel Opening novel-e5b1264a",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "f4",
-      "b4",
-      "d7",
-      "a7",
-      "g1",
-      "a4",
-      "d1",
-      "g4",
-      "a1",
-      "b6",
-      "d6",
-      "b2",
-      "d2",
-      "c4",
-      "d6",
-      "d5",
-      "g4",
-      "g7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BW.........W...B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BW..W..B...W...B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BW.BWW.B...W...B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BW.BWWWBB..W...B........|W|5|5"
+        "fen": ".W.W.W.W.B.B...B.B.W.B..|W|5|5"
       }
     ],
     "strategic_notes": "",
@@ -6238,1092 +5823,52 @@
       "learned"
     ],
     "source_reference": "",
-    "needs_llm_name": true
+    "needs_llm_name": false
   },
   {
-    "opening_id": "novel-088dd691",
-    "name": "Novel Opening novel-088dd691",
+    "opening_id": "novel-a6905787",
+    "name": "Four Corners Fortification",
     "aliases": [],
     "family": "novel",
     "side": "both",
     "seed_source": "learned",
     "line_moves": [
-      "f4",
       "d7",
-      "g7",
       "d1",
-      "a1",
       "g4",
-      "d2",
-      "d6",
-      "a7",
-      "d5",
-      "b4",
-      "c4",
-      "d3",
       "a4",
-      "f6",
+      "e4",
+      "f4",
+      "e5",
+      "e3",
       "c5",
-      "f2",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".BW..B.....W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".BWB.BW....W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".BWB.BW..B.W.W..........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WBWB.BW..B.W.W...B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-3f8ed0e7",
-    "name": "Novel Opening novel-3f8ed0e7",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g7",
-      "g4",
-      "d7",
-      "d6",
-      "d1",
-      "d2",
-      "a7",
-      "a4",
-      "a1",
-      "g4",
-      "g1",
-      "b6",
-      "g4",
-      "f6",
-      "f4",
-      "g4",
-      "b4",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".WWB.....B..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".WWB.W...B...B..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "WWWB.W.B.B...B..........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WWWB.WWB.B...B..........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-3e9995fd",
-    "name": "Novel Opening novel-3e9995fd",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "a7",
-      "d6",
-      "g7",
-      "d7",
-      "g1",
-      "d1",
-      "g4",
-      "f4",
-      "d2",
-      "a1",
-      "b4",
       "c4",
-      "d6",
-      "d5",
-      "a4",
-      "b6",
-      "f2",
-      "d3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "WBW......B..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "WBW.WB...B..............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "WBWWWB...B.B............|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WBWWWBB..B.B.W..........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-bfbe91b2",
-    "name": "Novel Opening novel-bfbe91b2",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "e4",
-      "d7",
-      "f4",
-      "f6",
-      "d6",
-      "e5",
-      "a4",
-      "g1",
-      "d3",
-      "e3",
-      "b4",
-      "f2",
-      "c4",
-      "b6",
-      "d1",
-      "a7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".B.W...B...........W....|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".B.W...B..BW.......W....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W...B.WBW......BW....|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.WB..W.WBW......BW....|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-561c24ff",
-    "name": "Novel Opening novel-561c24ff",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d1",
-      "g7",
-      "d5",
-      "d6",
-      "g4",
-      "c4",
-      "d3",
-      "f4",
-      "d2",
-      "a4",
-      "b4",
-      "c4",
-      "d7",
-      "b2",
-      "e4",
-      "f6",
-      "f2",
-      "b6"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "..B..W...B.......W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "..BW.W...B.......W.....B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "..BW.W...B.B.....W...W.B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "..BW.W.B.B.B.W...W...W.B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-16e70f0c",
-    "name": "Novel Opening novel-16e70f0c",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "d6",
-      "d7",
-      "a4",
-      "d2",
-      "d1",
-      "e4",
-      "c4",
-      "f4",
-      "e5",
       "d5",
       "d3",
-      "c4",
-      "b4",
-      "f2",
-      "e3",
-      "b2",
-      "d3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.W...B.B..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W.B.B.B...W..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.W.B.B.B...W.....W...B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.W.B.B.B.W.W....BW...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-5d3ffb45",
-    "name": "Novel Opening novel-5d3ffb45",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d1",
-      "a7",
       "d6",
-      "g4",
-      "d3",
-      "d5",
-      "d2",
-      "e4",
-      "a4",
-      "f4",
-      "d6",
-      "c4",
-      "g1",
-      "d7",
-      "a1",
-      "a7",
-      "b4",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "B..B.W...W..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "B..B.W...W.......B...W..|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "B..B.W...W...W...B.B.W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "B..B.W.W.W.B.W...B.B.W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-a24747ad",
-    "name": "Novel Opening novel-a24747ad",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "g7",
-      "d5",
-      "a4",
-      "d6",
-      "d1",
-      "d2",
-      "c4",
-      "b4",
-      "e4",
-      "f4",
-      "g7",
-      "d3",
-      "g4",
-      "b2",
-      "g1",
-      "b2",
-      "a1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".WB....B.........W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".WB..B.B.W.......W......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".WB..B.B.W...W...W.....B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".WB..B.B.W...W.W.W.B...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-b9931191",
-    "name": "Novel Opening novel-b9931191",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a7",
-      "d6",
-      "c4",
-      "d1",
-      "d5",
-      "d3",
-      "e4",
-      "d2",
-      "e4",
-      "f4",
-      "d7",
-      "b4",
-      "g7",
-      "b4",
-      "a1",
-      "b2",
-      "a4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "B..W.....W.............B|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "B..W.W...W.......B.....B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "B..W.W...W.......B.B.W.B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "B..W.W...W...W...B.B.W.B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-7065368f",
-    "name": "Novel Opening novel-7065368f",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a7",
-      "d7",
-      "b4",
-      "e4",
-      "f4",
-      "d3",
       "d2",
       "a4",
-      "d5",
-      "c4",
-      "a1",
-      "d1",
-      "g7",
-      "d6",
-      "c3",
-      "f2",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BW.W...........B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BW.W.......B...B...W....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BW.W.......B.B.B...W.W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BW.W...W...B.B.B.B.W.W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-07ee4188",
-    "name": "Novel Opening novel-07ee4188",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d1",
-      "g7",
-      "d5",
-      "d7",
-      "a7",
-      "c4",
       "b4",
-      "d3",
       "e4",
-      "d2",
-      "g4",
-      "d6",
-      "f4",
-      "g1",
-      "c5",
-      "e5",
-      "e3",
-      "d3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".BB..W...........W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "WBB..W...........W.....B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "WBB..W.........W.W...B.B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WBB..W.......B.W.W.W.B.B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-b2e95f0f",
-    "name": "Novel Opening novel-b2e95f0f",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "d7",
-      "d6",
-      "d2",
-      "b4",
-      "d5",
-      "d3",
-      "f4",
-      "a4",
-      "d1",
-      "c4",
-      "d5",
-      "e3",
-      "c3",
-      "c5",
-      "b6",
-      "e4",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".B.W.....W...B..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".B.W.....W...B.W.B......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.....W.B.B.W.B...W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.B.W.W.B.B.W.B...W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-2f3931b5",
-    "name": "Novel Opening novel-2f3931b5",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "a7",
-      "g4",
-      "d5",
-      "a4",
-      "d6",
-      "e4",
-      "f4",
-      "g7",
-      "d2",
-      "g1",
-      "c4",
-      "d2",
-      "d1",
-      "b4",
-      "c3",
-      "b6"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "WW.B.B..................|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "WW.B.B.B.........W......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "WW.B.B.B.W.......W.B....|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "WWBB.B.B.W.W.....W.B....|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-7dce7e58",
-    "name": "Novel Opening novel-7dce7e58",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d1",
-      "d2",
-      "d7",
-      "c4",
-      "d3",
-      "d6",
-      "e4",
-      "g4",
-      "a4",
-      "b4",
-      "f4",
-      "a1",
-      "e3",
-      "d5",
-      "c3",
-      "g4",
-      "e5",
-      "a7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...W.......B.........B|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W...W...B...B.......W.B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.B.W...B...B.....W.W.B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.B.W.W.B...B.B...W.W.B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-cd13e23c",
-    "name": "Novel Opening novel-cd13e23c",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "d6",
-      "d2",
-      "b4",
-      "d5",
-      "d1",
-      "f4",
-      "d7",
-      "d3",
-      "e4",
-      "g7",
-      "f2",
-      "c4",
-      "c3",
-      "b6",
-      "e3",
-      "g1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "...W...B.W...B..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...W...B.W...B.W.B......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...W.W.B.W.B.B.W.B......|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.W.W.B.W.B.B.W.B...B..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-ed00ef87",
-    "name": "Novel Opening novel-ed00ef87",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "e4",
-      "d7",
-      "f4",
-      "a4",
-      "d1",
-      "c4",
-      "b4",
-      "d2",
-      "d6",
-      "d3",
-      "d5",
-      "f2",
-      "b2",
-      "b6",
-      "c3",
-      "a1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".B.W...B...........W....|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".B.W...B...W.......W....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.W.B...W.......W...B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W.B...W.B.W...W...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-0e98cf16",
-    "name": "Seven Star Foothold",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "f2",
-      "b2",
-      "b4",
-      "a4",
-      "d7",
-      "d1",
-      "e4",
-      "g7",
-      "d5",
-      "d3",
-      "g4",
-      "c4",
-      "e5",
-      "c3",
       "e3"
     ],
     "branch_moves": [],
     "opening_fen_signatures": [
       {
         "ply": 4,
-        "fen": ".........W.WBB..........|W|2|2"
+        "fen": ".W.W.B.B................|W|2|2"
       },
       {
         "ply": 6,
-        "fen": ".........W.WBBWB........|W|3|3"
+        "fen": ".W.W.B.B...B.......W....|W|3|3"
       },
       {
         "ply": 8,
-        "fen": ".B.....W.W.WBBWB........|W|4|4"
+        "fen": ".W.W.B.B...B......WWB...|W|4|4"
       },
       {
         "ply": 10,
-        "fen": ".B...W.W.W.WBBWB...B....|W|5|5"
+        "fen": ".W.W.B.B...B....W.WWB..B|W|5|5"
       }
     ],
     "strategic_notes": "",
@@ -7335,6 +5880,136 @@
     "outcome_stats": {
       "W": 0,
       "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-77cb0319",
+    "name": "The Crowned Anchor Opening",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d1",
+      "d2",
+      "d6",
+      "a4",
+      "f4",
+      "c4",
+      "g4",
+      "b4",
+      "e4",
+      "d2",
+      "d5",
+      "d3",
+      "d6",
+      "f2",
+      "c5",
+      "b2",
+      "d5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W...B...B...W..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W...B.W.B.B.W..........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B.B.W.B.B.W.........W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B.B.W.B.B.W.W...B...W|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-1a945176",
+    "name": "Fenrir's Fury Rise",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "b4",
+      "f6",
+      "f2",
+      "b6",
+      "b2",
+      "d3",
+      "g4",
+      "e4",
+      "d7",
+      "e3",
+      "d5",
+      "e5",
+      "c3",
+      "g4",
+      "f4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........WWWBB.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWWWBBBB........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B....WWWWBBBB.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
       "D": 0
     },
     "confidence": 0.3,

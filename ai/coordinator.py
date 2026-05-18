@@ -36,6 +36,7 @@ class Coordinator:
         endgame_recognizer: EndgameRecognizer | None = None,
         trajectory_db: TrajectoryDB | None = None,
         vs_human: bool = True,
+        human_color: str = "W",
     ) -> None:
         self.game_ai = game_ai
         self.mills_llm = mills_llm
@@ -47,6 +48,7 @@ class Coordinator:
         self.endgame_recognizer = endgame_recognizer
         self.trajectory_db = trajectory_db
         self.vs_human = vs_human
+        self.human_color = human_color
 
         self.dialogue_log: list[str] = []
         self._poor_move_count = 0
@@ -159,7 +161,7 @@ class Coordinator:
         summary = self.mills_llm.summarise_session([game_record])
         if summary:
             self.memory.save_session_narrative(summary)
-            self.emit("MillsLLM", summary)
+            self.emit("MillsAI", summary)
 
     @staticmethod
     def _compute_fen_signatures(placement_moves: list[str]) -> list[dict]:
@@ -174,6 +176,8 @@ class Coordinator:
         return sigs
 
     def _save_novel_opening(self, game_record: dict) -> None:
+        from ai.opening_book import is_auto_named
+
         placement_moves = [
             m["to"] for m in game_record.get("moves", [])
             if m.get("type") == "place"
@@ -182,14 +186,75 @@ class Coordinator:
             return
 
         book = self.opening_recognizer.book  # type: ignore[union-attr]
+        winner = game_record.get("winner")
+
+        # Check if an existing opening shares the same first 4+ moves.
+        # If so, merge this game's outcome into it rather than creating a duplicate.
+        similar = book.find_similar(placement_moves, min_common=4)
+        if similar:
+            canonical = max(
+                similar,
+                key=lambda o: sum(o.outcome_stats.get(k, 0) for k in ("W", "B", "D")),
+            )
+            if winner in ("W", "B", "D"):
+                canonical.outcome_stats[winner] = canonical.outcome_stats.get(winner, 0) + 1
+            # Name it now if it's still carrying an auto-generated placeholder
+            if is_auto_named(canonical.name) or canonical.needs_llm_name:
+                name = self.mills_llm.name_novel_opening(canonical.line_moves)
+                if name and not is_auto_named(name):
+                    canonical.name = name
+                    canonical.needs_llm_name = False
+                    self.emit("MillsAI", f"Named this opening family \"{name}\"")
+            book.save_opening(canonical)
+            return
+
+        # No similar opening — create a new one.
+        llm_available = self.mills_llm._client is not None
         name = self.mills_llm.name_novel_opening(placement_moves)
         sigs = self._compute_fen_signatures(placement_moves)
+        needs_name = is_auto_named(name) or not llm_available
         novel = book.save_novel_opening(
-            placement_moves, sigs, outcome=game_record.get("winner")
+            placement_moves, sigs,
+            outcome=winner,
+            needs_llm_name=needs_name,
         )
         novel.name = name
         book.save_opening(novel)
-        self.emit("MillsLLM", f"I've recorded this opening as \"{name}\"")
+        if not needs_name:
+            self.emit("MillsAI", f"I've recorded this opening as \"{name}\"")
+
+    # ── Tactical pre-screen ───────────────────────────────────────────────────
+
+    def _tactical_situation(self, board: "BoardState") -> dict:
+        """Classify the tactical urgency before move selection.
+
+        Returns a dict with flags used both for logging and to inform the LLM
+        about the immediate tactical context.
+        """
+        from ai.heuristics import (
+            detect_double_mills, detect_feeder_mills,
+            detect_diamonds, opponent_mills_in_n_moves,
+        )
+        from ai.heuristics import _closeable_mills
+        ai_color  = board.turn
+        opp_color = "B" if ai_color == "W" else "W"
+
+        can_close      = _closeable_mills(board, ai_color) > 0
+        opp_can_close  = _closeable_mills(board, opp_color) > 0
+        opp_doubles    = detect_double_mills(board, opp_color)
+        ai_doubles     = detect_double_mills(board, ai_color)
+        opp_diamonds   = detect_diamonds(board, opp_color)
+        opp_threats_2  = opponent_mills_in_n_moves(board, opp_color, n=2)
+
+        return {
+            "urgent":             can_close or opp_can_close or bool(opp_doubles),
+            "can_close_mill":     can_close,
+            "must_block_opponent": opp_can_close,
+            "opp_double_mills":   opp_doubles,
+            "ai_double_mills":    ai_doubles,
+            "opp_diamonds":       opp_diamonds,
+            "opp_threats_in_2":  opp_threats_2,
+        }
 
     # ── AI deliberation ───────────────────────────────────────────────────────
 
@@ -243,7 +308,7 @@ class Coordinator:
         if self.endgame_recognizer:
             self._endgame_state = self.endgame_recognizer.update(board)
             for msg in self.endgame_recognizer.transition_announcements():
-                self.emit("MillsLLM", msg)
+                self.emit("MillsAI", msg)
         endgame_state = self._endgame_state
 
         # 2. Query trajectory DB for historical move-outcome hints
@@ -253,7 +318,17 @@ class Coordinator:
             if notations:
                 trajectory_hints = self.trajectory_db.query(notations, board.turn) or None
 
-        # 3. GameAI picks its best move (with opening bonus, trajectory hints, endgame depth)
+        # 3. Tactical pre-screen: log urgency level so the AI and LLM know the context
+        tac = self._tactical_situation(board)
+        if tac["can_close_mill"]:
+            self.emit("GameAI", "Mill closure available — prioritising tactical completion")
+        elif tac["must_block_opponent"]:
+            self.emit("GameAI", "Opponent threatens a mill — defensive priority")
+        elif tac["opp_double_mills"]:
+            pivots = ", ".join(tac["opp_double_mills"][:2])
+            self.emit("GameAI", f"Disrupting opponent cycling mill pivot at {pivots}")
+
+        # 4. GameAI picks its best move (with opening bonus, trajectory hints, endgame depth)
         ai_move = self.game_ai.choose_move(
             board,
             recognition=recognition,
@@ -262,13 +337,15 @@ class Coordinator:
         )
         ai_score = self.game_ai.score_move(board, ai_move)
 
-        # 4. Expose score hint to MillsLLM for its prompt
+        # 5. Expose score hint to MillsLLM for its prompt
         self.mills_llm._last_ai_score = ai_score
 
         # 5. Ask MillsLLM for a recommendation (with opening + endgame context)
+        _notations_so_far = [m.get("notation", "") for m in self._game_moves if m.get("notation")]
         opinion, llm_notation = self.mills_llm.ask_for_move_opinion(
             board, legal, ai_move, recognition=recognition, endgame_state=endgame_state,
             audience="human" if self.vs_human else "ai",
+            move_history=_notations_so_far,
         )
 
         # 6. Try to adopt the LLM's recommendation if it scores well enough
@@ -322,13 +399,13 @@ class Coordinator:
                         "You've outplayed me completely. I yield.",
                         "My position is beyond recovery. Congratulations.",
                     ])
-                    self.emit("MillsLLM", farewell)
+                    self.emit("MillsAI", farewell)
             except Exception:
                 pass
 
         if self.game_ai.last_was_blunder:
-            blunder_msg = self.mills_llm.announce_blunder(board, move)
-            self.emit("MillsLLM", blunder_msg if blunder_msg else
+            blunder_msg = self.mills_llm.announce_blunder(board, move, move_history=_notations_so_far)
+            self.emit("MillsAI", blunder_msg if blunder_msg else
                       "I just made a mistake there — can you spot what I should have done instead?")
 
         # 8. Update recognizer with AI's move notation
@@ -370,7 +447,7 @@ class Coordinator:
         if self.endgame_recognizer:
             self._endgame_state = self.endgame_recognizer.update(board_after)
             for msg in self.endgame_recognizer.transition_announcements():
-                self.emit("MillsLLM", msg)
+                self.emit("MillsAI", msg)
 
         # Update recognizer with human's move
         recognition = INACTIVE_RESULT
@@ -379,9 +456,9 @@ class Coordinator:
                 human_move.get("to", ""), board_after
             )
             if recognition.status == "exact" and recognition.name:
-                self.emit("MillsLLM", f"Opening recognised: {recognition.name}")
+                self.emit("MillsAI", f"Opening recognised: {recognition.name}")
             elif recognition.status == "transposition" and recognition.name:
-                self.emit("MillsLLM", f"Transposition to: {recognition.name}")
+                self.emit("MillsAI", f"Transposition to: {recognition.name}")
 
         score_before = self.game_ai.score_move(board_before, human_move)
 
@@ -408,12 +485,16 @@ class Coordinator:
 
         has_capture = bool(human_move.get("capture"))
         score_after = 1.0 - score_before
+        _notations = [m.get("notation", "") for m in self._game_moves if m.get("notation")]
 
         # 1. Mill/capture commentary — always comment when human forms a mill
         if has_capture:
-            comment = self.mills_llm.comment_on_mill(board_after, human_move)
+            comment = self.mills_llm.comment_on_mill(
+                board_after, human_move,
+                human_color=self.human_color, move_history=_notations,
+            )
             if comment:
-                self.emit("MillsLLM", comment)
+                self.emit("MillsAI", comment)
                 self._general_comment_count += 1
                 self._last_comment_turn = self._turn_num
                 return
@@ -427,27 +508,34 @@ class Coordinator:
                 score_after=score_after,
                 score_drop_threshold=self.poor_move_threshold,
                 recognition=recognition,
+                human_color=self.human_color,
+                move_history=_notations,
             )
             if comment:
-                self.emit("MillsLLM", comment, tag="warning")
+                self.emit("MillsAI", comment, tag="warning")
                 self._poor_move_count += 1
                 self._last_comment_turn = self._turn_num
                 return
 
         # 3. Positive commentary on strong moves
         if score_before >= 0.75:
-            comment = self.mills_llm.comment_on_good_move(board_after, human_move, score_before)
+            comment = self.mills_llm.comment_on_good_move(
+                board_after, human_move, score_before,
+                human_color=self.human_color, move_history=_notations,
+            )
             if comment:
-                self.emit("MillsLLM", comment)
+                self.emit("MillsAI", comment)
                 self._general_comment_count += 1
                 self._last_comment_turn = self._turn_num
                 return
 
         # 4. Periodic strategic question every 8 human moves
         if self._human_turn_num % 8 == 0:
-            question = self.mills_llm.ask_strategic_question(board_after)
+            question = self.mills_llm.ask_strategic_question(
+                board_after, human_color=self.human_color, move_history=_notations,
+            )
             if question:
-                self.emit("MillsLLM", question)
+                self.emit("MillsAI", question)
                 self._last_comment_turn = self._turn_num
 
     # ── Export ────────────────────────────────────────────────────────────────

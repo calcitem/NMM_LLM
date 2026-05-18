@@ -113,7 +113,7 @@ class MemoryManager:
         games_path: str = "data/games",
         session_path: str = "data/session_memory",
         ollama_url: str = "http://localhost:11434",
-        ollama_model: str = "llama3.2",
+        ollama_model: str = "llama3.1:8b",
         use_ollama_embeddings: bool = True,
     ) -> None:
         self._games_path = Path(games_path)

@@ -20,6 +20,23 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_AUTO_NAME_PREFIXES = (
+    "Novel Opening novel-",
+    "Novel Opening (",
+    "Novel Opening",
+    "Self-Play Line",
+)
+
+
+def is_auto_named(name: str) -> bool:
+    """Return True if `name` is a machine-generated placeholder (not an LLM name)."""
+    if not name or not name.strip():
+        return True
+    for prefix in _AUTO_NAME_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    return False
+
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
@@ -434,6 +451,90 @@ class OpeningBook:
         )
         self.save_opening(opening)
         return opening
+
+    # ── Deduplication ─────────────────────────────────────────────────────────
+
+    def find_similar(
+        self,
+        move_sequence: list[str],
+        min_common: int = 4,
+    ) -> list["Opening"]:
+        """Return openings whose first `min_common` moves match `move_sequence`."""
+        if len(move_sequence) < min_common:
+            return []
+        prefix = tuple(move_sequence[:min_common])
+        return [
+            o for o in self._index.values()
+            if len(o.line_moves) >= min_common
+            and tuple(o.line_moves[:min_common]) == prefix
+        ]
+
+    def merge_duplicates(self, min_common: int = 4) -> int:
+        """Merge auto-named openings that share the same first `min_common` moves.
+
+        Rules:
+        - Named openings (LLM or book names) are NEVER merged with each other —
+          they represent intentionally distinct variations of the same opening family.
+        - Auto-named openings sharing a prefix with a named opening are merged INTO
+          the named opening that has the most recorded games.
+        - Auto-named openings sharing a prefix with only other auto-named openings
+          are merged into the one with the most recorded games; the result keeps
+          needs_llm_name=True so it gets named in the next naming pass.
+
+        Returns the number of entries removed.
+        """
+        from collections import defaultdict
+
+        _stat_keys = ("W", "B", "D",
+                      "human_wins", "human_losses", "human_draws",
+                      "ai_wins", "ai_losses", "ai_draws")
+
+        groups: dict[tuple, list[Opening]] = defaultdict(list)
+        for o in self._index.values():
+            if len(o.line_moves) >= min_common:
+                key = tuple(o.line_moves[:min_common])
+                groups[key].append(o)
+
+        removed = 0
+        for group in groups.values():
+            if len(group) <= 1:
+                continue
+
+            named   = [o for o in group if not is_auto_named(o.name)]
+            unnamed = [o for o in group if is_auto_named(o.name)]
+
+            if not unnamed:
+                # Every entry in this group has a real name → distinct lines, skip
+                continue
+
+            def _by_games(o: Opening) -> int:
+                return sum(o.outcome_stats.get(k, 0) for k in ("W", "B", "D"))
+
+            if named:
+                # Fold all unnamed into the named entry with the most games
+                canonical = max(named, key=_by_games)
+                to_merge  = unnamed
+            else:
+                # No named entry → fold all auto-named into the most-played one
+                unnamed.sort(key=_by_games, reverse=True)
+                canonical = unnamed[0]
+                canonical.needs_llm_name = True  # flag for later naming pass
+                to_merge  = unnamed[1:]
+
+            for dup in to_merge:
+                for k in _stat_keys:
+                    canonical.outcome_stats[k] = (
+                        canonical.outcome_stats.get(k, 0)
+                        + dup.outcome_stats.get(k, 0)
+                    )
+                del self._index[dup.opening_id]
+                removed += 1
+
+            self._index[canonical.opening_id] = canonical
+
+        if removed:
+            self._write_openings_json()
+        return removed
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@
     <button id="toggle-moves">Moves</button>
     <button id="toggle-settings">Settings</button>
     <button id="toggle-ai-tuning">AI Tuning</button>
+    <button id="toggle-openings">Openings</button>
   </header>
 
   <main>
@@ -22,10 +23,11 @@
       <div class="panel-box commentary-panel" id="commentary-human-panel">
         <h3>MillsAI Chat</h3>
         <div id="commentary-human"></div>
-        <div id="player-chat-row">
-          <input type="text" id="player-chat-input" placeholder="Ask MillsAI…" maxlength="300" autocomplete="off">
-          <button id="player-chat-send">Send</button>
-        </div>
+      </div>
+      <!-- Player chat input — static between the two panels -->
+      <div id="player-chat-row">
+        <input type="text" id="player-chat-input" placeholder="Ask MillsAI…" maxlength="300" autocomplete="off">
+        <button id="player-chat-send">Send</button>
       </div>
       <!-- AI ↔ AI discussion section (bottom) -->
       <div class="panel-box commentary-panel" id="commentary-ai-panel">
@@ -49,6 +51,31 @@
       <div class="panel-box" id="moves-panel" hidden>
         <h3>Moves</h3>
         <div id="moves-list"></div>
+      </div>
+
+      <!-- Openings panel (toggled via header button) -->
+      <div class="panel-box" id="openings-panel" hidden>
+        <h3>Opening Explorer</h3>
+        <div class="form-row">
+          <label for="sel-opening">Opening</label>
+          <select id="sel-opening" style="flex:1;min-width:0">
+            <option value="">— loading… —</option>
+          </select>
+        </div>
+        <div id="opening-info" style="font-size:.78rem;color:var(--text-dim);margin:4px 0 6px;line-height:1.4"></div>
+        <div class="form-row">
+          <label for="rng-replay-speed">Speed</label>
+          <input type="range" id="rng-replay-speed" min="300" max="3000" step="100" value="800" style="flex:1">
+          <span id="lbl-replay-speed" style="min-width:38px;text-align:right;font-size:.8rem">0.8s</span>
+        </div>
+        <div class="form-row">
+          <label for="sel-continue-mode">After opening</label>
+          <select id="sel-continue-mode">
+            <option value="practice">Practice — I play on</option>
+            <option value="auto">Watch — AI continues</option>
+          </select>
+        </div>
+        <button id="btn-replay-opening">&#x25B6; Replay Opening</button>
       </div>
 
       <div class="panel-box">
@@ -78,6 +105,19 @@
           <span class="piece-b">⬛ Taken</span>
           <span id="info-b-taken" class="piece-b">—</span>
         </div>
+      </div>
+
+      <!-- Replay controls -->
+      <div class="panel-box" id="replay-panel">
+        <h3>Replay</h3>
+        <div id="replay-controls">
+          <button id="btn-replay-first" title="First move">&#x23EE;</button>
+          <button id="btn-replay-prev"  title="Previous move">&#x23F4;</button>
+          <span id="replay-ply-label">0 / 0</span>
+          <button id="btn-replay-next"  title="Next move">&#x23F5;</button>
+          <button id="btn-replay-last"  title="Last move">&#x23ED;</button>
+        </div>
+        <button id="btn-replay-live" class="btn-small" style="margin-top:6px;width:100%">&#x21A9; Back to Live</button>
       </div>
 
       <div class="panel-box" id="settings-panel">

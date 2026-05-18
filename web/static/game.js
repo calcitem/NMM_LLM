@@ -19,6 +19,9 @@ let thinkingInterval  = null; // setInterval handle while AI is thinking
 let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
 let canMarkBad        = false; // true only between ai_move and the next human move commit
+let replayMoves       = [];   // moves with FEN data, populated when game ends
+let replayIdx         = -1;   // -1 = not replaying; 0..n-1 = ply index
+let _openingsData     = [];   // cached openings from /api/openings
 
 // ── AI weight defaults (Stage 5.13) ──────────────────────────────────────────
 
@@ -176,6 +179,17 @@ document.addEventListener("DOMContentLoaded", () => {
     p.hidden = !p.hidden;
     $("toggle-moves").classList.toggle("btn-active", !p.hidden);
   });
+  $("toggle-openings").addEventListener("click", () => {
+    const p = $("openings-panel");
+    p.hidden = !p.hidden;
+    $("toggle-openings").classList.toggle("btn-active", !p.hidden);
+  });
+  $("rng-replay-speed").addEventListener("input", () => {
+    const ms = parseInt($("rng-replay-speed").value);
+    $("lbl-replay-speed").textContent = (ms / 1000).toFixed(1) + "s";
+  });
+  $("btn-replay-opening").addEventListener("click", startReplayOpening);
+  $("sel-opening").addEventListener("change", _showOpeningInfo);
   $("btn-undo").addEventListener("click", () => {
     if (!ws || phase === "idle") return;
     ws.send(JSON.stringify({ type: "undo" }));
@@ -218,9 +232,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter") sendPlayerMessage();
   });
 
+  // Replay controls
+  $("btn-replay-first").addEventListener("click", () => replayGo(0));
+  $("btn-replay-prev").addEventListener("click",  () => replayGo(replayIdx - 1));
+  $("btn-replay-next").addEventListener("click",  () => replayGo(replayIdx + 1));
+  $("btn-replay-last").addEventListener("click",  () => replayGo(replayMoves.length - 1));
+  $("btn-replay-live").addEventListener("click",  exitReplay);
+
   $("settings-panel").hidden  = false;
   $("ai-tuning-panel").hidden = true;
+  _setReplayButtonsDisabled(true);
   renderIdle();
+  _loadOpenings();
 });
 
 function renderIdle() {
@@ -254,6 +277,10 @@ function startNewGame() {
   hintsLeft = 3;
   drawUnlocked = false;
   forceAggressive = false;
+  replayMoves = [];
+  replayIdx   = -1;
+  _updateReplayLabel();
+  _setReplayButtonsDisabled(true);
   $("btn-force-cap").classList.remove("btn-active");
   $("btn-force-cap").disabled = true;
   drawEvalGraph();
@@ -300,21 +327,30 @@ function handleMessage(msg) {
       phase = msg.finished ? "game_over" : "playing";
       stopThinkingTimer();
       $("btn-force-move").hidden = true;
-      board.render(msg);
-      if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
+      if (replayIdx === -1) {
+        board.render(msg);
+        if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
+      }
       updateInfoPanel(msg);
       if (msg.eval_score !== undefined) {
         evalHistory.push(msg.eval_score);
         drawEvalGraph();
       }
-      if (msg.moves) renderMoves(msg.moves);
+      if (msg.moves) {
+        renderMoves(msg.moves);
+        if (phase === "game_over" && msg.moves.length > 0) {
+          replayMoves = msg.moves;
+          _setReplayButtonsDisabled(false);
+          _updateReplayLabel();
+        }
+      }
       $("btn-undo").disabled = (phase === "idle" || phase === "game_over");
       updateHintButton(msg.is_human_turn && phase !== "game_over");
       if ((msg.post_placement_moves ?? 0) >= 40) drawUnlocked = true;
       updateDrawButton();
       $("btn-force-cap").disabled = (phase === "idle" || phase === "game_over");
       $("btn-bad-move").hidden = !canMarkBad;
-      if (msg.is_human_turn) {
+      if (msg.is_human_turn && replayIdx === -1) {
         setStatus(
           msg.phase === "place"
             ? "Your turn — click a green node to place."
@@ -698,9 +734,84 @@ function setTurnBadge(name, winner) {
   }
 }
 
+// ── Move replay ───────────────────────────────────────────────────────────────
+// replayIdx is 0-based ply index. Position at idx shows board AFTER move[idx].
+// move[idx].fen is the board BEFORE that move, so we use move[idx+1].fen
+// (the board before the next move = board after this move).
+// For the last move we render directly from the live final board grid.
+
+function replayGo(idx) {
+  if (!replayMoves.length) return;
+  idx = Math.max(0, Math.min(replayMoves.length - 1, idx));
+  replayIdx = idx;
+
+  // Board state AFTER move[idx]
+  if (idx + 1 < replayMoves.length) {
+    const fen = replayMoves[idx + 1].fen;
+    if (fen) board.renderFromFen(fen);
+  } else {
+    // Last move: use the live final board
+    if (gameState) {
+      board.grid = Object.assign({}, gameState.board);
+      board._millNodes = new Set();
+      board._hintGroup.innerHTML  = "";
+      board._hintOverlay.innerHTML = "";
+      board._drawPieces();
+    }
+  }
+
+  _updateReplayLabel();
+  _highlightReplayMove(idx);
+}
+
+function exitReplay() {
+  replayIdx = -1;
+  if (gameState) {
+    board.render(gameState);
+    if (gameState.move_pairs) board.setMovePairs(gameState.move_pairs);
+  }
+  _updateReplayLabel();
+  _highlightReplayMove(-1);
+}
+
+function _setReplayButtonsDisabled(disabled) {
+  ["btn-replay-first","btn-replay-prev","btn-replay-next",
+   "btn-replay-last","btn-replay-live"].forEach(id => {
+    const el = $(id);
+    if (el) el.disabled = disabled;
+  });
+}
+
+function _updateReplayLabel() {
+  const lbl = $("replay-ply-label");
+  if (!lbl) return;
+  const total = replayMoves.length;
+  if (replayIdx === -1) {
+    lbl.textContent = total ? `— / ${total}` : "0 / 0";
+  } else {
+    lbl.textContent = `${replayIdx + 1} / ${total}`;
+  }
+}
+
+function _highlightReplayMove(idx) {
+  const list = $("moves-list");
+  if (!list) return;
+  list.querySelectorAll(".move-row").forEach(r => r.classList.remove("move-row-replay"));
+  if (idx < 0) return;
+  // Each display row = 2 half-moves (White + Black)
+  const rows = list.querySelectorAll(".move-row:not(.move-row-hdr)");
+  const rowIdx = Math.floor(idx / 2);
+  if (rows[rowIdx]) {
+    rows[rowIdx].classList.add("move-row-replay");
+    rows[rowIdx].scrollIntoView({ block: "nearest" });
+  }
+}
+
+// ── Commentary routing ────────────────────────────────────────────────────────
+
 // Speakers that belong to the AI discussion box (bottom).
 // All others go to the human-facing box (top).
-const _AI_SPEAKERS = new Set(["GameAI", "Game", "Error"]);
+const _AI_SPEAKERS = new Set(["GameAI", "Game", "Error", "MillsLLM"]);
 
 function addCommentary(speaker, text, section) {
   if (!text) return;
@@ -726,6 +837,74 @@ function clearCommentary() {
   const a = $("commentary-ai");
   if (h) h.innerHTML = "";
   if (a) a.innerHTML = "";
+}
+
+// ── Openings panel ────────────────────────────────────────────────────────────
+
+function _loadOpenings() {
+  fetch("/api/openings")
+    .then(r => r.json())
+    .then(openings => {
+      _openingsData = openings;
+      const sel = $("sel-opening");
+      sel.innerHTML = "";
+      if (!openings.length) {
+        sel.innerHTML = '<option value="">No openings found</option>';
+        return;
+      }
+      // Group by family
+      const families = {};
+      for (const op of openings) {
+        const fam = op.family || "Other";
+        if (!families[fam]) families[fam] = [];
+        families[fam].push(op);
+      }
+      for (const [fam, ops] of Object.entries(families).sort()) {
+        const grp = document.createElement("optgroup");
+        grp.label = fam;
+        for (const op of ops) {
+          const opt = document.createElement("option");
+          opt.value = op.id;
+          opt.textContent = `${op.name} (${op.n_moves} moves)`;
+          grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+      }
+      _showOpeningInfo();
+    })
+    .catch(() => {
+      $("sel-opening").innerHTML = '<option value="">Could not load openings</option>';
+    });
+}
+
+function _showOpeningInfo() {
+  const sel  = $("sel-opening");
+  const info = $("opening-info");
+  if (!sel || !info) return;
+  const op = _openingsData.find(o => o.id === sel.value);
+  if (!op) { info.textContent = ""; return; }
+  const total = op.total_games;
+  const stats = total
+    ? `W ${op.w_wins} / B ${op.b_wins} / D ${op.draws}  (${total} games)`
+    : "No games recorded yet";
+  const side = op.side === "W" ? "White" : op.side === "B" ? "Black" : "Both sides";
+  info.innerHTML = `<b>${op.n_moves} moves</b> · ${side} · ${stats}` +
+    (op.notes ? `<br><em>${op.notes.slice(0, 120)}</em>` : "");
+}
+
+function startReplayOpening() {
+  if (!ws) { setStatus("Connect first — start a new game."); return; }
+  const id      = $("sel-opening").value;
+  if (!id) return;
+  const speedMs = parseInt($("rng-replay-speed").value);
+  const mode    = $("sel-continue-mode").value;
+  ws.send(JSON.stringify({
+    type:          "replay_opening",
+    opening_id:    id,
+    speed_ms:      speedMs,
+    continue_mode: mode,
+  }));
+  setStatus("Replaying opening…");
 }
 
 // ── AI weight sliders (Stage 5.13) ────────────────────────────────────────────

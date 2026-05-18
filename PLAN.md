@@ -13,12 +13,12 @@
 | 5.6 | In-Game Hint System | ✅ Complete |
 | 5.7 | Force Move + Thinking Timer | ✅ Complete |
 | 5.8 | Enhanced LLM Commentary | ✅ Complete |
-| 5.9 | Move Replay Viewer | ⬜ Planned |
+| 5.9 | Move Replay Viewer | ✅ Complete |
 | 5.10 | Position Setup / Editor | ⬜ Planned |
-| 5.11 | Bug Fixes & Hardening | 🔄 Current |
-| 5.12 | AI Tactical Imperatives | 🔄 Current |
-| 5.13 | AI Settings & Weight Tuning UI | ⬜ Planned |
-| 5.14 | Opening Replay on GUI | ⬜ Planned |
+| 5.11 | Bug Fixes & Hardening | ✅ Complete |
+| 5.12 | AI Tactical Imperatives | ✅ Complete |
+| 5.13 | AI Settings & Weight Tuning UI | ✅ Complete |
+| 5.14 | Opening Replay on GUI | ✅ Complete |
 | 5.15 | User Guide & README Expansion | 🔄 Current |
 | 5.16 | Starting Play Variants & Opening Database | ⬜ Planned |
 | 5.17 | Game Trajectory Memory & Winner-Aware Learning | ✅ Complete |
@@ -695,7 +695,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/coordinator.py` — Accept `banned_moves` in `deliberate()`; filter them from `get_all_legal_moves()` result before scoring.
 - `ai/game_ai.py` — Accept `excluded_moves: set[str]` in `choose_move()`; skip any move whose notation matches.
 
-### Stage 5.22 — Self-Play Book Variety ⬜
+### Stage 5.22 — Self-Play Book Variety ✅
 
 **Goal:** Self-play games should start from different opening positions, not all converge on the single highest-UCB1 opening. Each game should force a different book start.
 

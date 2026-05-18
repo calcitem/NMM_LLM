@@ -99,7 +99,7 @@ def run_game(
 ) -> None:
     settings = _load_settings()
     ollama_url = settings.get("ollama_url", "http://localhost:11434")
-    ollama_model = settings.get("ollama_model", "llama3.2")
+    ollama_model = settings.get("ollama_model", "llama3.1:8b")
     poor_move_threshold = settings.get("poor_move_threshold", 0.3)
     max_comments = settings.get("max_poor_move_comments_per_game", 5)
 

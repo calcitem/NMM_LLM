@@ -51,6 +51,9 @@ Usage
 
   # Fix both sides to a single personality (disables random mixing):
   python tools/self_play.py --games 20 --no-llm --white-personality aggressive --black-personality defensive
+  
+  	# Favorite;
+	python tools/self_play.py --games 1 --white 5 --black 1 -v --white-personality scholar
 """
 
 from __future__ import annotations
@@ -184,8 +187,12 @@ def _run_fast_game(
     game_label: str = "",
     white_personality: str = "balanced",
     black_personality: str = "balanced",
+    forced_opening=None,  # Opening | None — if set, lock first N placement moves
 ) -> dict:
     """Play one game with no LLM calls. Returns a minimal game-record dict."""
+    from game.rules import get_all_legal_moves as _get_legal
+    from ai.opening_recognizer import RecognitionResult
+
     engine     = GameEngine(human_color="B")
     white_rec  = OpeningRecognizer(book)
     black_rec  = OpeningRecognizer(book)
@@ -195,6 +202,10 @@ def _run_fast_game(
     move_count = 0
     fen_counts: Counter = Counter()
     draw_by_repetition = False
+
+    # How many placement moves we've made (used to index the forced-opening line)
+    _placement_count = 0
+    _forced_line = forced_opening.line_moves if forced_opening else []
 
     while not engine.finished and move_count < _MAX_MOVES:
         board = engine.board
@@ -208,14 +219,33 @@ def _run_fast_game(
         color = board.turn
         ai    = white_ai if color == "W" else black_ai
         rec   = white_rec if color == "W" else black_rec
+        phase = get_game_phase(board, color)
 
         recognition   = rec.get_current_result()
         endgame_state = egr.update(board)
 
         t_move = time.perf_counter()
-        move   = ai.choose_move(board, recognition=recognition, endgame_state=endgame_state,
-                                top_n=2, fast_early_game=True)
+
+        # Force the first N placement moves from the chosen opening so every
+        # game starts from a different position rather than converging on the
+        # single highest-UCB1 line.  Only apply when the book destination is
+        # actually a legal placement; fall back to normal search otherwise.
+        forced_move = None
+        if phase == "place" and _forced_line and _placement_count < len(_forced_line):
+            dest = _forced_line[_placement_count]
+            legal_dests = {m["to"] for m in _get_legal(board)}
+            if dest in legal_dests:
+                forced_move = {"from": None, "to": dest, "capture": None}
+
+        if forced_move is not None:
+            move = forced_move
+        else:
+            move = ai.choose_move(board, recognition=recognition, endgame_state=endgame_state,
+                                  top_n=2, fast_early_game=True)
         elapsed_move = time.perf_counter() - t_move
+
+        if phase == "place":
+            _placement_count += 1
 
         moves_log.append({
             "turn":             move_count + 1,
@@ -318,11 +348,16 @@ def _parallel_worker(params: dict) -> dict:
     black_ai = _make_ai("B", black_diff, black_personality)
     label    = f"[Game {game_num}] " if verbose else ""
 
+    # Round-robin opening variety: use game_num as the cycle index
+    all_openings = list(book._index.values())
+    forced = all_openings[(game_num - 1) % len(all_openings)] if all_openings else None
+
     record = _run_fast_game(
         white_ai, black_ai, book,
         verbose=verbose, game_label=label,
         white_personality=white_personality,
         black_personality=black_personality,
+        forced_opening=forced,
     )
     return record
 
@@ -512,6 +547,11 @@ def main() -> None:
         bp = fixed_b or random.choice(pool)
         return wp, bp
 
+    # Round-robin opening index — cycles through all available openings so
+    # each game starts from a different book line instead of always following
+    # the highest-UCB1 opening.
+    _opening_index = 0
+
     print(f"\nNine Men's Morris — Self-Play Training")
     print(f"  Games:       {n_games}")
     print(f"  White diff:  {w_diff}  |  Black diff: {b_diff}")
@@ -627,12 +667,20 @@ def main() -> None:
                     record.setdefault("white_personality", wp)
                     record.setdefault("black_personality", bp)
                 else:
+                    # Round-robin through book openings so each game starts
+                    # from a different line rather than always the top-UCB1 one.
+                    all_openings = list(book._index.values())
+                    forced = None
+                    if all_openings:
+                        forced = all_openings[_opening_index % len(all_openings)]
+                        _opening_index += 1
                     record = _run_fast_game(
                         white_ai, black_ai, book,
                         verbose=args.verbose,
                         game_label=f"[Game {game_num}] ",
                         white_personality=wp,
                         black_personality=bp,
+                        forced_opening=forced,
                     )
                     mem.save_game_record(record)  # type: ignore[union-attr]
             except KeyboardInterrupt:

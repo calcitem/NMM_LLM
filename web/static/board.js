@@ -310,6 +310,27 @@ export class Board {
     this._hintOverlay.innerHTML = "";
   }
 
+  // Render board positions from a FEN string (for move replay).
+  // FEN format: "<24chars>|<turn>|<W_placed>|<B_placed>"
+  // Positions are in canonical order matching board.py POSITIONS list.
+  renderFromFen(fen) {
+    const POSITIONS = [
+      "a7","d7","g7","g4","g1","d1","a1","a4",
+      "b6","d6","f6","f4","f2","d2","b2","b4",
+      "c5","d5","e5","e4","e3","d3","c3","c4",
+    ];
+    const chars = fen.split("|")[0] || "";
+    this.grid = {};
+    for (let i = 0; i < POSITIONS.length; i++) {
+      const ch = chars[i];
+      this.grid[POSITIONS[i]] = ch === "W" ? "W" : ch === "B" ? "B" : null;
+    }
+    this._millNodes = new Set();
+    this._hintGroup.innerHTML = "";
+    this._hintOverlay.innerHTML = "";
+    this._drawPieces();
+  }
+
   flashMills(boardGrid, color) {
     // Find any mills belonging to `color` in the current grid and flash them.
     const mills = MILLS.filter(m => m.every(n => boardGrid[n] === color));

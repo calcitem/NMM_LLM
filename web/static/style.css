@@ -51,7 +51,8 @@ header h1 {
 
 #toggle-moves,
 #toggle-settings,
-#toggle-ai-tuning {
+#toggle-ai-tuning,
+#toggle-openings {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -63,10 +64,12 @@ header h1 {
 #toggle-settings  { margin-left: auto; }
 #toggle-moves:hover,
 #toggle-settings:hover,
-#toggle-ai-tuning:hover { border-color: var(--accent); color: var(--accent); }
+#toggle-ai-tuning:hover,
+#toggle-openings:hover { border-color: var(--accent); color: var(--accent); }
 #toggle-moves.btn-active,
 #toggle-settings.btn-active,
-#toggle-ai-tuning.btn-active { border-color: var(--tan); color: var(--tan); }
+#toggle-ai-tuning.btn-active,
+#toggle-openings.btn-active { border-color: var(--tan); color: var(--tan); }
 
 /* ── Main 3-column grid ──────────────────────────────────────────────── */
 /*   [commentary 260px] [board 1fr] [side 280px]                         */
@@ -95,7 +98,12 @@ main {
   overflow: hidden;
 }
 
-#commentary-feed {
+/* Human chat panel (top) gets more vertical space than AI discussion (bottom) */
+#commentary-human-panel { flex: 2; }
+#commentary-ai-panel    { flex: 1; }
+
+#commentary-human,
+#commentary-ai {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -104,14 +112,17 @@ main {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-bottom: 8px;
 }
 
-/* Player chat row */
+/* Player chat row — sits between the two commentary panels */
 #player-chat-row {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 #player-chat-input {
@@ -268,6 +279,19 @@ main {
 }
 #btn-new-game:hover { background: #e09050; }
 
+#btn-replay-opening {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--tan);
+  font-size: .85rem;
+  cursor: pointer;
+}
+#btn-replay-opening:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ── AI Tuning sliders ───────────────────────────────────────────────── */
 .tuning-summary {
   font-size: .8rem;
@@ -318,6 +342,32 @@ main {
   cursor: pointer;
 }
 .btn-small:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Replay controls ─────────────────────────────────────────────────── */
+#replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+#replay-controls button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: .9rem;
+}
+#replay-controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+#replay-controls button:disabled,
+#btn-replay-live:disabled { opacity: 0.35; cursor: default; }
+#replay-ply-label {
+  font-size: .82rem;
+  color: var(--text-dim);
+  min-width: 52px;
+  text-align: center;
+}
 
 /* ── Bottom bar: eval graph + undo ───────────────────────────────────── */
 #bottom-bar {
@@ -416,6 +466,7 @@ main {
   padding-bottom: 4px;
 }
 .move-row-last { background: #1e1a12; }
+.move-row-replay { background: #2a2010; outline: 1px solid var(--accent); }
 
 .move-num  { color: var(--text-dim); }
 .move-row .move-w { color: var(--white-p); }

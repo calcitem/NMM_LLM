@@ -161,6 +161,31 @@ async def save_personality(name: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/openings")
+async def list_openings():
+    from fastapi.responses import JSONResponse
+    book = OpeningBook()
+    result = []
+    for op in sorted(book._index.values(), key=lambda o: o.name):
+        stats = op.outcome_stats
+        total = stats.get("W", 0) + stats.get("B", 0) + stats.get("D", 0)
+        result.append({
+            "id":       op.opening_id,
+            "name":     op.name,
+            "family":   op.family,
+            "side":     op.side,
+            "moves":    op.line_moves,
+            "n_moves":  len(op.line_moves),
+            "tags":     op.tags,
+            "notes":    op.strategic_notes,
+            "total_games": total,
+            "w_wins":   stats.get("W", 0),
+            "b_wins":   stats.get("B", 0),
+            "draws":    stats.get("D", 0),
+        })
+    return JSONResponse(result)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _state(session: Session) -> dict:
@@ -201,7 +226,11 @@ def _state(session: Session) -> dict:
         "draw_reason":           engine.draw_reason,
         "post_placement_moves":  engine._post_placement_moves,
         "moves":            [
-            {"color": m["color"], "notation": m["notation"]}
+            {
+                "color":    m["color"],
+                "notation": m["notation"],
+                "fen":      m.get("board_fen_before", ""),
+            }
             for m in engine.game_record.get("moves", [])
         ],
     }
@@ -216,7 +245,7 @@ def _classify_commentary(line: str) -> tuple[str, str, str]:
 
     Section is 'human' (top box, LLM↔human) or 'ai' (bottom box, AI↔AI).
     """
-    AI_SPEAKERS = {"GameAI", "Game"}
+    AI_SPEAKERS = {"GameAI", "Game", "MillsLLM"}
     if line.startswith("[") and "]" in line:
         end = line.index("]")
         speaker = line[1:end]
@@ -466,6 +495,7 @@ async def ws_endpoint(websocket: WebSocket):
                             opening_recognizer=rec, endgame_recognizer=egr,
                             trajectory_db=_trajectory_db,
                             vs_human=True,  # coordinator always faces a human in web games
+                            human_color=hc,
                         )
                         await asyncio.to_thread(coord.on_game_start)
 
@@ -656,8 +686,9 @@ async def ws_endpoint(websocket: WebSocket):
                         f"In one or two sentences, why is {move_str} a strong move "
                         f"in this position? Be specific about the strategic reason."
                     )
+                    _hint_hist = [m.get("notation", "") for m in session.coordinator._game_moves if m.get("notation")]
                     explanation = await asyncio.to_thread(
-                        session.coordinator.mills_llm.player_chat, prompt, board
+                        session.coordinator.mills_llm.player_chat, prompt, board, _hint_hist
                     )
 
                 await _send(websocket, {
@@ -708,6 +739,97 @@ async def ws_endpoint(websocket: WebSocket):
                 else:
                     await _send(websocket, {"type": "draw_rejected"})
 
+            # ── replay_opening ────────────────────────────────────────────────
+            elif kind == "replay_opening":
+                opening_id   = msg.get("opening_id", "")
+                speed_ms     = int(msg.get("speed_ms", 800))
+                continue_mode = msg.get("continue_mode", "practice")
+
+                book    = OpeningBook()
+                opening = book._index.get(opening_id)
+                if opening is None:
+                    await _send(websocket, {
+                        "type": "error",
+                        "message": f"Opening '{opening_id}' not found.",
+                    })
+                    continue
+
+                # Create a fresh engine and session for the replay
+                new_engine  = GameEngine(human_color="B")
+                new_session = Session(
+                    engine=new_engine,
+                    game_ai=None,
+                    coordinator=None,
+                    human_color="B",
+                    vs_human=(continue_mode == "practice"),
+                )
+                session = new_session  # noqa: F841 — reassign nonlocal
+
+                # Send initial state to reset the client board
+                await _send(websocket, _state(session))
+                await _send(websocket, {
+                    "type":    "commentary",
+                    "speaker": "Game",
+                    "text":    f"Replaying opening: {opening.name}",
+                    "section": "ai",
+                })
+
+                # Replay each placement move
+                for pos in opening.line_moves:
+                    await asyncio.sleep(0)  # yield to event loop
+                    move = {"from": None, "to": pos, "capture": None}
+
+                    # Check legality
+                    board = session.engine.board
+                    legal = get_all_legal_moves(board)
+                    valid = any(m.get("from") is None and m["to"] == pos for m in legal)
+                    if not valid:
+                        await _send(websocket, {
+                            "type":    "commentary",
+                            "speaker": "Game",
+                            "text":    f"Opening replay stopped: move {pos} is not legal at this point.",
+                            "section": "ai",
+                        })
+                        break
+
+                    # Auto-capture when a mill is formed
+                    if session.engine.move_forms_mill(move):
+                        caps = sorted(board.legal_captures(board.turn))
+                        if caps:
+                            move["capture"] = caps[0]
+
+                    session.engine.apply_move(move)
+
+                    await asyncio.sleep(speed_ms / 1000)
+                    await _send(websocket, {
+                        "type":        "ai_move",
+                        "from":        None,
+                        "to":          pos,
+                        "capture":     move.get("capture"),
+                        "was_blunder": False,
+                        "can_mark_bad": False,
+                    })
+                    await _send(websocket, _state(session))
+
+                    if session.engine.finished:
+                        break
+
+                # Post-replay message
+                if continue_mode == "practice":
+                    await _send(websocket, {
+                        "type":    "commentary",
+                        "speaker": "Game",
+                        "text":    "Opening complete — your turn to continue from this position.",
+                        "section": "ai",
+                    })
+                else:
+                    await _send(websocket, {
+                        "type":    "commentary",
+                        "speaker": "Game",
+                        "text":    "Opening complete — now playing AI vs AI.",
+                        "section": "ai",
+                    })
+
             # ── player_message ────────────────────────────────────────────────
             elif kind == "player_message" and session:
                 text = str(msg.get("text", "")).strip()[:500]
@@ -716,7 +838,8 @@ async def ws_endpoint(websocket: WebSocket):
                 llm = session.coordinator.mills_llm if session.coordinator else None
                 if llm and llm._client:
                     board = session.engine.board
-                    response = await asyncio.to_thread(llm.player_chat, text, board)
+                    _hist = [m.get("notation", "") for m in (session.coordinator._game_moves if session.coordinator else []) if m.get("notation")]
+                    response = await asyncio.to_thread(llm.player_chat, text, board, _hist)
                     # Echo message and response through commentary
                     if session.coordinator:
                         session.coordinator.emit("Player", text)
