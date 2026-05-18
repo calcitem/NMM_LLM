@@ -1,6 +1,6 @@
 # Nine Men's Morris — AI-Powered Web Game
 
-A browser-based Nine Men's Morris game with a classical minimax engine, an Ollama-powered LLM commentary system, a curated opening book, trajectory-based and endgame position learning, and a fully tunable AI personality system.
+A browser-based Nine Men's Morris game with a classical minimax engine, an Ollama-powered LLM commentary system, a curated opening book, trajectory-based and endgame position learning, a fully tunable AI personality system, adaptive difficulty, and a 6-opponent Tournament Mode with Elo tracking.
 
 ![board](https://img.shields.io/badge/game-Nine%20Men's%20Morris-c8a96e?style=flat-square)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)
@@ -78,7 +78,7 @@ During the placement phase, the Game Info panel shows the **opening family** as 
 ### Trajectory-based learning (TrajectoryDB)
 - All completed games are indexed by move prefix at server startup
 - The AI consults win-rate statistics for the current move sequence when choosing openings, and avoids move sequences associated with losses
-- Bad moves flagged by the player are recorded in `data/bad_moves.json` and excluded from future trajectory suggestions for the duration of the session
+- Adaptive-softened games (where the AI was deliberately weakened) are excluded from the index so intentional blunders don't pollute the library
 
 ### Endgame learning (EndgameDB)
 - Positions from completed games are stored and indexed by piece configuration
@@ -96,9 +96,30 @@ During the placement phase, the Game Info panel shows the **opening family** as 
 - MillsAI can be disabled per game via the Settings panel checkbox
 
 ### Adaptive difficulty (session-only)
-- After 3 consecutive losses, difficulty is automatically softened by one level with an on-screen notification
-- Once softened, difficulty is gradually restored as the player wins
-- After 3 consecutive wins, the UI suggests trying a harder difficulty
+- After 3 consecutive losses, difficulty drops by one level and the AI makes additional deliberate mistakes; an amber badge appears near the status bar
+- Difficulty is gradually restored as the player wins — one level per 3-win streak
+- After 3 consecutive wins at base difficulty, the UI suggests trying a harder level
+- Manually changing the difficulty in Settings resets the adaptive state
+- Games played under adaptive softening are tagged and excluded from the TrajectoryDB and EndgameDB so the library is never trained on intentional blunders
+
+### Tournament Mode
+Play a 6-game gauntlet against all AI personalities in order from weakest to strongest. After completing 3 qualifying games in a session, the **Tournament** header button unlocks.
+
+| Round | Personality | Difficulty | AI Elo |
+|-------|-------------|-----------|--------|
+| 1 | Chaos — The Trickster | 2 | 720 |
+| 2 | Aggressive — The Crusher | 3 | 850 |
+| 3 | Scholar — The Bookworm | 3 | 900 |
+| 4 | Balanced | 4 | 960 |
+| 5 | Defensive — The Blocker | 4 | 1020 |
+| 6 | Positional — The Strategist | 5 | 1080 |
+
+- Colours alternate (White / Black / White / …) for fairness across rounds
+- Score: **2 pts** for a win, **1 pt** for a draw, **0 pts** for a loss (max 12)
+- Player Elo is updated after each game using K=32; displayed live in the Tournament panel
+- Final rank: Apprentice / Beginner / Intermediate / Advanced / Master (based on total points)
+- The next round starts automatically after each game completes; the scoreboard updates in real time
+- Tournament AI uses server-authoritative personality weights — slider settings do not affect tournament games
 
 ### AI Tuning and Personalities
 - **13 configurable weight sliders** accessible via the **AI Tuning** header button (panel stays open during play); settings persist across sessions via **Save settings**:
@@ -154,6 +175,7 @@ During the placement phase, the Game Info panel shows the **opening family** as 
 | **Moves** | Toggle the move list in the side panel |
 | **Openings** | Toggle the Opening Explorer (browse and replay named openings) |
 | **Setup** | Toggle the Position Setup editor (place pieces on the board manually) |
+| **🏆 Tournament** | Toggle the Tournament panel (unlocks after 3 qualifying games) |
 | **► New Game** | Start a new game with current settings |
 | **Personality dropdown** | Switch AI personality; changes take effect from the next game |
 | **Settings** | Toggle the New Game / settings panel |
@@ -164,7 +186,7 @@ During the placement phase, the Game Info panel shows the **opening family** as 
 | Button | When visible | Action |
 |--------|-------------|--------|
 | **Force Move** (gold pulse) | While AI is thinking | Interrupt AI search immediately; AI plays the best move found so far |
-| **Bad Move** | After AI plays a move | Flag the AI's last move as bad, undo it, and have the AI try a different move; the flagged move is banned for the rest of the game |
+| **Bad Move** | After AI plays a move | Flag the AI's last move as bad, undo it, and have the AI try a different move; the ban is **position-specific** — if any piece moves or is captured afterward, the same move becomes legal again from the new board state |
 | **Force Capture** | Always | Toggle: forces the AI to capture aggressively, disabling fly-sacrifice strategy |
 | **Offer Draw** | After 40 post-placement half-moves | Offer a draw; AI may accept or decline |
 | **Hint (3)** | Human's turn | Request a hint; MillsAI explains the suggested move (3 hints per game) |
@@ -329,9 +351,9 @@ NMM_ollama/
 │   ├── memory_manager.py        # Game record persistence and pattern analysis
 │   └── debriefer.py             # Post-game session summary
 ├── web/
-│   ├── app.py                   # FastAPI + WebSocket server, session management, adaptive difficulty
+│   ├── app.py                   # FastAPI + WebSocket server, session management, adaptive difficulty, tournament
 │   ├── static/
-│   │   ├── game.js              # Game controller, personality presets, weight sliders, replay
+│   │   ├── game.js              # Game controller, personality presets, weight sliders, replay, tournament
 │   │   ├── board.js             # SVG board renderer
 │   │   └── style.css            # Dark wood theme
 │   └── templates/index.html
@@ -349,7 +371,7 @@ NMM_ollama/
 │   ├── openings/                # Opening book JSON (openings.json, book_openings.json)
 │   ├── personalities/           # Saved per-personality weight files
 │   ├── games/                   # Game records (JSONL, one file per game)
-│   ├── bad_moves.json           # Player-flagged bad AI moves
+│   ├── weights/                 # Evolved heuristic weights (best.json + checkpoints)
 │   ├── chroma/                  # ChromaDB vector store (LLM memory)
 │   └── session_memory/          # LLM session narrative files
 ├── tests/                       # unittest test suite (160+ tests)
