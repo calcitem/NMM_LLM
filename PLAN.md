@@ -20,10 +20,13 @@
 | 5.13 | AI Settings & Weight Tuning UI | ✅ Complete |
 | 5.14 | Opening Replay on GUI | ✅ Complete |
 | 5.15 | User Guide & README Expansion | 🔄 Current |
-| 5.16 | Starting Play Variants & Opening Database | ⬜ Planned |
+| 5.16 | Starting Play Variants & Opening Database | ✅ Complete |
 | 5.17 | Game Trajectory Memory & Winner-Aware Learning | ✅ Complete |
-| 5.23 | UI Layout & Default Preference Fixes | ⬜ Planned |
-| 6 | Self-Play Training Loop | ⬜ Planned |
+| 5.23 | UI Layout & Default Preference Fixes | ✅ Complete |
+| 5.24 | Endgame Position Memory | ✅ Complete |
+| 5.25 | AI Personality Selector in Header | ✅ Complete |
+| 5.26 | Setup Position Button in Header | ✅ Complete |
+| 6 | Self-Play Training Loop | ✅ Complete |
 | 7 | Heuristic Parameter Evolution | ⬜ Planned |
 | 8 | Adaptive Difficulty | ⬜ Planned |
 | 9 | Tournament / Match Mode | ⬜ Planned |
@@ -635,6 +638,8 @@ source .venv/bin/activate
 
 5. **Self-play smoke test** — plays one 30-move `--no-llm` game and checks it reaches a valid terminal state.
 
+6. **EndgameDB integration test** — after the smoke-test game, verifies `EndgameDB.query()` returns at least one hint for the final endgame position (≤11 pieces). Confirms the hint dict contains valid board notations with float deltas in the range [−0.5, 0.5]. Passes even if no historical games exist yet (empty result accepted). Run with: `python tools/self_test.py --endgame`.
+
 Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the default `localhost:11434` if Ollama is running on a non-standard address.
 
 **Deliverables:**
@@ -666,7 +671,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `web/static/game.js` — Personality load/save wiring.
 - `data/personalities/` directory support.
 
-### Stage 5.23 — UI Layout & Default Preference Fixes ⬜
+### Stage 5.23 — UI Layout & Default Preference Fixes ✅
 
 **Goal:** Small UI improvements requested after playtest.
 
@@ -763,7 +768,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `tools/self_play.py` — Before each game, call `book.select_opening(ai_color='W', exploration_rate=1.5)` (high exploration) and lock the first 4 placement moves to that opening's sequence. Both AIs follow the forced start, then play freely.
 - Or: keep a round-robin index over all openings for the session and cycle through them.
 
-### Stage 5.16 — Starting Play Variants & Opening Database ⬜
+### Stage 5.16 — Starting Play Variants & Opening Database ✅
 
 **Goal:** Extend opening recognition into a richer, staged starting-play system that identifies early deviations, stores named variant lines, and lays the groundwork for a searchable opening database the AI can consult by structure, move sequence, and outcome.
 
@@ -948,6 +953,44 @@ If Ollama is already running but the model is missing, only the pull is needed. 
 **Code-side investigation needed:** Add a pre-flight check in `tools/self_play.py` and `web/app.py` that pings the Ollama endpoint and logs a clear warning (not a crash) when it is unreachable.
 
 
+### Stage 5.25 — AI Personality Selector in Header ✅
+
+**Goal:** Add a compact personality picker to the top header bar, immediately to the right of the "New Game" button, so the player can switch AI personality with a single click before or between games. Random should be the default.
+
+**User flow:**
+
+1. A `<select>` or row of small toggle buttons appears in the header: `Random | Balanced | Aggressive | Defensive | Positional | Scholar | Chaos`.
+2. Selecting a personality immediately updates `sel-game-personality` in the Settings panel so both controls stay in sync.
+3. Default selection on page load: **Random** — AI personality changes each new game, as it does today.
+4. When a new game starts, the selected personality propagates through the existing `personality` field in the `/new_game` request body.
+
+**Implementation notes:**
+
+- Add a `<select id="hdr-personality">` to the `<header>` element in `index.html`, mirroring the options in `#sel-game-personality` (Settings panel).
+- In `game.js`, sync both selects bidirectionally: any change in either updates the other.
+- Style to match other header buttons: `border: 1px solid var(--border); background: none; color: var(--text-dim); padding: 4px 8px; border-radius: 4px; font-size: .85rem;`.
+- No server changes required — personality already travels in the new-game payload.
+
+
+### Stage 5.26 — Setup Position Button in Header ✅
+
+**Goal:** Add a "Setup" button to the header bar next to the "Openings" toggle, giving fast access to the position-setup editor without needing to open Settings.
+
+**User flow:**
+
+1. A `<button id="toggle-setup">Setup</button>` appears in the header between "Openings" and "New Game".
+2. Clicking it opens the position-setup editor (shows `#setup-panel`, hides `#settings-panel`) exactly as if the player had opened Settings and clicked "Setup Position…".
+3. Clicking again closes the setup panel.
+4. The button follows the same `.btn-active` active-state styling as the other header toggles.
+
+**Implementation notes:**
+
+- Add button to `<header>` in `index.html`: `<button id="toggle-setup">Setup</button>`.
+- In `game.js`, add a click handler that mirrors the existing `#btn-setup-toggle` logic (show `setup-panel`, hide `settings-panel`, toggle board into setup mode).
+- Keep `#btn-setup-toggle` in the Settings panel for users who navigate that way.
+- CSS: same rule block as `#toggle-moves`, `#toggle-settings`, `#toggle-openings`.
+
+
 ## Planned Stages
 
 ### Stage 5.9 — Move Replay Viewer ⬜
@@ -1020,7 +1063,7 @@ If Ollama is already running but the model is missing, only the pull is needed. 
 
 - `web/static/style.css` — Palette styles.
 
-### Stage 6 — Self-Play Training Loop ⬜
+### Stage 6 — Self-Play Training Loop ✅
 
 **Goal:** Populate the opening book with real win-rate data and enrich LLM game history without requiring a human player.
 

@@ -168,6 +168,15 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sel-opponent").addEventListener("change", _updatePersonalityRow);
   _updatePersonalityRow();
 
+  // Bidirectional sync: header personality picker ↔ settings panel picker
+  const _hdrP = $("hdr-personality");
+  const _sidP = $("sel-game-personality");
+  if (_hdrP && _sidP) {
+    _hdrP.value = _sidP.value;
+    _hdrP.addEventListener("change", () => { _sidP.value = _hdrP.value; });
+    _sidP.addEventListener("change", () => { _hdrP.value = _sidP.value; });
+  }
+
   $("btn-new-game").addEventListener("click", startNewGame);
 
   // Setup position controls
@@ -267,9 +276,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("settings-panel").hidden  = false;
   $("ai-tuning-panel").hidden = true;
+  $("moves-panel").hidden     = false;   // show moves by default
   _setReplayButtonsDisabled(true);
   renderIdle();
   _loadOpenings();
+
+  // Header "New Game" button mirrors sidebar button
+  $("btn-new-game-header").addEventListener("click", () => $("btn-new-game").click());
+
+  // Header "Setup" toggle
+  $("toggle-setup").addEventListener("click", () => {
+    if (setupMode) exitSetupMode();
+    else enterSetupMode();
+  });
 });
 
 function renderIdle() {
@@ -372,6 +391,7 @@ function enterSetupMode() {
   $("settings-panel").hidden = true;
   $("setup-panel").hidden    = false;
   $("toggle-settings").classList.remove("btn-active");
+  $("toggle-setup").classList.add("btn-active");
 
   _renderSetupBoard();
   _updateSetupUI();
@@ -381,6 +401,7 @@ function enterSetupMode() {
 function exitSetupMode() {
   setupMode = false;
   $("setup-panel").hidden = true;
+  $("toggle-setup").classList.remove("btn-active");
   // Restore piece layer click interception (disabled during setup for erase to work)
   board._pieceGroup.setAttribute("pointer-events", "");
   // Restore live board if game is running
@@ -497,6 +518,7 @@ function startSetupGame() {
     }));
     setupMode = false;
     $("setup-panel").hidden = true;
+    $("toggle-setup").classList.remove("btn-active");
   };
 
   ws.onmessage = evt => handleMessage(JSON.parse(evt.data));
@@ -737,6 +759,16 @@ function updateInfoPanel(state) {
   // pieces_captured[W] = pieces White has taken from Black
   $("info-w-taken").textContent  = state.pieces_captured?.W ?? 0;
   $("info-b-taken").textContent  = state.pieces_captured?.B ?? 0;
+
+  const ef = state.early_families;
+  if (ef && state.phase === "place") {
+    const wFam = ef.white_family || "";
+    const bFam = ef.black_family || "";
+    $("info-opening-family").textContent = wFam === bFam ? wFam : `W:${wFam} / B:${bFam}`;
+    $("opening-family-row").hidden = false;
+  } else {
+    $("opening-family-row").hidden = true;
+  }
 }
 
 function setStatus(text) {

@@ -52,6 +52,7 @@ from ai.opening_recognizer import OpeningRecognizer
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
 from ai.endgame_db import EndgameDB
+from ai.starting_play import combined_family_summary
 
 # Load trajectory DB once at startup — updated incrementally as games complete.
 _trajectory_db    = TrajectoryDB(_ROOT / "data" / "games")
@@ -219,6 +220,16 @@ def _state(session: Session) -> dict:
         except Exception:
             pass
 
+    # Early starting-play family detection during placement phase
+    early_families: dict = {}
+    placed_w = board.pieces_placed.get("W", 0)
+    placed_b = board.pieces_placed.get("B", 0)
+    if phase == "place" and placed_w >= 3 and placed_b >= 2:
+        try:
+            early_families = combined_family_summary(board)
+        except Exception:
+            pass
+
     return {
         "type":             "state",
         "board":            dict(board.positions),
@@ -238,6 +249,7 @@ def _state(session: Session) -> dict:
         "winner":                engine.winner,
         "draw_reason":           engine.draw_reason,
         "post_placement_moves":  engine._post_placement_moves,
+        "early_families":        early_families,
         "moves":            [
             {
                 "color":    m["color"],

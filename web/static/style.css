@@ -52,7 +52,8 @@ header h1 {
 #toggle-moves,
 #toggle-settings,
 #toggle-ai-tuning,
-#toggle-openings {
+#toggle-openings,
+#toggle-setup {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -61,15 +62,35 @@ header h1 {
   cursor: pointer;
   font-size: .85rem;
 }
-#toggle-settings  { margin-left: auto; }
 #toggle-moves:hover,
 #toggle-settings:hover,
 #toggle-ai-tuning:hover,
-#toggle-openings:hover { border-color: var(--accent); color: var(--accent); }
+#toggle-openings:hover,
+#toggle-setup:hover { border-color: var(--accent); color: var(--accent); }
 #toggle-moves.btn-active,
 #toggle-settings.btn-active,
 #toggle-ai-tuning.btn-active,
-#toggle-openings.btn-active { border-color: var(--tan); color: var(--tan); }
+#toggle-openings.btn-active,
+#toggle-setup.btn-active { border-color: var(--tan); color: var(--tan); }
+#btn-new-game-header {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  padding: 6px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 600;
+}
+#hdr-personality {
+  background: #1e1a12;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: .82rem;
+  cursor: pointer;
+}
 
 /* ── Main 3-column grid ──────────────────────────────────────────────── */
 /*   [commentary 260px] [board 1fr] [side 280px]                         */

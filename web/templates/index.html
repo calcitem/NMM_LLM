@@ -10,10 +10,22 @@
 <div id="app">
   <header>
     <h1>Nine Men's Morris</h1>
-    <button id="toggle-moves">Moves</button>
-    <button id="toggle-settings">Settings</button>
-    <button id="toggle-ai-tuning">AI Tuning</button>
+    <button id="toggle-moves" class="btn-active">Moves</button>
     <button id="toggle-openings">Openings</button>
+    <button id="toggle-setup">Setup</button>
+    <button id="btn-new-game-header">&#9658; New Game</button>
+    <select id="hdr-personality" title="AI Personality">
+      <option value="random" selected>Random</option>
+      <option value="balanced">Balanced</option>
+      <option value="aggressive">Aggressive</option>
+      <option value="defensive">Defensive</option>
+      <option value="positional">Positional</option>
+      <option value="scholar">Scholar</option>
+      <option value="chaos">Chaos</option>
+      <option value="current">Custom</option>
+    </select>
+    <button id="toggle-settings" style="margin-left:auto">Settings</button>
+    <button id="toggle-ai-tuning">AI Tuning</button>
   </header>
 
   <main>
@@ -48,7 +60,7 @@
     <div id="side-panel">
 
       <!-- Moves list (toggled via header button) -->
-      <div class="panel-box" id="moves-panel" hidden>
+      <div class="panel-box" id="moves-panel">
         <h3>Moves</h3>
         <div id="moves-list"></div>
       </div>
@@ -104,6 +116,10 @@
         <div class="piece-row">
           <span class="piece-b">⬛ Taken</span>
           <span id="info-b-taken" class="piece-b">—</span>
+        </div>
+        <div class="piece-row" id="opening-family-row" hidden>
+          <span style="color:var(--text-dim)">Opening</span>
+          <span id="info-opening-family" style="color:var(--tan);font-size:.8rem;text-align:right;max-width:140px">—</span>
         </div>
       </div>
 
