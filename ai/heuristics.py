@@ -180,12 +180,15 @@ def evaluate(
 
     # 4v3: when facing a fly-mobile opponent, a fork (dual closeable mills) is the
     # primary winning mechanism — one threat is always blockable, two are not.
-    # Boost fork weight from 14 → ~54 and reward independent mill pairs (insurance
-    # structure so piece loss doesn't eliminate all mill potential).
+    # Boost fork weight and reward independent mill pairs heavily (insurance
+    # so any single opponent capture still leaves us with a 2-config).
     opp_in_fly = board.pieces_placed.get(opp, 0) >= 9 and opp_pieces == 3
     if own_pieces == 4 and opp_in_fly and phase == "move":
         base += 40 * our_fork
-        base += 90 * _independent_mill_pairs(board, color)
+        base += 300 * _independent_mill_pairs(board, color)  # was 90
+        # Opponent fly threats are as dangerous as fly-phase threats even though
+        # we are in move phase — apply the fly-urgency gap as an extra penalty.
+        base -= (_THREAT_WEIGHTS["fly"] - _THREAT_WEIGHTS["move"]) * opp_thr
 
     # 3v4: fly attacker rewards separated opponent groups — disconnected pieces
     # can't defend each other, allowing the fly attacker to threaten one group at a time.
@@ -199,7 +202,7 @@ def evaluate(
     if phase == "fly" and get_game_phase(board, opp) == "fly":
         opp_surplus = max(0, opp_thr - 1)  # we block 1 max; remainder are automatic
         own_surplus = max(0, our_thr - 1)
-        base += 600 * (own_surplus - opp_surplus)
+        base += 900 * (own_surplus - opp_surplus)  # was 600
 
     # Move-phase: reward non-contributing pieces that are adjacent to a 2-config
     # piece (assembling toward a productive formation — free piece assembly).
@@ -816,6 +819,14 @@ def tactical_move_bonus(
             and after.pieces_on_board[opp] <= 5):
         trap_build_bonus = weights.mill_trap_build
 
+    # Fly-fork creation bonus: in fly phase, going from <2 own 2-configs to ≥2 in
+    # one move creates a fork that the opponent can block at most one of.
+    # Opening a closed mill to set up this fork is the primary 3v3 winning strategy.
+    fly_fork_bonus = 0
+    after_phase = get_game_phase(after, color)
+    if after_phase == "fly" and own_two_after >= 2 and own_two_before < 2:
+        fly_fork_bonus = 750
+
     return (
         weights.close_mill            * mills_delta
         + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
@@ -829,6 +840,7 @@ def tactical_move_bonus(
         + mill_open_bonus
         + late_mill_bonus
         + trap_build_bonus
+        + fly_fork_bonus
     )
 
 

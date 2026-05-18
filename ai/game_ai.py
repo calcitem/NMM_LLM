@@ -51,7 +51,8 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
 def _order_moves(board: BoardState, moves: list) -> list:
     """Sort moves so the most urgent are tried first (better alpha-beta pruning).
 
-    Priority 0 — close own mill (immediate win/capture opportunity).
+    Priority 0 — close own mill (immediate win/capture) OR create a fork
+                 (land on a diamond square — closing 2+ own 2-configs simultaneously).
     Priority 1 — block opponent mill (prevent their immediate threat).
     Priority 2 — all other moves.
 
@@ -59,20 +60,31 @@ def _order_moves(board: BoardState, moves: list) -> list:
     moves are evaluated before the search deadline, so force_move returns a
     tactically sound choice even if the full tree isn't searched.
     """
+    from game.rules import get_game_phase
     color = board.turn
     opp = "B" if color == "W" else "W"
 
     close: set[str] = set()
     block: set[str] = set()
+    closing_count: dict[str, int] = {}
     for mill in MILLS:
         vals = [board.positions[p] for p in mill]
         c = vals.count(color)
         o = vals.count(opp)
         e = vals.count("")
         if c == 2 and e == 1:
-            close.add(next(p for p in mill if board.positions[p] == ""))
+            empty = next(p for p in mill if board.positions[p] == "")
+            close.add(empty)
+            closing_count[empty] = closing_count.get(empty, 0) + 1
         if o == 2 and e == 1:
             block.add(next(p for p in mill if board.positions[p] == ""))
+
+    # In fly phase, also prioritize moves to diamond squares (fork creation:
+    # landing on a square that simultaneously closes 2+ own 2-configs).
+    if get_game_phase(board, color) == "fly":
+        for sq, cnt in closing_count.items():
+            if cnt >= 2:
+                close.add(sq)  # diamond squares join priority-0 (already in close)
 
     if not close and not block:
         return moves  # nothing to prioritize — skip the pass

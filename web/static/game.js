@@ -262,7 +262,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-replay-first").addEventListener("click", () => replayGo(0));
   $("btn-replay-prev").addEventListener("click",  () => replayGo(replayIdx - 1));
   $("btn-replay-next").addEventListener("click",  () => replayGo(replayIdx + 1));
-  $("btn-replay-last").addEventListener("click",  () => replayGo(replayMoves.length - 1));
+  $("btn-replay-last").addEventListener("click",  () => replayGo(replayMoves.length));
   $("btn-replay-live").addEventListener("click",  exitReplay);
 
   $("settings-panel").hidden  = false;
@@ -527,7 +527,7 @@ function handleMessage(msg) {
       }
       if (msg.moves) {
         renderMoves(msg.moves);
-        if (phase === "game_over" && msg.moves.length > 0) {
+        if (msg.moves.length > 0) {
           replayMoves = msg.moves;
           _setReplayButtonsDisabled(false);
           _updateReplayLabel();
@@ -939,22 +939,29 @@ function setTurnBadge(name, winner) {
 }
 
 // ── Move replay ───────────────────────────────────────────────────────────────
-// replayIdx is 0-based ply index. Position at idx shows board AFTER move[idx].
-// move[idx].fen is the board BEFORE that move, so we use move[idx+1].fen
-// (the board before the next move = board after this move).
-// For the last move we render directly from the live final board grid.
+// replayIdx: -1 = live; 0 = initial board; k = board after move k.
+// move[k].fen is the board BEFORE move k, so:
+//   idx=0 → replayMoves[0].fen (position before move 0 = initial board)
+//   idx=k → replayMoves[k].fen (position before move k = after move k-1)
+//   idx=n → gameState.board (after the last move)
 
 function replayGo(idx) {
   if (!replayMoves.length) return;
-  idx = Math.max(0, Math.min(replayMoves.length - 1, idx));
+  // idx=0 → initial board (before any moves)
+  // idx=k → board after move k  (1 ≤ k ≤ replayMoves.length)
+  idx = Math.max(0, Math.min(replayMoves.length, idx));
   replayIdx = idx;
 
-  // Board state AFTER move[idx]
-  if (idx + 1 < replayMoves.length) {
-    const fen = replayMoves[idx + 1].fen;
+  if (idx === 0) {
+    // Initial board: FEN stored in move[0] is the board BEFORE that move
+    const fen = replayMoves[0].fen;
+    if (fen) board.renderFromFen(fen);
+  } else if (idx < replayMoves.length) {
+    // Board after move idx-1: FEN of move[idx] = board before move idx = after move idx-1
+    const fen = replayMoves[idx].fen;
     if (fen) board.renderFromFen(fen);
   } else {
-    // Last move: use the live final board
+    // After last move: use the live/final board from gameState
     if (gameState) {
       board.grid = Object.assign({}, gameState.board);
       board._millNodes = new Set();
@@ -993,7 +1000,8 @@ function _updateReplayLabel() {
   if (replayIdx === -1) {
     lbl.textContent = total ? `— / ${total}` : "0 / 0";
   } else {
-    lbl.textContent = `${replayIdx + 1} / ${total}`;
+    // idx=0 is the start position; idx=total is after the last move
+    lbl.textContent = `${replayIdx} / ${total}`;
   }
 }
 
@@ -1001,10 +1009,10 @@ function _highlightReplayMove(idx) {
   const list = $("moves-list");
   if (!list) return;
   list.querySelectorAll(".move-row").forEach(r => r.classList.remove("move-row-replay"));
-  if (idx < 0) return;
-  // Each display row = 2 half-moves (White + Black)
+  if (idx <= 0) return;  // 0 = initial board, nothing to highlight
+  // idx=1 is after move 0 (White's first move); each display row = 2 half-moves
   const rows = list.querySelectorAll(".move-row:not(.move-row-hdr)");
-  const rowIdx = Math.floor(idx / 2);
+  const rowIdx = Math.floor((idx - 1) / 2);
   if (rows[rowIdx]) {
     rows[rowIdx].classList.add("move-row-replay");
     rows[rowIdx].scrollIntoView({ block: "nearest" });
