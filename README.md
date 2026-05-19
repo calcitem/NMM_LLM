@@ -284,6 +284,35 @@ python tools/endgame_play.py --seed-from-games --positions 300 --parallel 4
 python tools/endgame_play.py --positions 100 --min-pieces 6 --max-pieces 8 --personalities balanced,positional,defensive
 ```
 
+### Purging AI-Generated Learning Data
+
+If the AI accumulates bad self-play data that degrades its play, you can revert to only the clean, book-imported data while keeping the capability for future AI learning:
+
+```bash
+# Preview what would be removed (no changes made)
+python tools/purge_ai_learning.py --dry-run
+
+# Run the purge (prompts for confirmation, backs up everything first)
+python tools/purge_ai_learning.py
+
+# Skip the confirmation prompt
+python tools/purge_ai_learning.py --yes
+```
+
+**What is removed:**
+- Openings with `seed_source='learned'` and no `source_reference` (AI self-generated openings)
+- All self-play JSONL game files (`human_color == 'self_play'`)
+
+**What is kept:**
+- Openings imported from the strategy book (`seed_source='book'`)
+- Openings imported from book games (`seed_source='learned'` with a `source_reference`)
+- Human vs AI game records
+- `bad_moves.json`, ChromaDB vector memory, player profiles, settings
+
+A full backup is written to `data/backups/<timestamp>/` before any changes. The TrajectoryDB and EndgameDB rebuild automatically from the remaining human game records on the next server start.
+
+---
+
 ### Weight Evolution
 
 ```bash
@@ -396,7 +425,8 @@ NMM_ollama/
 │   ├── name_openings.py         # LLM-name novel openings
 │   ├── list_openings.py         # Print opening book summary
 │   ├── teach_opening.py         # Interactively teach a new opening line
-│   └── debrief.py               # Run post-session debrief manually
+│   ├── debrief.py               # Run post-session debrief manually
+│   └── purge_ai_learning.py     # Remove AI self-play data; revert to book-only openings
 ├── data/
 │   ├── settings.json            # Runtime configuration
 │   ├── openings/                # Opening book JSON (openings.json, book_openings.json)

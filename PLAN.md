@@ -34,7 +34,7 @@
 | 9 | Tournament / Match Mode | ✅ Complete |
 | 10 | Player Profiles & Persistent Stats | ✅ Complete |
 | 11 | Endgame Self-Play | ✅ Complete |
-| 12 | Advanced Search (MCTS / NN) | ⬜ Stretch |
+| 12 | Advanced Search (MCTS / NN) | ✅ Complete |
 
 
 ## Completed Stages
@@ -271,7 +271,7 @@ The game as shipped today can:
 
 ## Active / Near-Term Stages
 
-### Stage 5.11 — Bug Fixes & Hardening 🔄
+### Stage 5.11 — Bug Fixes & Hardening ✅
 
 **Goal:** Resolve a set of confirmed bugs affecting game stability, self-test reliability, and human-vs-AI playability.
 
@@ -353,7 +353,7 @@ The game as shipped today can:
 
 - `tools/self\\\_play.py` — Hard move-count cap.
 
-### Stage 5.12 — AI Tactical Imperatives 🔄
+### Stage 5.12 — AI Tactical Imperatives ✅
 
 **Goal:** Make the AI decisively exploit tactical patterns — mills, double mills, feeder structures, and diamond formations — rather than defaulting to passive positional play.
 
@@ -707,7 +707,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/heuristics.py` — Add a late-game danger penalty: when one side has ≤4 pieces and the opponent has ≥6 pieces with ≥2 open mills, apply a large negative adjustment (e.g. `−800`) to the weaker side's score before tanh normalisation.
 - `ai/heuristics.py` — Reduce `TANH_SCALE` for the fly phase from 280 to ~180 so extreme positions are less compressed near ±1.
 
-### Bug 5.11-H — Free Pieces Not Assembling Into Mills ⬜
+### Bug 5.11-H — Free Pieces Not Assembling Into Mills ✅
 
 **Symptom:** In the move phase, isolated AI pieces with no nearby allies don't move toward forming mills unless there is an immediate threat. The AI leaves "stranded" pieces that never contribute to mill formations.
 
@@ -717,7 +717,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/heuristics.py` — Add `_free_piece_assembly(board, color)`: for each own piece not participating in any 2-config or closed mill, measure its distance (in adjacency hops) to the nearest same-color piece that IS in a 2-config. Sum reciprocals (closer = higher score) to reward pieces gathering toward productive formations. Weight ~40 in move phase.
 - `ai/heuristics.py` — Add `_path_to_mill(board, color)`: count own pieces that are 2 adjacency hops from an empty slot in an existing own 2-config (enabling closure in 2 moves). Weight ~60 in move phase. This extends `setup_mill` semantics into the movement phase and catches pieces 2 moves away from joining a forming mill.
 
-### Bug 5.11-E — AI Not Moving Toward Mill Closure or Block in Move Phase ⬜
+### Bug 5.11-E — AI Not Moving Toward Mill Closure or Block in Move Phase ✅
 
 **Symptom:** During the move phase the AI sometimes fails to move a piece toward an open mill line (to form or complete it), or fails to move to block an opponent's developing mill. The issue can occur at any position — the examples below are illustrative only, not exhaustive.
 
@@ -733,7 +733,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/heuristics.py` — Add a `_mill_approach_bonus`: in move phase, reward moves that bring an own piece adjacent to the empty slot of an existing own 2-config (enabling closure next turn). Weight ~80.
 - Investigate why `block_opponent_mill` (400) does not override c3 positional score: add debug logging to `tactical_move_bonus` for the specific position.
 
-### Bug 5.11-F — AI Resign Does Not Trigger LLM Debrief ⬜
+### Bug 5.11-F — AI Resign Does Not Trigger LLM Debrief ✅
 
 **Symptom:** When the AI resigns (via the `offer_defeat` path added in Stage 5.11-D), the MillsAI post-game debrief does not run. The game ends but no summary or debrief commentary is shown.
 
@@ -742,7 +742,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 **Fix:**
 - `web/app.py` — In the `offer_defeat` / `ai_resignation` handler, call `await asyncio.to_thread(session.coordinator.on_game_end, board, result="ai_resignation")` before sending the `game_over` WebSocket message so the debrief runs just as it does for normal termination.
 
-### Bug 5.11-G — Self-Play Crashes in Parallel Mode ⬜
+### Bug 5.11-G — Self-Play Crashes in Parallel Mode ✅
 
 **Symptom:** `tools/self_play.py` crashes when run with parallel game flags, especially with `--parallel N > 1`.
 
@@ -753,7 +753,7 @@ Set `OLLAMA\\\_HOST` / `OLLAMA\\\_PORT` environment variables to override the de
 - `ai/opening_book.py` — Make `save_opening()` and `merge_duplicates()` thread-safe (file-level lock or in-memory lock around JSON read-modify-write).
 - Reproduce the crash deterministically with `--parallel 2 --games 4 --no-llm`, then confirm the fix.
 
-### Stage 5.21 — Bad Move Button Fix ⬜
+### Stage 5.21 — Bad Move Button Fix ✅
 
 **Goal:** After pressing "Bad Move", the AI must not replay the same bad move in its next attempt. Currently the ban is saved to `bad_moves.json` but the in-memory TrajectoryDB in the running server instance is not queried for bans when the coordinator re-runs `deliberate()`.
 
@@ -1031,16 +1031,72 @@ If Ollama is already running but the model is missing, only the pull is needed. 
 3. `choose_move()` looks up `board.to_fen_string()` on each call — if any piece moves or is captured the FEN changes and the ban no longer applies.
 4. Removed `_trajectory_db.save_bad_move()` call — bans are now session-local and position-specific rather than permanent global notation bans.
 
-#### Bug 9-B — "Offer Draw" Button Not Visible to Players ⬜
 
-**Symptom:** The "Offer Draw" button exists in the bottom bar but is disabled until 40 post-placement half-moves have passed. Players do not know it exists or why it's greyed out. They never see it active during a normal game.
+### Bug UI-A — AI Discussion Panel Hidden / No Scrollbar ✅
 
-**Desired behaviour:** Button should be labelled clearly (e.g. "Offer Draw (available at move 40)"), and once unlocked it should be more prominent or a tooltip should explain it.
+**Symptom:** The "AI Discussion" (AI ↔ AI commentary) panel was not visible and neither panel scrolled.
 
-**Planned fix:**
-1. Add a dynamic tooltip/title attribute showing how many moves remain until draw can be offered.
-2. Consider lowering the threshold or adding an early-draw option once one side is significantly behind.
-3. Update README to document the draw offer mechanic.
+**Root cause:** CSS selector `#commentary-col > .commentary-panel` targeted DIRECT children of `#commentary-col`, but the panels are inside `#chat-view` (a child of `#commentary-col`), so the `display:flex`, `min-height:0`, and `overflow:hidden` rules never applied. Without a bounded parent height the `overflow-y:auto` scroll on the inner divs had nothing to trigger against.
+
+**Fix:** Changed selector to `#chat-view > .commentary-panel`, which correctly matches the panels as direct children of `#chat-view`.
+
+### Bug UI-B — Profile Tab Does Not Close When Clicked Again ✅
+
+**Symptom:** Clicking the active "Profile" tab a second time did not dismiss the profile view or return to chat.
+
+**Fix:** `web/static/game.js` — profile tab click handler now calls `_switchLeftTab("chat")` when the profile view is already visible, toggling back to the chat.
+
+### Tactic 5.12-A — 6v4 Piece Sacrifice to Reach Winning Endgame ⬜
+
+**Goal:** When the AI has 6 pieces and the opponent has 4, and the standard 6v3 zugzwang pattern is achievable, the AI should deliberately sacrifice 3 of its own pieces to reach 3v3 — unless the 6v3 domination pattern is reachable first.
+
+**Rationale:** A 6v4 position is roughly level (neither side dominates). The well-known 3v3 flying endgame, however, is a forced win for the side with superior mill structure. Reaching 3v3 by voluntary piece reduction (trading pieces rather than protecting them) puts the AI into a position it can play from a known winning blueprint.
+
+**Conditions to trigger:**
+1. AI has exactly 6 pieces, opponent has exactly 4 pieces (6v4).
+2. 6v3 domination (three AI mills, opponent cannot cover all) is NOT immediately available.
+3. The AI can engineer a sequence of piece trades (deliberately moving into captures) to reach 3v3 within 3–4 moves.
+4. After reduction, the AI's resulting 3-piece position forms or imminently forms a mill, giving it the better 3v3 structure.
+
+**Check endgame patterns are stored:**
+- Verify `data/endgame/` (or the EndgameDB) contains 3v3 flying winning patterns. If not, supply them or run `tools/endgame_play.py` seeded from 3v3 positions.
+
+**Implementation:**
+- `ai/heuristics.py` — Add `_is_6v4_sacrifice_position(board, color)`: returns True when the conditions above hold.
+- `ai/heuristics.py` `evaluate()` — When in 6v4 and sacrifice is viable: add a bonus (~250) to moves that reduce own piece count toward 3v3 *if* the resulting 3-piece arrangement contains at least one closed mill or 2-config.
+- `ai/coordinator.py` — In `_tactical_situation()`: flag `"6v4_sacrifice_viable": True` and emit a commentary hint when triggered.
+- `tests/test_tactics.py` — Add tests: 6v4 sacrifice bonus fires when structure is good; does not fire when 6v3 is available; does not fire when the post-trade 3-piece arrangement is weak.
+
+### Bug UI-C — AI Double-Mill Prevention Weakness ⬜
+
+**Symptom:** The AI fails to prevent an opponent from setting up a double mill (two open mills that share a pivot piece). Once the opponent has two 2-configs whose closing squares share a common piece, the AI cannot block both in one move. Example: White places on d6 and f6 creating lines 6 and f simultaneously — no single black move blocks both.
+
+**Root cause:** The existing `stop_opponent_mills` bonus (weight 450) dismantles individual 2-configs but does not specifically detect or penalise the opponent's *double-mill convergence* — the moment two opponent 2-configs share a closing square or pivot. The AI waits until the mills are closeable before treating them as urgent, by which point the fork is already established.
+
+**Fix:**
+- `ai/heuristics.py` — Add `_double_mill_convergence(board, opp)`: count positions where the opponent has two or more 2-configs that share a common empty closing square or a common own-piece pivot. This is the precursor to a fork that cannot be blocked.
+- `ai/heuristics.py` `evaluate()` — Add term: penalise `_double_mill_convergence(board, opp)` with weight ~180 in move phase (slightly above `stop_opponent_mills` to make disrupting convergence the priority over dismantling isolated 2-configs).
+- `ai/heuristics.py` `tactical_move_bonus()` — Add a bonus for moves that *reduce* the opponent's double-mill convergence count (break one of the two 2-configs that share a square/pivot). Weight ~220, applied on top of `stop_opponent_mills`.
+
+### Bug UI-D — Tournament Mode: Show AI Personality Per Game ⬜
+
+**Symptom:** In tournament mode the round results only show "White wins" / "Black wins" without indicating which AI personality was playing each side, making it hard to compare personality performance.
+
+**Fix:**
+- `web/app.py` — Include `white_personality` and `black_personality` in the `tournament_game_result` WebSocket message payload.
+- `web/static/game.js` — Display personality names in the tournament results table alongside the win/loss result for each game.
+
+### Bug UI-E — User Guide: Missing Sections ⬜
+
+**Goal:** Stage 5.15 (User Guide) is in progress. The following sections are missing and must be added:
+
+1. **Named Openings** — how the opening book works, how openings get named, how to browse them.
+2. **Game Setup / Position Editor** — how to use the Setup Position button to create custom starting positions.
+3. **AI Slider Weights** — what each weight slider in the AI Tuning panel controls and how they interact.
+4. **Personality Profiles** — description of each built-in personality and what makes them distinct.
+5. **Training Tools** — brief guide to `self_play.py`, `evolve_weights.py`, `train_value_net.py`, and `import_book_games.py`.
+
+**Deliverable:** README.md (or separate GUIDE.md) updated with these five sections.
 
 ## Planned Stages
 
@@ -1286,7 +1342,7 @@ python tools/endgame_play.py --positions 500 --parallel 4 --difficulty 5
 python tools/endgame_play.py --seed-from-games --positions 200 --parallel 4
 ```
 
-### Stage 12 — Advanced Search (MCTS / Neural Evaluation) ⬜ *(Stretch)*
+### Stage 12 — Advanced Search (MCTS / Neural Evaluation) ✅ *(Stretch)*
 
 **Goal:** Replace or augment negamax with Monte Carlo Tree Search, optionally with a learned value function.
 

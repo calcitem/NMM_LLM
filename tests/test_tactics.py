@@ -376,5 +376,140 @@ class TestOpenMillDomination(unittest.TestCase):
         self.assertGreater(evaluate(b7v3, "W"), evaluate(b7v4, "W"))
 
 
+# ── capture_disrupt_feeder ────────────────────────────────────────────────────
+
+class TestCaptureDisruptFeeder(unittest.TestCase):
+    """Capturing a piece that feeds a cycling mill gets a bonus."""
+
+    def _make_capture(self, before: BoardState, after: BoardState, color: str) -> int:
+        return tactical_move_bonus(before, after, color)
+
+    def test_feeder_capture_gets_bonus(self):
+        # B has a closed mill at a7-d7-g7 and a feeder at d6 (adjacent to d7).
+        # W captures the feeder piece at d6 — should get capture_disrupt_feeder bonus.
+        before = _board(
+            ["c5", "d5", "e5"],                       # W pieces
+            ["a7", "d7", "g7", "d6"],                  # B: closed mill + feeder
+            turn="W", w_placed=9, b_placed=9,
+        )
+        after = _board(
+            ["c5", "d5", "e5"],
+            ["a7", "d7", "g7"],                        # feeder d6 captured
+            turn="B", w_placed=9, b_placed=9,
+        )
+        # Manually set pieces_on_board to reflect the capture
+        after.pieces_on_board["B"] = 3
+        bonus = tactical_move_bonus(before, after, "W")
+        self.assertGreater(bonus, tactical_move_bonus(
+            before,
+            _board(["c5", "d5", "e5"], ["a7", "d7", "g7", "a4"],
+                   turn="B", w_placed=9, b_placed=9),
+            "W",
+        ))
+
+    def test_non_feeder_capture_no_feeder_bonus(self):
+        # B has a closed mill but captured piece is not adjacent to it.
+        # No feeder bonus should fire.
+        before = _board(
+            ["c5", "d5", "e5"],
+            ["a7", "d7", "g7", "b2"],                  # b2 is far from the top mill
+            turn="W", w_placed=9, b_placed=9,
+        )
+        after_feeder = _board(
+            ["c5", "d5", "e5"],
+            ["a7", "d7", "g7"],                        # b2 captured (not a feeder)
+            turn="B", w_placed=9, b_placed=9,
+        )
+        after_feeder.pieces_on_board["B"] = 3
+        w = HeuristicWeights()
+        bonus = tactical_move_bonus(before, after_feeder, "W", w)
+        # feeder bonus should NOT be in there (captured piece b2 not adjacent to top mill)
+        self.assertEqual(bonus, tactical_move_bonus(before, after_feeder, "W",
+                                                    HeuristicWeights(capture_disrupt_feeder=0)))
+
+    def test_feeder_bonus_higher_than_ordinary_capture(self):
+        # Two otherwise identical captures: one removes a feeder, one removes an isolated piece.
+        # The feeder capture should score strictly higher.
+        before = _board(
+            ["c5", "d5", "e5", "g4"],
+            ["a7", "d7", "g7", "d6", "b2"],
+            turn="W", w_placed=9, b_placed=9,
+        )
+        # Capture d6 (feeder adjacent to the top mill)
+        after_feeder = _board(
+            ["c5", "d5", "e5", "g4"],
+            ["a7", "d7", "g7", "b2"],
+            turn="B", w_placed=9, b_placed=9,
+        )
+        after_feeder.pieces_on_board["B"] = 4
+        # Capture b2 (isolated piece, not a feeder)
+        after_isolated = _board(
+            ["c5", "d5", "e5", "g4"],
+            ["a7", "d7", "g7", "d6"],
+            turn="B", w_placed=9, b_placed=9,
+        )
+        after_isolated.pieces_on_board["B"] = 4
+        self.assertGreater(
+            tactical_move_bonus(before, after_feeder, "W"),
+            tactical_move_bonus(before, after_isolated, "W"),
+        )
+
+
+# ── capture_disrupt_diamond ───────────────────────────────────────────────────
+
+class TestCaptureDisruptDiamond(unittest.TestCase):
+    """Capturing a piece that's part of an opponent fork (diamond) gets a bonus."""
+
+    def test_diamond_capture_gets_bonus(self):
+        # B has two 2-configs sharing the closing square d7:
+        #   a7-d7 (needs g7) and g7 is not relevant here — let's use a proper fork.
+        # B pieces: a7, g7 (share d7 as closing square for outer top mill)
+        # AND b6, f6 sharing d6 as closing square — wait that's 2 separate mills.
+        # Simpler: outer top mill (a7-d7-g7): a7, g7 placed → d7 is fork for that one mill.
+        # For a fork we need d7 to be closing square for TWO different mills.
+        # Middle top mill (b6-d6-f6) and outer top (a7-d7-g7) don't share a closing sq.
+        # Use: mills d5-d6-d7 (vertical middle) and a7-d7-g7 (outer top): share d7.
+        # B has d5, d6 (for d5-d6-d7) and a7, g7 (for a7-d7-g7) → d7 is fork square.
+        before = _board(
+            ["c3", "c4", "c5"],                              # W (irrelevant positions)
+            ["d5", "d6", "a7", "g7"],                        # B: two 2-configs pointing at d7
+            turn="W", w_placed=9, b_placed=9,
+        )
+        # Capture d6 — part of the d5-d6-d7 two-config pointing at the fork square d7
+        after = _board(
+            ["c3", "c4", "c5"],
+            ["d5", "a7", "g7"],
+            turn="B", w_placed=9, b_placed=9,
+        )
+        after.pieces_on_board["B"] = 3
+        w0 = HeuristicWeights(capture_disrupt_diamond=0)
+        w1 = HeuristicWeights(capture_disrupt_diamond=250)
+        self.assertGreater(
+            tactical_move_bonus(before, after, "W", w1),
+            tactical_move_bonus(before, after, "W", w0),
+        )
+
+    def test_no_diamond_bonus_when_no_fork(self):
+        # B has only a single 2-config (no fork): a7, g7 → closing square d7 used once.
+        before = _board(
+            ["c3", "c4", "c5"],
+            ["a7", "g7", "b2"],
+            turn="W", w_placed=9, b_placed=9,
+        )
+        after = _board(
+            ["c3", "c4", "c5"],
+            ["a7", "g7"],
+            turn="B", w_placed=9, b_placed=9,
+        )
+        after.pieces_on_board["B"] = 2
+        w0 = HeuristicWeights(capture_disrupt_diamond=0)
+        w1 = HeuristicWeights(capture_disrupt_diamond=250)
+        # No fork before → no diamond bonus regardless of weight
+        self.assertEqual(
+            tactical_move_bonus(before, after, "W", w0),
+            tactical_move_bonus(before, after, "W", w1),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

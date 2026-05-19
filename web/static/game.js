@@ -288,7 +288,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Left column tab toggle ────────────────────────────────────────────
   $("tab-chat").addEventListener("click", () => _switchLeftTab("chat"));
-  $("tab-profile").addEventListener("click", () => _switchLeftTab("profile"));
+  // Clicking the active profile tab closes it (returns to chat).
+  $("tab-profile").addEventListener("click", () =>
+    _switchLeftTab($("profile-view").hidden ? "profile" : "chat"));
 
   // ── Player profile ────────────────────────────────────────────────────
   if (playerName) {

@@ -685,14 +685,20 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         session.engine.finished = True
         session.engine.winner   = session.human_color
         human_name = "White" if session.human_color == "W" else "Black"
-        await _commentary(ws, session)
         await _send(ws, {
-            "type":       "game_over",
-            "winner":     session.human_color,
+            "type":        "game_over",
+            "winner":      session.human_color,
             "draw_reason": None,
-            "result":     "ai_resignation",
-            "message":    f"{human_name} wins — AI resigns!",
+            "result":      "ai_resignation",
+            "message":     f"{human_name} wins — AI resigns!",
         })
+        if session.coordinator:
+            record = session.coordinator.build_game_record(
+                winner=session.human_color, human_color=session.human_color
+            )
+            await asyncio.to_thread(session.coordinator.on_game_end, record)
+            await _commentary(ws, session)
+            asyncio.create_task(_maybe_consolidate(ws))
         return
 
     # Snapshot state BEFORE applying so the human can mark this move as bad.

@@ -1,7 +1,7 @@
-[
-  {
+{
+  "mill-rush-parallel": {
     "opening_id": "mill-rush-parallel",
-    "name": "Mill Rush — Parallel",
+    "name": "Mill Rush \u2014 Parallel",
     "aliases": [
       "Parallel Lines",
       "Double Horizontal"
@@ -24,7 +24,7 @@
         "branch_id": "mill-rush-parallel-b2-alt",
         "deviation_ply": 7,
         "deviation_move": "d1",
-        "name": "Mill Rush Parallel — d1 Variant",
+        "name": "Mill Rush Parallel \u2014 d1 Variant",
         "line_continuation": [
           "d1",
           "b6"
@@ -67,7 +67,7 @@
     "outcome_stats": {
       "W": 4,
       "B": 0,
-      "D": 4
+      "D": 6
     },
     "confidence": 1.0,
     "tags": [
@@ -77,12 +77,12 @@
       "placement",
       "parallel"
     ],
-    "source_reference": "Chapter 15.2, Game 1a — parallel lines mill rush",
+    "source_reference": "Chapter 15.2, Game 1a \u2014 parallel lines mill rush",
     "needs_llm_name": false
   },
-  {
+  "mill-rush-perpendicular": {
     "opening_id": "mill-rush-perpendicular",
-    "name": "Mill Rush — Perpendicular",
+    "name": "Mill Rush \u2014 Perpendicular",
     "aliases": [
       "Perpendicular Lines"
     ],
@@ -127,7 +127,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 2
+      "D": 4
     },
     "confidence": 1.0,
     "tags": [
@@ -137,12 +137,12 @@
       "placement",
       "perpendicular"
     ],
-    "source_reference": "Chapter 15.2, Game 2a — perpendicular lines mill rush",
+    "source_reference": "Chapter 15.2, Game 2a \u2014 perpendicular lines mill rush",
     "needs_llm_name": false
   },
-  {
+  "mill-rush-parallel-alt": {
     "opening_id": "mill-rush-parallel-alt",
-    "name": "Mill Rush — Parallel (Alt)",
+    "name": "Mill Rush \u2014 Parallel (Alt)",
     "aliases": [
       "Parallel Lines Alt"
     ],
@@ -193,7 +193,7 @@
     "outcome_stats": {
       "W": 2,
       "B": 0,
-      "D": 4
+      "D": 2
     },
     "confidence": 1.0,
     "tags": [
@@ -201,12 +201,12 @@
       "placement",
       "parallel"
     ],
-    "source_reference": "Chapter 15.2, Game 1b — parallel lines (alt) mill rush",
+    "source_reference": "Chapter 15.2, Game 1b \u2014 parallel lines (alt) mill rush",
     "needs_llm_name": false
   },
-  {
+  "mill-rush-perpendicular-alt": {
     "opening_id": "mill-rush-perpendicular-alt",
-    "name": "Mill Rush — Perpendicular (Alt)",
+    "name": "Mill Rush \u2014 Perpendicular (Alt)",
     "aliases": [
       "Perpendicular Lines Alt"
     ],
@@ -249,9 +249,9 @@
       ]
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 4,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 1.0,
     "tags": [
@@ -259,12 +259,12 @@
       "placement",
       "perpendicular"
     ],
-    "source_reference": "Chapter 15.2, Game 2b — perpendicular lines (alt) mill rush",
+    "source_reference": "Chapter 15.2, Game 2b \u2014 perpendicular lines (alt) mill rush",
     "needs_llm_name": false
   },
-  {
+  "mill-rush-extended-parallel": {
     "opening_id": "mill-rush-extended-parallel",
-    "name": "Mill Rush — Extended Parallel",
+    "name": "Mill Rush \u2014 Extended Parallel",
     "aliases": [
       "Extended Parallel"
     ],
@@ -313,9 +313,9 @@
       ]
     },
     "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 2
+      "W": 2,
+      "B": 2,
+      "D": 4
     },
     "confidence": 1.0,
     "tags": [
@@ -324,12 +324,12 @@
       "parallel",
       "outer-ring"
     ],
-    "source_reference": "Chapter 15.2, Game 3 — extended parallel mill rush",
+    "source_reference": "Chapter 15.2, Game 3 \u2014 extended parallel mill rush",
     "needs_llm_name": false
   },
-  {
+  "inverted-mill-rush-parallel": {
     "opening_id": "inverted-mill-rush-parallel",
-    "name": "Inverted Mill Rush — Parallel",
+    "name": "Inverted Mill Rush \u2014 Parallel",
     "aliases": [
       "Inverted Parallel"
     ],
@@ -373,9 +373,9 @@
       ]
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 2,
       "B": 0,
-      "D": 6
+      "D": 4
     },
     "confidence": 1.0,
     "tags": [
@@ -384,12 +384,12 @@
       "parallel",
       "inverted"
     ],
-    "source_reference": "Chapter 15.3 — Inverted Mill Rush, parallel lines",
+    "source_reference": "Chapter 15.3 \u2014 Inverted Mill Rush, parallel lines",
     "needs_llm_name": false
   },
-  {
+  "inverted-mill-rush-perpendicular": {
     "opening_id": "inverted-mill-rush-perpendicular",
-    "name": "Inverted Mill Rush — Perpendicular",
+    "name": "Inverted Mill Rush \u2014 Perpendicular",
     "aliases": [
       "Inverted Perpendicular"
     ],
@@ -443,10 +443,10 @@
       "perpendicular",
       "inverted"
     ],
-    "source_reference": "Chapter 15.3 — Inverted Mill Rush, perpendicular",
+    "source_reference": "Chapter 15.3 \u2014 Inverted Mill Rush, perpendicular",
     "needs_llm_name": false
   },
-  {
+  "battle-lines": {
     "opening_id": "battle-lines",
     "name": "Battle Lines",
     "aliases": [
@@ -486,7 +486,7 @@
         "fen": ".B...W..BBWWWWBB........|W|5|5"
       }
     ],
-    "strategic_notes": "W builds multiple potential mills aggressively across all ring sections. B responds by mirroring. The game rewards the side that converts potential mills first — W usually has more options if it keeps removing B pieces strategically and does not allow B to isolate its pieces.",
+    "strategic_notes": "W builds multiple potential mills aggressively across all ring sections. B responds by mirroring. The game rewards the side that converts potential mills first \u2014 W usually has more options if it keeps removing B pieces strategically and does not allow B to isolate its pieces.",
     "common_blunders": [
       "a7",
       "g7",
@@ -501,8 +501,8 @@
       ]
     },
     "outcome_stats": {
-      "W": 0,
-      "B": 0,
+      "W": 2,
+      "B": 4,
       "D": 0
     },
     "confidence": 1.0,
@@ -511,12 +511,12 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.4 — Battle Lines",
+    "source_reference": "Chapter 15.4 \u2014 Battle Lines",
     "needs_llm_name": false
   },
-  {
+  "z-mill-closed": {
     "opening_id": "z-mill-closed",
-    "name": "Z Mill — Closed",
+    "name": "Z Mill \u2014 Closed",
     "aliases": [
       "Z Mill",
       "Closed Z Mill"
@@ -539,7 +539,7 @@
         "branch_id": "z-mill-closed-c4-e3",
         "deviation_ply": 5,
         "deviation_move": "e5",
-        "name": "Z Mill — c4/e3 Variant",
+        "name": "Z Mill \u2014 c4/e3 Variant",
         "line_continuation": [
           "e5",
           "d3",
@@ -582,7 +582,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 0,
+      "B": 2,
       "D": 4
     },
     "confidence": 1.0,
@@ -592,12 +592,12 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.5 — The Z Mill",
+    "source_reference": "Chapter 15.5 \u2014 The Z Mill",
     "needs_llm_name": false
   },
-  {
+  "z-mill-open": {
     "opening_id": "z-mill-open",
-    "name": "Z Mill — Open",
+    "name": "Z Mill \u2014 Open",
     "aliases": [
       "Open Z Mill",
       "Z Mill Variation"
@@ -644,7 +644,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 2
+      "D": 4
     },
     "confidence": 1.0,
     "tags": [
@@ -652,10 +652,10 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.6 — The Open Z Mill",
+    "source_reference": "Chapter 15.6 \u2014 The Open Z Mill",
     "needs_llm_name": false
   },
-  {
+  "corner-gambit": {
     "opening_id": "corner-gambit",
     "name": "Corner Gambit",
     "aliases": [
@@ -689,7 +689,7 @@
         "fen": "W.W.W.W.BB.B...B........|W|4|4"
       }
     ],
-    "strategic_notes": "W occupies all four outer ring corners early. Each pair threatens a potential mill along the outer ring sides. B must respond to contain the outer ring. This can be a gambit trap — the predictability of needing to block open mills can help W plan traps.",
+    "strategic_notes": "W occupies all four outer ring corners early. Each pair threatens a potential mill along the outer ring sides. B must respond to contain the outer ring. This can be a gambit trap \u2014 the predictability of needing to block open mills can help W plan traps.",
     "common_blunders": [
       "d7",
       "d1"
@@ -703,7 +703,7 @@
     },
     "outcome_stats": {
       "W": 2,
-      "B": 1,
+      "B": 3,
       "D": 0,
       "ai_wins": 2,
       "human_losses": 2,
@@ -717,1022 +717,10 @@
       "placement",
       "gambit"
     ],
-    "source_reference": "Chapter 15 — A Gambit",
+    "source_reference": "Chapter 15 \u2014 A Gambit",
     "needs_llm_name": false
   },
-  {
-    "opening_id": "novel-e69dc499",
-    "name": "The Focal Four Gambit",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "f2",
-      "b2",
-      "d1",
-      "d3",
-      "g1",
-      "e4",
-      "g4",
-      "g7",
-      "a1",
-      "g7",
-      "a7",
-      "a4",
-      "b4",
-      "c3",
-      "e3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.WBB..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".....B...W.WBBW.........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "....BB...W.WBBW......W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...BBB...W.WBBW....W.W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 0,
-      "D": 0,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-5f22d2bf",
-    "name": "The Triangular Fortress Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d7",
-      "f4",
-      "a7",
-      "g7",
-      "a4",
-      "a1",
-      "c4",
-      "b4",
-      "c3",
-      "c5",
-      "d3",
-      "e3",
-      "e5",
-      "g4",
-      "d2",
-      "g1",
-      "e4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BB.......W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BBW....B.W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BBW...WB.W.W...........B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BBW...WB.W.W...W......BB|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 4,
-      "B": 0,
-      "D": 8,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-e965cb40",
-    "name": "The \"Triple Fortification",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "d1",
-      "f4",
-      "g4",
-      "f2",
-      "b2",
-      "f6",
-      "d6",
-      "b4",
-      "g1",
-      "a7",
-      "g7",
-      "a1",
-      "a4",
-      "d7",
-      "e4",
-      "c4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".....W...W.B.B..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...W.W...W.BBB..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...W.W...WBBBBW.........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...W.W...WBBBBWB........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 2
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-6f99d2f3",
-    "name": "The \"Eagle's Stronghold Formation",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "f2",
-      "b2",
-      "b4",
-      "a4",
-      "d7",
-      "d1",
-      "g7",
-      "a7",
-      "e5",
-      "g4",
-      "e4",
-      "e3",
-      "a1",
-      "c5",
-      "f6"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.WBB..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........W.WBBWB........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.....W.W.WBBWB........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".BB..W.W.W.WBBWB........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 3,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-2e5e82ee",
-    "name": "The \"Auroral Surge",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d1",
-      "f4",
-      "a1",
-      "g1",
-      "a4",
-      "a7",
-      "d2",
-      "d3",
-      "b4",
-      "c4",
-      "b2",
-      "g7",
-      "b6",
-      "a7",
-      "f2",
-      "a7",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".....BB..W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "....WBBB.W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "W...WBBB.W.W.B..........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "W...WBBB.W.W.B.B.....W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 8,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-1081eef3",
-    "name": "The Weaver's Stronghold",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "d7",
-      "d5",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "b2",
-      "c5",
-      "e5",
-      "c4",
-      "a4",
-      "c3",
-      "a1",
-      "b2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.......W.W.B.B.B......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.......WWWBB.B.B......|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W......WWWWBB.B.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-10ff0050",
-    "name": "The \"Morning Shield",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "d1",
-      "d7",
-      "g4",
-      "d5",
-      "g1",
-      "e3",
-      "a1",
-      "e5",
-      "g7",
-      "e5",
-      "e4",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B...W...WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-277ca389",
-    "name": "The \"Distant Shield",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "d1",
-      "d7",
-      "g4",
-      "d5",
-      "g1",
-      "e3",
-      "a1",
-      "g7",
-      "a7",
-      "d3",
-      "c3",
-      "d2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B...W...WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-67e50622",
-    "name": "The Iron Fortress Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "g7",
-      "d5",
-      "a7",
-      "d7",
-      "b2",
-      "e3",
-      "e4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "........WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 3,
-      "D": 0,
-      "human_wins": 1,
-      "ai_losses": 1,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-384e3db3",
-    "name": "The \"Diamond Citadel",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "d1",
-      "d7",
-      "g4",
-      "d5",
-      "g1",
-      "e3",
-      "a1",
-      "g7",
-      "a7",
-      "e5",
-      "e4",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B...W...WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 2,
-      "D": 16,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-8b19aeea",
-    "name": "The \"Threefold Fortress",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "d1",
-      "d7",
-      "g4",
-      "d5",
-      "g1",
-      "g7",
-      "a1",
-      "e5",
-      "g7",
-      "e5",
-      "c5",
-      "e3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B...W...WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-8ed16912",
-    "name": "Five Elements Ascend",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "d5",
-      "d7",
-      "g4",
-      "e4",
-      "e3",
-      "g1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "........WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-8d21a59a",
-    "name": "King's Edge Setup",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "d5",
-      "d6",
-      "a4",
-      "d3",
-      "d2",
-      "g4",
-      "c4",
-      "b4",
-      "e4",
-      "f4",
-      "b6",
-      "c5",
-      "g1",
-      "e3",
-      "c3",
-      "f2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...B...B.......W......|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W...B.W.B.......W...B..|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.B.B.W.B...W...W...B..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.B.B.W.B...W.B.W...B.W|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 3,
-      "B": 2,
-      "D": 17,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-ea1d22c7",
-    "name": "The Morning March",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "g4",
-      "b4",
-      "e4",
-      "f4",
-      "d5",
-      "b6",
-      "f6",
-      "b2",
-      "f6",
-      "d3",
-      "e5",
-      "c5",
-      "a7",
-      "c3",
-      "d7",
-      "e3",
-      "a7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "...B.....W.....W...B....|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...B.....W.W...W.B.B....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...B....WWBW...W.B.B....|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...B....WWBW..WW.B.B....|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-f0bb5cac",
-    "name": "The \"Cornerstone Gambit",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "g4",
-      "b4",
-      "e4",
-      "f4",
-      "d5",
-      "d3",
-      "d2",
-      "a7",
-      "c5",
-      "e5",
-      "c4",
-      "c3",
-      "e3",
-      "b6",
-      "b2",
-      "f6",
-      "f2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "...B.....W.....W...B....|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...B.....W.W...W.B.B....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...B.....W.W.B.W.B.B.W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "W..B.....W.W.B.WBB.B.W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 2
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
+  "book-00-182e33": {
     "opening_id": "book-00-182e33",
     "name": "Game One",
     "aliases": [],
@@ -1794,10 +782,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-01-260f7b": {
     "opening_id": "book-01-260f7b",
     "name": "Try Try Again",
     "aliases": [],
@@ -1859,10 +847,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-02-bc7264": {
     "opening_id": "book-02-bc7264",
     "name": "Alternate Game Two",
     "aliases": [],
@@ -1924,10 +912,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-03-c687b2": {
     "opening_id": "book-03-c687b2",
     "name": "Game Three",
     "aliases": [],
@@ -1982,17 +970,17 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 0
+      "D": 4
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-04-979bbb": {
     "opening_id": "book-04-979bbb",
     "name": "Gambit Play",
     "aliases": [],
@@ -2052,10 +1040,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-06-ec4029": {
     "opening_id": "book-06-ec4029",
     "name": "Game Four",
     "aliases": [],
@@ -2109,18 +1097,18 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 1,
-      "D": 0
+      "B": 3,
+      "D": 2
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-07-089d4a": {
     "opening_id": "book-07-089d4a",
     "name": "Game Five A",
     "aliases": [],
@@ -2182,10 +1170,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-08-214941": {
     "opening_id": "book-08-214941",
     "name": "Game Five B",
     "aliases": [],
@@ -2247,12 +1235,12 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-10-a47788": {
     "opening_id": "book-10-a47788",
-    "name": "Game Seven — Patience",
+    "name": "Game Seven \u2014 Patience",
     "aliases": [],
     "family": "Early Game",
     "side": "both",
@@ -2312,10 +1300,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-11-6c94a1": {
     "opening_id": "book-11-6c94a1",
     "name": "Creating Opportunities",
     "aliases": [],
@@ -2377,10 +1365,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-12-7c2690": {
     "opening_id": "book-12-7c2690",
     "name": "Which Piece to Take",
     "aliases": [],
@@ -2442,10 +1430,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-13-a3640f": {
     "opening_id": "book-13-a3640f",
     "name": "Right Angle Potential Mills",
     "aliases": [],
@@ -2507,10 +1495,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-14-31b94f": {
     "opening_id": "book-14-31b94f",
     "name": "End Play Placements",
     "aliases": [],
@@ -2572,10 +1560,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-15-25ea09": {
     "opening_id": "book-15-25ea09",
     "name": "Early Game to Victory",
     "aliases": [],
@@ -2626,19 +1614,19 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 2,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-16-dc305f": {
     "opening_id": "book-16-dc305f",
     "name": "Cannon Fodder",
     "aliases": [],
@@ -2700,10 +1688,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-19-8d0e77": {
     "opening_id": "book-19-8d0e77",
     "name": "Sacrificial Mills",
     "aliases": [],
@@ -2765,10 +1753,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-20-4be0ef": {
     "opening_id": "book-20-4be0ef",
     "name": "Cardinal Point Abandonment",
     "aliases": [],
@@ -2830,10 +1818,10 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-22-06af3c": {
     "opening_id": "book-22-06af3c",
     "name": "Man-to-Man Marking",
     "aliases": [],
@@ -2895,10 +1883,10 @@
       "book",
       "man-to-man-marking"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-23-186c54": {
     "opening_id": "book-23-186c54",
     "name": "Black Diamond",
     "aliases": [],
@@ -2951,21 +1939,21 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 2,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "black-diamond"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-24-d5192b": {
     "opening_id": "book-24-d5192b",
-    "name": "Mill Rush — Misplacement Loss",
+    "name": "Mill Rush \u2014 Misplacement Loss",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3025,12 +2013,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-25-f03c02": {
     "opening_id": "book-25-f03c02",
-    "name": "Mill Rush — Parallel Lines",
+    "name": "Mill Rush \u2014 Parallel Lines",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3090,12 +2078,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-26-11476f": {
     "opening_id": "book-26-11476f",
-    "name": "Mill Rush — Parallel Lines (Alt)",
+    "name": "Mill Rush \u2014 Parallel Lines (Alt)",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3155,12 +2143,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-27-54cdc5": {
     "opening_id": "book-27-54cdc5",
-    "name": "Mill Rush — Perpendicular Lines",
+    "name": "Mill Rush \u2014 Perpendicular Lines",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3220,12 +2208,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-28-0180cc": {
     "opening_id": "book-28-0180cc",
-    "name": "Mill Rush — Perpendicular Lines (Alt)",
+    "name": "Mill Rush \u2014 Perpendicular Lines (Alt)",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3285,12 +2273,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-29-72a62a": {
     "opening_id": "book-29-72a62a",
-    "name": "Mill Rush — Extended Parallel",
+    "name": "Mill Rush \u2014 Extended Parallel",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3350,12 +2338,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-30-c669f7": {
     "opening_id": "book-30-c669f7",
-    "name": "Mill Rush — Alt Extended Parallel",
+    "name": "Mill Rush \u2014 Alt Extended Parallel",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3415,12 +2403,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-31-173eb1": {
     "opening_id": "book-31-173eb1",
-    "name": "Mill Rush — Black's Alternate Response",
+    "name": "Mill Rush \u2014 Black's Alternate Response",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3480,12 +2468,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-32-7128af": {
     "opening_id": "book-32-7128af",
-    "name": "Mill Rush — Alternate Black Response",
+    "name": "Mill Rush \u2014 Alternate Black Response",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3545,12 +2533,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-33-1b81cb": {
     "opening_id": "book-33-1b81cb",
-    "name": "Inverted Mill Rush — Parallel Lines",
+    "name": "Inverted Mill Rush \u2014 Parallel Lines",
     "aliases": [],
     "family": "Inverted Mill Rush",
     "side": "both",
@@ -3610,12 +2598,12 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-34-ba238d": {
     "opening_id": "book-34-ba238d",
-    "name": "Inverted Mill Rush — Perpendicular",
+    "name": "Inverted Mill Rush \u2014 Perpendicular",
     "aliases": [],
     "family": "Inverted Mill Rush",
     "side": "both",
@@ -3675,12 +2663,12 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-35-a7d107": {
     "opening_id": "book-35-a7d107",
-    "name": "Inverted Mill Rush — White Mistake",
+    "name": "Inverted Mill Rush \u2014 White Mistake",
     "aliases": [],
     "family": "Inverted Mill Rush",
     "side": "both",
@@ -3740,12 +2728,12 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-36-3fed69": {
     "opening_id": "book-36-3fed69",
-    "name": "Mill Rush — Endgame Stalemate",
+    "name": "Mill Rush \u2014 Endgame Stalemate",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -3805,12 +2793,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-37-56fc68": {
     "opening_id": "book-37-56fc68",
-    "name": "Battle Lines — Black Loss",
+    "name": "Battle Lines \u2014 Black Loss",
     "aliases": [],
     "family": "Battle Lines",
     "side": "both",
@@ -3870,12 +2858,12 @@
       "book",
       "battle-lines"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-38-e9e4be": {
     "opening_id": "book-38-e9e4be",
-    "name": "Battle Lines — Better Response",
+    "name": "Battle Lines \u2014 Better Response",
     "aliases": [],
     "family": "Battle Lines",
     "side": "both",
@@ -3935,10 +2923,10 @@
       "book",
       "battle-lines"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-39-aaaae3": {
     "opening_id": "book-39-aaaae3",
     "name": "Closed Z Mill",
     "aliases": [],
@@ -4000,10 +2988,10 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-40-b80834": {
     "opening_id": "book-40-b80834",
     "name": "Open Z Mill",
     "aliases": [],
@@ -4065,12 +3053,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-41-42b007": {
     "opening_id": "book-41-42b007",
-    "name": "Z Mill — Variation A",
+    "name": "Z Mill \u2014 Variation A",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4130,12 +3118,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-42-de2d76": {
     "opening_id": "book-42-de2d76",
-    "name": "Z Mill — Variation B",
+    "name": "Z Mill \u2014 Variation B",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4195,12 +3183,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-43-be2a34": {
     "opening_id": "book-43-be2a34",
-    "name": "Z Mill — Variation C",
+    "name": "Z Mill \u2014 Variation C",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4256,12 +3244,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-44-630046": {
     "opening_id": "book-44-630046",
-    "name": "Z Mill — Variation D",
+    "name": "Z Mill \u2014 Variation D",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4321,12 +3309,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-45-a6aab2": {
     "opening_id": "book-45-a6aab2",
-    "name": "Z Mill — Variation E",
+    "name": "Z Mill \u2014 Variation E",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4386,12 +3374,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-47-6ce70d": {
     "opening_id": "book-47-6ce70d",
-    "name": "Z Mill c4/e3 — Parallel Mills",
+    "name": "Z Mill c4/e3 \u2014 Parallel Mills",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4451,12 +3439,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-48-dbe7b9": {
     "opening_id": "book-48-dbe7b9",
-    "name": "Z Mill c4/e3 — Ring Round the Rosie",
+    "name": "Z Mill c4/e3 \u2014 Ring Round the Rosie",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4516,12 +3504,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-49-4707ce": {
     "opening_id": "book-49-4707ce",
-    "name": "Z Mill c4/e3 — All Along the Watchtower",
+    "name": "Z Mill c4/e3 \u2014 All Along the Watchtower",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4581,12 +3569,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-50-48b559": {
     "opening_id": "book-50-48b559",
-    "name": "Z Mill c4/e3 — Perpendicular Mills",
+    "name": "Z Mill c4/e3 \u2014 Perpendicular Mills",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4646,12 +3634,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-51-98d08e": {
     "opening_id": "book-51-98d08e",
-    "name": "Z Mill c4/e3 — A Shoot-Out",
+    "name": "Z Mill c4/e3 \u2014 A Shoot-Out",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4711,12 +3699,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-52-40a6c0": {
     "opening_id": "book-52-40a6c0",
-    "name": "Z Mill c4/e3 — Misdirection",
+    "name": "Z Mill c4/e3 \u2014 Misdirection",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4776,12 +3764,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-53-5ac589": {
     "opening_id": "book-53-5ac589",
-    "name": "Z Mill c4/e3 — Cut the Bottom Out",
+    "name": "Z Mill c4/e3 \u2014 Cut the Bottom Out",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4841,12 +3829,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-54-8444f7": {
     "opening_id": "book-54-8444f7",
-    "name": "Z Mill c4/e3 — Two L's",
+    "name": "Z Mill c4/e3 \u2014 Two L's",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4906,12 +3894,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-55-da8bdf": {
     "opening_id": "book-55-da8bdf",
-    "name": "Z Mill c4/e3 — Hangman",
+    "name": "Z Mill c4/e3 \u2014 Hangman",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4971,12 +3959,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-56-0da61a": {
     "opening_id": "book-56-0da61a",
-    "name": "Z Mill c4/e3 — Perpendicular Mills 2",
+    "name": "Z Mill c4/e3 \u2014 Perpendicular Mills 2",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -5036,12 +4024,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-57-0351a0": {
     "opening_id": "book-57-0351a0",
-    "name": "Z Mill c4/e3 — Roof Falls In",
+    "name": "Z Mill c4/e3 \u2014 Roof Falls In",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -5101,10 +4089,10 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-58-b77e22": {
     "opening_id": "book-58-b77e22",
     "name": "Black L, White Wrap",
     "aliases": [],
@@ -5166,12 +4154,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
   },
-  {
+  "book-59-e63feb": {
     "opening_id": "book-59-e63feb",
-    "name": "Into White — White to a1",
+    "name": "Into White \u2014 White to a1",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -5222,1452 +4210,16 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 2,
       "B": 0,
-      "D": 0
+      "D": 2
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy — Brandwood",
+    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
     "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-4950bfde",
-    "name": "The Morning March",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "b2",
-      "d3",
-      "g4",
-      "c4",
-      "d7",
-      "g7",
-      "a1",
-      "e5",
-      "a4",
-      "c3",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBBBB........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...B....WWWWBBBB.....W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-7fb20cbe",
-    "name": "The Crimson Rampart Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "c4",
-      "c5",
-      "e3",
-      "e5",
-      "b2",
-      "d7",
-      "d1",
-      "e4",
-      "a1",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "........WWWWBB.BB......W|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-97edfd40",
-    "name": "The \"Ancient Citadel",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "a7",
-      "g4",
-      "a4",
-      "a1",
-      "f4",
-      "d7",
-      "g1",
-      "g7",
-      "d1",
-      "d5",
-      "f6",
-      "d3",
-      "c5",
-      "b4",
-      "f4",
-      "d2",
-      "f2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "B..W...B.W..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "B..W..WB.W.B............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BW.WB.WB.W.B............|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BWWWBBWB.W.B............|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-fa0c6050",
-    "name": "Garden of Three Stones",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "d6",
-      "d7",
-      "d1",
-      "c4",
-      "e4",
-      "b4",
-      "e4",
-      "d2",
-      "f4",
-      "d5",
-      "d2",
-      "d3",
-      "b6",
-      "e5",
-      "f6",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".B.W...B.W..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".B.W.W.B.W.............B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.W.W.B.W.....B...W...B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W.B.W...B.B...W...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 0,
-      "D": 0,
-      "human_wins": 0,
-      "human_losses": 0,
-      "human_draws": 0,
-      "ai_wins": 0,
-      "ai_losses": 0,
-      "ai_draws": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-4fecbb67",
-    "name": "The Golden Core Emerges",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d6",
-      "a4",
-      "d2",
-      "d5",
-      "b4",
-      "c5",
-      "f4",
-      "e5",
-      "d6",
-      "d3",
-      "c4",
-      "e4",
-      "c3",
-      "e3",
-      "d6",
-      "a1",
-      "a7"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.....W.B...B..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.....W.B...B.B.W......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.....W.B.B.B.BWW......|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.....W.B.B.B.BWWW.....|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-569c8e46",
-    "name": "The \"Triple Crown Gambit",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "d7",
-      "c4",
-      "d5",
-      "b4",
-      "e4",
-      "f4",
-      "d1",
-      "d2",
-      "d5",
-      "d3",
-      "d6",
-      "d3",
-      "a1",
-      "g1",
-      "c5",
-      "e5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.W...B...............B|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W...B.......B.W.....B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.W...B...B...B.W.W...B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.W.W.B...B.B.B.W.W...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-b21bfa7b",
-    "name": "Cornerstone Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d6",
-      "f4",
-      "a4",
-      "d5",
-      "d2",
-      "e4",
-      "g4",
-      "e3",
-      "e5",
-      "d1",
-      "c4",
-      "b4",
-      "c5",
-      "d3",
-      "c3",
-      "b2",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.....B.B.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.....B.B.W.B...W......|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.B...B.B.W.B...W.W....|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.B...B.B.W.B...WBWW...|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-2107af76",
-    "name": "The \"Four-Corner Fissure",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "g4",
-      "a4",
-      "d6",
-      "c4",
-      "e4",
-      "b4",
-      "d2",
-      "f4",
-      "e4",
-      "d1",
-      "c3",
-      "d3",
-      "b6",
-      "f6",
-      "f2",
-      "d7",
-      "b2",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "...W...B.W.............B|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...W...B.W.....B...W...B|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...W...B.W.B.W.B...W...B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...W.B.B.W.B.W.B...W...B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-4cfbd49a",
-    "name": "The Royal Guard Rise",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d6",
-      "a4",
-      "b4",
-      "g4",
-      "f4",
-      "d1",
-      "d3",
-      "e4",
-      "d5",
-      "c4",
-      "b6",
-      "f6",
-      "b2",
-      "d7",
-      "c5",
-      "e5",
-      "c3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.....W.B.....B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W...W.B.B...B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.W.W.W.B.B...B.....B..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.W.W.W.B.B...B.B.W.B..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-a6905787",
-    "name": "Four Corners Fortification",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "g4",
-      "a4",
-      "e4",
-      "f4",
-      "e5",
-      "e3",
-      "c5",
-      "c4",
-      "d5",
-      "d3",
-      "d6",
-      "d2",
-      "a4",
-      "b4",
-      "e4",
-      "e3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.W.B.B................|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W.B.B...B.......W....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.W.B.B...B......WWB...|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.W.B.B...B....W.WWB..B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-77cb0319",
-    "name": "The Crowned Anchor Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d1",
-      "d2",
-      "d6",
-      "a4",
-      "f4",
-      "c4",
-      "g4",
-      "b4",
-      "e4",
-      "d2",
-      "d5",
-      "d3",
-      "d6",
-      "f2",
-      "c5",
-      "b2",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...B...B...W..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W...B.W.B.B.W..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W.B.B.W.B.B.W.........W|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".W.B.B.W.B.B.W.W...B...W|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-1a945176",
-    "name": "Fenrir's Fury Rise",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "b2",
-      "d3",
-      "g4",
-      "e4",
-      "d7",
-      "e3",
-      "d5",
-      "e5",
-      "c3",
-      "g4",
-      "f4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBBBB........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...B....WWWWBBBB.....W..|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-fed60f58",
-    "name": "Novel Opening novel-fed60f58",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "d1",
-      "f4",
-      "g4",
-      "f2",
-      "b2",
-      "f6",
-      "a7",
-      "b4",
-      "g1",
-      "d3",
-      "g7",
-      "a1",
-      "a4",
-      "d7",
-      "e4",
-      "c4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".....W...W.B.B..........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "...W.W...W.BBB..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...W.W...WBBBBW.........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "W..W.W...WBBBBWB........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-78cdaf49",
-    "name": "Novel Opening novel-78cdaf49",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "d2",
-      "d1",
-      "d7",
-      "g4",
-      "d5",
-      "g1",
-      "e3",
-      "a1",
-      "e5",
-      "g7",
-      "b2",
-      "e4",
-      "c5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........WBB...W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WBBWB.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B...W...WBBWB.W........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.W.W...WBBWB.W.B......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-1c8901a3",
-    "name": "The \"Golden Triangle Opening",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "f2",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "g7",
-      "d5",
-      "a7",
-      "d7",
-      "c3",
-      "g4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "........WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-d56f9859",
-    "name": "The \"Ancient Crown",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d7",
-      "f4",
-      "a7",
-      "g7",
-      "a4",
-      "a1",
-      "c4",
-      "b4",
-      "g4",
-      "e5",
-      "g1",
-      "d1",
-      "b6",
-      "e3",
-      "e4",
-      "c5",
-      "d5"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": "BB.......W.W............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "BBW....B.W.W............|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BBW...WB.W.W...........B|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BBWB..WB.W.W...W.......B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-90501a5e",
-    "name": "The \"Trident's Fury",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "d7",
-      "d1",
-      "g4",
-      "e5",
-      "a7",
-      "g7",
-      "g1",
-      "b2",
-      "a1",
-      "a4",
-      "d2"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B......WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.B.W..WWWWBB.B........|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": false
-  },
-  {
-    "opening_id": "novel-9add1c14",
-    "name": "Novel Opening novel-9add1c14",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "d7",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "g7",
-      "d5",
-      "a7",
-      "a4",
-      "d3",
-      "e3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B......WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B......WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-28a58cb1",
-    "name": "Novel Opening novel-28a58cb1",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "f6",
-      "f2",
-      "b6",
-      "g4",
-      "b2",
-      "c5",
-      "c4",
-      "e5",
-      "d5",
-      "d7",
-      "d3",
-      "e4",
-      "e3",
-      "g1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........WWWBB.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "...B....WWWWBB.B........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "...B....WWWWBBWBB.......|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 1,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-bfd289fa",
-    "name": "Novel Opening novel-bfd289fa",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d2",
-      "d6",
-      "f4",
-      "b4",
-      "e3",
-      "e4",
-      "d3",
-      "d1",
-      "c3",
-      "d7",
-      "f2",
-      "b2",
-      "f6",
-      "d5",
-      "b6",
-      "c4",
-      "a4",
-      "g4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........B.W.W.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........B.W.W.B...BW...|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".....B...B.W.W.B...BWW..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B...B...B.W.W.B...BWWW.|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-222aec19",
-    "name": "Novel Opening novel-222aec19",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "f4",
-      "b4",
-      "d2",
-      "b6",
-      "f6",
-      "b2",
-      "d7",
-      "f2",
-      "c4",
-      "a7",
-      "d5",
-      "c5",
-      "e3",
-      "d3",
-      "g1",
-      "g7",
-      "e4"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.B.B.W........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "........WWBB.B.W........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B......WWBB.BWW........|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B......WWBBWBWW.......B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-c8f50243",
-    "name": "Novel Opening novel-c8f50243",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d6",
-      "d2",
-      "f4",
-      "b4",
-      "c4",
-      "d7",
-      "d3",
-      "g4",
-      "c3",
-      "c5",
-      "f6",
-      "f2",
-      "b6",
-      "d1",
-      "e3",
-      "b2",
-      "a4",
-      "g1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........W.W.B.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".B.......W.W.B.B.......W|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".B.B.....W.W.B.B.....W.W|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": ".B.B.....W.W.B.BB....WWW|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 0,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
   }
-]
+}

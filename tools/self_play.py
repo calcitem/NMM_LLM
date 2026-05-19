@@ -189,6 +189,7 @@ def _run_fast_game(
     white_personality: str = "balanced",
     black_personality: str = "balanced",
     forced_opening=None,  # Opening | None — if set, lock first N placement moves
+    skip_book_write: bool = False,  # True in parallel workers to avoid concurrent file writes
 ) -> dict:
     """Play one game with no LLM calls. Returns a minimal game-record dict."""
     from game.rules import get_all_legal_moves as _get_legal
@@ -281,44 +282,58 @@ def _run_fast_game(
 
     winner = engine.winner
 
-    # Record opening book outcomes
+    # Opening book stats and novel-opening detection.
+    # When skip_book_write=True (parallel workers) we collect the data but do
+    # NOT write to disk — the main process merges all records into the book
+    # after the workers finish, avoiding concurrent JSON file corruption.
+    opening_outcomes: list[dict] = []
     for rec_inst in (white_rec, black_rec):
         result = rec_inst.get_current_result()
         if result and result.opening_id and result.status in ("exact", "probable", "transposition"):
-            book.update_outcome_stats(result.opening_id, winner=winner or "D")
+            if skip_book_write:
+                opening_outcomes.append({"opening_id": result.opening_id, "winner": winner or "D"})
+            else:
+                book.update_outcome_stats(result.opening_id, winner=winner or "D")
 
-    # Save novel openings with needs_llm_name=True so they can be named later
     novel_opening_info: dict | None = None
     for rec_inst in (white_rec, black_rec):
         result = rec_inst.get_current_result()
         if result and result.status == "novel":
             placement_moves = [m["to"] for m in moves_log if m["type"] == "place"]
             if len(placement_moves) >= 6:
-                sigs  = _compute_fen_signatures(placement_moves)
-                novel = book.save_novel_opening(
-                    placement_moves, sigs, outcome=winner, needs_llm_name=True
-                )
-                novel_opening_info = {
-                    "opening_id":     novel.opening_id,
-                    "placement_moves": placement_moves,
-                    "outcome":         winner,
-                }
+                sigs = _compute_fen_signatures(placement_moves)
+                if skip_book_write:
+                    novel_opening_info = {
+                        "placement_moves": placement_moves,
+                        "outcome":         winner,
+                        "sigs":            sigs,
+                    }
+                else:
+                    novel = book.save_novel_opening(
+                        placement_moves, sigs, outcome=winner, needs_llm_name=True
+                    )
+                    novel_opening_info = {
+                        "opening_id":      novel.opening_id,
+                        "placement_moves": placement_moves,
+                        "outcome":         winner,
+                    }
             break
 
     return {
-        "session_id":         session_id,
-        "date":               datetime.now().isoformat(),
-        "human_color":        "self_play",
-        "winner":             winner,
-        "move_count":         move_count,
-        "white_difficulty":   white_ai.difficulty,
-        "black_difficulty":   black_ai.difficulty,
-        "white_personality":  white_personality,
-        "black_personality":  black_personality,
-        "self_play":          True,
-        "draw_repetition":    draw_by_repetition,
-        "moves":              moves_log,
-        "novel_opening":      novel_opening_info,
+        "session_id":        session_id,
+        "date":              datetime.now().isoformat(),
+        "human_color":       "self_play",
+        "winner":            winner,
+        "move_count":        move_count,
+        "white_difficulty":  white_ai.difficulty,
+        "black_difficulty":  black_ai.difficulty,
+        "white_personality": white_personality,
+        "black_personality": black_personality,
+        "self_play":         True,
+        "draw_repetition":   draw_by_repetition,
+        "moves":             moves_log,
+        "novel_opening":     novel_opening_info,
+        "opening_outcomes":  opening_outcomes,  # non-empty only when skip_book_write=True
     }
 
 
@@ -367,6 +382,7 @@ def _parallel_worker(params: dict) -> dict:
         white_personality=white_personality,
         black_personality=black_personality,
         forced_opening=forced,
+        skip_book_write=True,  # main process merges book after all workers finish
     )
     return record
 
@@ -660,13 +676,33 @@ def main() -> None:
         elapsed_all = time.perf_counter() - t0_all
         total_time  = elapsed_all
 
-        # Consolidate opening book and save records in main process
+        # Consolidate opening book and save records in main process.
+        # Workers skip book writes to avoid concurrent JSON corruption; we
+        # apply all stats updates and novel openings here serially instead.
         print(f"\n  Saving {len(all_records)} game records …")
+        _merge_book = OpeningBook()
         for record in all_records:
             try:
                 mem.save_game_record(record)  # type: ignore[union-attr]
             except Exception as exc:
                 print(f"  Warning: failed to save record: {exc}")
+            for outcome in record.pop("opening_outcomes", []):
+                try:
+                    _merge_book.update_outcome_stats(outcome["opening_id"], winner=outcome["winner"])
+                except Exception as exc:
+                    print(f"  Warning: book stats update failed: {exc}")
+            novel_info = record.get("novel_opening")
+            if novel_info and "sigs" in novel_info:
+                try:
+                    novel = _merge_book.save_novel_opening(
+                        novel_info["placement_moves"],
+                        novel_info.pop("sigs"),
+                        outcome=novel_info.get("outcome"),
+                        needs_llm_name=True,
+                    )
+                    novel_info["opening_id"] = novel.opening_id
+                except Exception as exc:
+                    print(f"  Warning: novel opening save failed: {exc}")
 
     # ── Sequential mode (fast or LLM) ────────────────────────────────────────
     else:

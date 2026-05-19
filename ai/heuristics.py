@@ -27,6 +27,8 @@ class HeuristicWeights:
     setup_mill: int           = 100   # bonus per new two-config gained this move (placement phase)
     mill_opening: int         = 200   # bonus for opening a cycling-ready mill (enables next capture)
     mill_trap_build: int      = 180   # bonus for adding a 3rd+ open mill when already dominant (endgame)
+    capture_disrupt_feeder: int = 300  # bonus when captured piece was a feeder for an opponent cycling mill
+    capture_disrupt_diamond: int = 250 # bonus when captured piece was part of an opponent fork (diamond)
     # ── Positional base scale (applied inside evaluate) ──────────────────
     long_term_position: int   = 100   # % multiplier on entire positional base score
     mill_count_scale: int     = 100   # % multiplier on mill-count weights
@@ -72,6 +74,18 @@ _CROSS_NODES_3 = frozenset({"d7", "g4", "d1", "a4", "d5", "e4", "d3", "c4"})
 
 # Union used for cardinal_block bonus (rewards placing on any high-mobility node).
 _CROSS_NODES = _CARDINAL_NODES | _CROSS_NODES_3
+
+# Outer-ring side mills: each contains two corner nodes (a7/g7/g1/a1) that
+# have only 2 connections.  Closing one of these during early placement locks
+# two pieces into low-mobility corner squares, hurting movement-phase options.
+_OUTER_MILLS = frozenset(
+    frozenset(m) for m in [
+        ("a7", "d7", "g7"),
+        ("g7", "g4", "g1"),
+        ("g1", "d1", "a1"),
+        ("a1", "a4", "a7"),
+    ]
+)
 
 # Inner-ring mills: entirely on the innermost square.  Closing one of these
 # confines your pieces to the inner ring and reduces long-term mobility, so
@@ -794,9 +808,67 @@ def tactical_move_bonus(
     if mill_opened > 0 and _mill_cycle_ready(after, color) > 0:
         mill_open_bonus = weights.mill_opening * mill_opened
 
+    capture_this_move = after.pieces_on_board[opp] < before.pieces_on_board[opp]
+
+    # Capture quality bonuses: reward capturing structurally important opponent pieces.
+    capture_feeder_bonus = 0
+    capture_diamond_bonus = 0
+    if capture_this_move:
+        captured_pos = next(
+            (pos for pos in POSITIONS
+             if before.positions[pos] == opp and after.positions[pos] != opp),
+            None,
+        )
+        if captured_pos is not None:
+            # Feeder disruption: captured piece was adjacent to (but not in) a closed opponent mill.
+            # Removing it breaks the cycling potential of that mill.
+            for mill in MILLS:
+                mill_set = set(mill)
+                if all(before.positions[p] == opp for p in mill):
+                    adj_non_mill = {
+                        nb for mp in mill for nb in ADJACENCY[mp] if nb not in mill_set
+                    }
+                    if captured_pos in adj_non_mill and before.positions[captured_pos] == opp:
+                        capture_feeder_bonus = weights.capture_disrupt_feeder
+                        break
+
+            # Diamond disruption: captured piece was part of an opponent 2-config
+            # that contributed to a fork (two 2-configs sharing a closing square).
+            if not capture_feeder_bonus:
+                opp_forks = detect_diamonds(before, opp)
+                for fork_sq in opp_forks:
+                    for mill in MILLS:
+                        if fork_sq in mill:
+                            mill_pieces = [p for p in mill if p != fork_sq]
+                            if (all(before.positions[p] == opp for p in mill_pieces)
+                                    and captured_pos in mill_pieces):
+                                capture_diamond_bonus = weights.capture_disrupt_diamond
+                                break
+                    if capture_diamond_bonus:
+                        break
+
+    # Outer-ring mill penalty during early placement (pieces 1–6).
+    # Each outer-ring side mill (a7-d7-g7, g7-g4-g1, g1-d1-a1, a1-a4-a7)
+    # contains two corner squares with only 2 connections each.  Completing
+    # one in the first six placements locks two pieces into the lowest-mobility
+    # positions on the board, hurting the movement phase.
+    # Skipped when the mill comes with an immediate capture — material gain
+    # justifies the mobility cost in that case.
+    # Does NOT fire at pieces 7-9 (late_mill_bonus below handles those).
+    outer_mill_penalty = 0
+    if (mills_delta > 0 and not capture_this_move
+            and get_game_phase(before, color) == "place"
+            and before.pieces_placed.get(color, 0) < 6):
+        for mill in MILLS:
+            if (all(after.positions[p] == color for p in mill)
+                    and not all(before.positions[p] == color for p in mill)):
+                if frozenset(mill) in _OUTER_MILLS:
+                    outer_mill_penalty += 1
+        outer_mill_penalty *= int(weights.close_mill * 0.65)
+
     # Late-placement mill urgency (pieces 7-9, i.e. pieces_placed >= 6).
-    # Closing a mill on the OUTER or MIDDLE ring in this window is critical —
-    # it's likely the last chance to form a mill with good piece placement.
+    # Closing a mill on the OUTER or MIDDLE ring in this window is still
+    # valuable — any mill at this stage is better than none.
     # Inner-ring mills are excluded: they confine pieces to the smallest square
     # and reduce long-term mobility more than they gain from the mill itself.
     late_mill_bonus = 0
@@ -841,6 +913,9 @@ def tactical_move_bonus(
         + late_mill_bonus
         + trap_build_bonus
         + fly_fork_bonus
+        + capture_feeder_bonus
+        + capture_diamond_bonus
+        - outer_mill_penalty
     )
 
 

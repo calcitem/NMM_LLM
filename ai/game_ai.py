@@ -128,12 +128,18 @@ class GameAI:
     ----------
     color : "W" or "B"
         The colour this AI controls.
-    difficulty : int [1-5]
-        Search depth. Difficulty 5 uses iterative deepening up to _TIME_LIMIT.
+    difficulty : int [1-10]
+        Search depth / time budget.  Difficulty 5+ uses iterative deepening.
     blunder_probability : float [0.0-1.0]
         Probability of playing a deliberately bad move each turn.
         0.0 = always plays best; 1.0 = always blunders.
         Bad moves are drawn from the bottom quartile of legal-move scores.
+    use_mcts : bool
+        When True, MCTS replaces negamax for the main move decision.
+        Time budget is taken from _TIME_LIMIT[difficulty] (default 10 s).
+    value_net : ValueNet | None
+        Optional trained value network passed to MCTS as the leaf evaluator.
+        Loaded automatically from data/value_net.npz by the web app when present.
     """
 
     def __init__(
@@ -142,6 +148,8 @@ class GameAI:
         difficulty: int = 3,
         blunder_probability: float = 0.0,
         weights: HeuristicWeights | None = None,
+        use_mcts: bool = False,
+        value_net=None,
     ) -> None:
         self.color = color
         self.difficulty = max(1, min(10, difficulty))
@@ -149,6 +157,18 @@ class GameAI:
         self._weights: HeuristicWeights = weights if weights is not None else DEFAULT_WEIGHTS
         self._nodes = 0
         self._deadline: float = math.inf   # set by _iterative_deepen; checked in _negamax
+        self.use_mcts = use_mcts
+        self._value_net = value_net
+        self._mcts = None
+        if use_mcts:
+            from .mcts import MCTS
+            time_budget = _TIME_LIMIT.get(self.difficulty, 10.0)
+            self._mcts = MCTS(
+                color=color,
+                time_limit=time_budget,
+                weights=self._weights,
+                value_net=value_net,
+            )
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
@@ -223,6 +243,14 @@ class GameAI:
             return blunder
 
         self.last_was_blunder = False
+
+        # MCTS path: delegate to Monte Carlo Tree Search when enabled.
+        if self._mcts is not None:
+            time_budget = _TIME_LIMIT.get(self.difficulty, 10.0)
+            if fast_early_game:
+                time_budget = 2.0
+            deadline = time.time() + time_budget
+            return self._mcts.choose_move(board, deadline=deadline)
 
         # Early-game fast path: while few pieces are on the board the tree is
         # tiny — cap the search to a short budget regardless of difficulty.
