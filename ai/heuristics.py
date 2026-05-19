@@ -34,6 +34,20 @@ class HeuristicWeights:
     mill_count_scale: int     = 100   # % multiplier on mill-count weights
     mobility_scale: int       = 100   # % multiplier on mobility weights
     blocked_scale: int        = 100   # % multiplier on blocked-pieces weights
+    # ── Placement busy-opponent scan-ahead ──────────────────────────────────
+    placement_busy_scan: int  = 120   # base weight per chain level (level-1 is free; 2,3,4 score ×1,2,3)
+    # ── Convergence cluster block ────────────────────────────────────────────
+    convergence_block: int    = 250   # bonus per opponent convergence cluster disrupted this placement
+    # ── 6v4 sacrifice-to-fly ────────────────────────────────────────────────
+    sacrifice_viable: int      = 200  # bonus in 6v4 when a strong 3-piece fly structure exists
+    # ── Double-mill convergence prevention ──────────────────────────────────
+    convergence_penalty: int   = 180  # penalty per opp fork precursor pair in move phase
+    convergence_disrupt: int   = 220  # bonus per opp fork precursor pair broken this move
+    # ── Ring crowding penalty ────────────────────────────────────────────────
+    ring_crowding_penalty: int = 150  # penalty for placing 6th+ own piece on a single ring
+    # ── Herding / mobility squeeze ───────────────────────────────────────────
+    herding_squeeze: int       = 60   # bonus per opponent piece with exactly 1 legal move
+    mobility_reduction: int    = 15   # bonus per opponent legal move removed this turn
     # ── Behaviour (consumed by GameAI, not heuristics) ───────────────────
     make_mistakes: int        = 0     # blunder probability 0-100 %
     opening_adherence: int    = 50    # how strongly to follow the opening book (0-100)
@@ -75,6 +89,13 @@ _CROSS_NODES_3 = frozenset({"d7", "g4", "d1", "a4", "d5", "e4", "d3", "c4"})
 # Union used for cardinal_block bonus (rewards placing on any high-mobility node).
 _CROSS_NODES = _CARDINAL_NODES | _CROSS_NODES_3
 
+# Ring membership: outer / middle / inner concentric squares.
+# Used to detect ring-crowding (4+ own pieces on one ring hurts mobility).
+_RING_OUTER  = frozenset({"a7", "d7", "g7", "g4", "g1", "d1", "a1", "a4"})
+_RING_MIDDLE = frozenset({"b6", "d6", "f6", "f4", "f2", "d2", "b2", "b4"})
+_RING_INNER  = frozenset({"c5", "d5", "e5", "e4", "e3", "d3", "c3", "c4"})
+_RINGS = (_RING_OUTER, _RING_MIDDLE, _RING_INNER)
+
 # Outer-ring side mills: each contains two corner nodes (a7/g7/g1/a1) that
 # have only 2 connections.  Closing one of these during early placement locks
 # two pieces into low-mobility corner squares, hurting movement-phase options.
@@ -108,7 +129,13 @@ _FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 55}
 # Herding / encirclement: own pieces adjacent to each opponent piece.
 # Rewards progressively surrounding opponent pieces to shrink their escape space.
 # Irrelevant in fly phase (pieces can jump anywhere).
-_HERD_WEIGHTS  = {"place": 2, "move": 12, "fly": 0}
+_HERD_WEIGHTS  = {"place": 6, "move": 18, "fly": 0}
+
+# Near-blocked pressure: opponent pieces with exactly 1 legal move remaining.
+# These are one step from total blockade — the goal of the herding tactic.
+# 0 in placement (mobility is constantly fluctuating during piece deployment)
+# and fly (adjacency constraints don't apply; pieces jump freely).
+_NEAR_BLOCKED_WEIGHTS = {"place": 0, "move": 30, "fly": 0}
 
 # Mill wrapping: own pieces occupying exit squares of opponent closed mills.
 # A surrounded mill cannot easily cycle — the pivot piece has nowhere to slide.
@@ -168,6 +195,8 @@ def evaluate(
     opp_fork   = _fork_threats(board, opp)
     our_herd   = _encirclement(board, color)
     opp_herd   = _encirclement(board, opp)
+    our_squeeze = _squeeze_count(board, opp)   # opponent near-blocked (good for us)
+    opp_squeeze = _squeeze_count(board, color) # our own near-blocked (bad for us)
     our_wrap   = _mill_wrapping_pressure(board, color)
     opp_wrap   = _mill_wrapping_pressure(board, opp)
     fly_asym   = 0 if force_aggressive else _fly_asymmetry(board, color)
@@ -187,6 +216,7 @@ def evaluate(
         + _CYCLE_WEIGHTS[phase]  * (our_cycle - opp_cycle)
         + _FORK_WEIGHTS[phase]   * (our_fork  - opp_fork)
         + _HERD_WEIGHTS[phase]   * (our_herd  - opp_herd)
+        + _NEAR_BLOCKED_WEIGHTS[phase] * (our_squeeze - opp_squeeze)
         + _WRAP_WEIGHTS[phase]   * (our_wrap  - opp_wrap)
         + _FLY_ASYM_WEIGHTS[phase]   * fly_asym
         + _DOMINATION_WEIGHTS[phase] * (our_dom - opp_dom)
@@ -225,6 +255,25 @@ def evaluate(
         opp_surplus = max(0, opp_thr - 1)  # we block 1 max; remainder are automatic
         own_surplus = max(0, our_thr - 1)
         base += 900 * (own_surplus - opp_surplus)  # was 600
+
+    # 6v4 sacrifice-to-fly: when own has 6 pieces and opp has 4 and a strong
+    # 3-piece fly nucleus already exists (closed mill or 2-config), reward the
+    # position.  This nudges the search toward trades that reach a winning 3v3
+    # rather than passively defending all 6 pieces until the search horizon.
+    # Guard: only fires when 6v3 domination (≥3 own open mills) is not yet
+    # available — once that path is open, the zugzwang plan is better.
+    w_sac = weights.sacrifice_viable if weights else DEFAULT_WEIGHTS.sacrifice_viable
+    if own_pieces == 6 and opp_pieces == 4 and phase == "move" and our_two < 3:
+        sq = _fly_sacrifice_quality(board, color)
+        if sq > 0:
+            base += w_sac * sq
+
+    # Move-phase double-mill convergence penalty: opponent two-configs that share
+    # a closing square (diamond) or a pivot piece are one move from an unblockable
+    # fork.  Penalise these precursors to force the AI to disrupt them proactively.
+    w_conv = weights.convergence_penalty if weights else DEFAULT_WEIGHTS.convergence_penalty
+    if phase == "move":
+        base -= w_conv * _double_mill_convergence(board, opp)
 
     # Move-phase: reward non-contributing pieces that are adjacent to a 2-config
     # piece (assembling toward a productive formation — free piece assembly).
@@ -415,6 +464,25 @@ def _encirclement(board: BoardState, color: str) -> int:
     return count
 
 
+def _squeeze_count(board: BoardState, color: str) -> int:
+    """Count pieces of `color` with exactly 1 legal adjacent move remaining.
+
+    A piece with 0 moves is already captured by _blocked_count.  This signal
+    targets the intermediate state: pieces that still have one escape route but
+    are one move away from total blockade.  High counts indicate the herding
+    tactic is close to completion.  Irrelevant in fly phase (pieces jump freely).
+    """
+    if get_game_phase(board, color) == "fly":
+        return 0
+    count = 0
+    for pos in POSITIONS:
+        if board.positions[pos] == color:
+            moves = sum(1 for n in ADJACENCY[pos] if board.positions[n] == "")
+            if moves == 1:
+                count += 1
+    return count
+
+
 def _open_mill_domination(board: BoardState, color: str) -> int:
     """Open-mill surplus in asymmetric endgame (own ≥ 6 pieces, opp ≤ 5).
 
@@ -524,6 +592,66 @@ def _free_piece_assembly(board: BoardState, color: str) -> int:
         if board.positions[pos] == color and pos not in in_mill and pos not in in_two:
             if any(nb in in_two for nb in ADJACENCY[pos]):
                 count += 1
+    return count
+
+
+def _fly_sacrifice_quality(board: BoardState, color: str) -> int:
+    """In a 6v4 position, estimate how strong a 3-piece flying endgame would be.
+
+    Returns 2 if own already has a closed mill (excellent fly nucleus), 1 if own
+    has at least one 2-config (good fly nucleus), 0 if the pieces are scattered.
+    Only meaningful when called with own_pieces==6 and opp_pieces==4.
+    """
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 3:
+            return 2
+        if vals.count(color) == 2 and vals.count("") == 1:
+            return 1  # keep scanning for a closed mill
+    return 0
+
+
+def _double_mill_convergence(board: BoardState, opp: str) -> int:
+    """Count opponent fork precursor pairs: two 2-configs that share either a
+    common empty closing square (diamond) or a common opp pivot piece.
+
+    A shared closing square means placing there closes BOTH mills simultaneously.
+    A shared pivot means one piece participates in two different 2-configs and
+    moving it can threaten either line.  Both patterns are one move away from
+    an unblockable fork and should be disrupted before they mature.
+    """
+    closing: dict[str, list[int]] = {}  # sq -> [mill_index, ...]
+    pivots:  dict[str, list[int]] = {}  # opp_piece -> [mill_index, ...]
+
+    for i, mill in enumerate(MILLS):
+        vals = [board.positions[p] for p in mill]
+        if vals.count(opp) == 2 and vals.count("") == 1:
+            emp = next(p for p in mill if board.positions[p] == "")
+            closing.setdefault(emp, []).append(i)
+            for p in mill:
+                if board.positions[p] == opp:
+                    pivots.setdefault(p, []).append(i)
+
+    count = 0
+    # Shared closing square (classic diamond)
+    shared_pairs: set[frozenset[int]] = set()
+    for mills_for_sq in closing.values():
+        for a in range(len(mills_for_sq)):
+            for b in range(a + 1, len(mills_for_sq)):
+                pair = frozenset((mills_for_sq[a], mills_for_sq[b]))
+                if pair not in shared_pairs:
+                    shared_pairs.add(pair)
+                    count += 1
+
+    # Shared pivot piece (not already counted as shared closing square)
+    for mills_for_piece in pivots.values():
+        for a in range(len(mills_for_piece)):
+            for b in range(a + 1, len(mills_for_piece)):
+                pair = frozenset((mills_for_piece[a], mills_for_piece[b]))
+                if pair not in shared_pairs:
+                    shared_pairs.add(pair)
+                    count += 1
+
     return count
 
 
@@ -745,11 +873,266 @@ def _cross_node_count(board: BoardState, color: str) -> int:
     return sum(1 for p in _CROSS_NODES if board.positions[p] == color)
 
 
+def _convergence_cluster_count(board: BoardState, opp: str) -> int:
+    """Count mills where the opponent has 3 pieces able to converge within 2 adjacency
+    moves along unblocked paths (no own pieces occupy target squares or intermediates).
+
+    Applies to any mill on the board — outer, middle, inner ring, or cross-ring.
+    Uses bipartite matching to verify 3 distinct opponent pieces can each claim a
+    distinct mill square within 2 moves.
+    """
+    own = "B" if opp == "W" else "W"
+    opp_pieces = [p for p in POSITIONS if board.positions[p] == opp]
+    if len(opp_pieces) < 3:
+        return 0
+
+    def _can_reach(piece: str, target: str) -> bool:
+        if piece == target:
+            return True  # already there (0 moves)
+        if board.positions[target] == own:
+            return False  # own piece occupies target
+        if board.positions[target] == opp:
+            return False  # another opp piece already occupies target
+        # target is empty — check 1-step and 2-step
+        if target in ADJACENCY[piece]:
+            return True
+        for mid in ADJACENCY[piece]:
+            if board.positions[mid] == "" and target in ADJACENCY[mid]:
+                return True
+        return False
+
+    count = 0
+    for mill in MILLS:
+        mill_sqs = list(mill)
+        # Skip if any mill square is owned — own piece blocks convergence
+        if any(board.positions[sq] == own for sq in mill_sqs):
+            continue
+        # Build per-square candidate lists
+        candidates: list[list[str]] = [
+            [p for p in opp_pieces if _can_reach(p, sq)]
+            for sq in mill_sqs
+        ]
+        # Bipartite matching: 3 distinct pieces → 3 distinct squares
+        def _match(idx: int, used: frozenset) -> bool:
+            if idx == len(mill_sqs):
+                return True
+            for piece in candidates[idx]:
+                if piece not in used:
+                    if _match(idx + 1, used | frozenset([piece])):
+                        return True
+            return False
+
+        if _match(0, frozenset()):
+            count += 1
+
+    return count
+
+
+def _placement_chain_scan(board: BoardState, color: str) -> int:
+    """Busy-opponent placement initiative scan (placement phase only).
+
+    Scans up to 4 half-moves ahead to find forcing sequences where every AI
+    placement compels an opponent response, ideally ending with a mill closure.
+    Also rewards "two-for-one" placements that block an opponent threat while
+    simultaneously creating a new AI 2-config — maintaining initiative even
+    while defending.
+
+    Uses a simplified board model (no mill-capture handling) so it stays fast.
+    Called from tactical_move_bonus on every candidate placement.
+
+    Returns 0–4:
+    4 — chain found where the last piece closes a mill
+    3 — fork reachable within chain (2 simultaneous threats opp can't both block)
+    2 — sustained initiative: forcing pressure persists after one opp response
+    1 — single immediate forcing threat (opp must respond)
+    0 — no forcing initiative from this position
+    """
+    opp = "B" if color == "W" else "W"
+    our_rem = 9 - board.pieces_placed.get(color, 0)
+    opp_rem = 9 - board.pieces_placed.get(opp, 0)
+    if our_rem <= 0:
+        return 0
+
+    def _threats(b: BoardState, c: str) -> list[str]:
+        seen: list[str] = []
+        for mill in MILLS:
+            vals = [b.positions[p] for p in mill]
+            if vals.count(c) == 2 and vals.count("") == 1:
+                e = next(p for p in mill if b.positions[p] == "")
+                if e not in seen:
+                    seen.append(e)
+        return seen
+
+    def _place(b: BoardState, c: str, pos: str) -> BoardState:
+        o = "B" if c == "W" else "W"
+        new_pos = dict(b.positions)
+        new_pos[pos] = c
+        return BoardState(
+            positions=new_pos,
+            turn=o,
+            pieces_on_board={**b.pieces_on_board, c: b.pieces_on_board[c] + 1},
+            pieces_placed={**b.pieces_placed, c: b.pieces_placed.get(c, 0) + 1},
+            pieces_captured=dict(b.pieces_captured),
+        )
+
+    def _closes_mill(b: BoardState, c: str, pos: str) -> bool:
+        for mill in MILLS:
+            if pos in mill and b.positions[pos] == "" and all(
+                b.positions[p] == c for p in mill if p != pos
+            ):
+                return True
+        return False
+
+    def _productive(b: BoardState, c: str) -> list[str]:
+        """Placements that close a mill, create a 2-config, or block+create (two-for-one)."""
+        o = "B" if c == "W" else "W"
+        result: list[str] = []
+        for pos in POSITIONS:
+            if b.positions[pos] != "":
+                continue
+            useful = False
+            blocks_opp_mill = False
+            for mill in MILLS:
+                if pos not in mill:
+                    continue
+                vals = [b.positions[p] for p in mill]
+                own = vals.count(c)
+                opp_cnt = vals.count(o)
+                emp = vals.count("")
+                if own == 2 and opp_cnt == 0:             # closes or 2-config
+                    useful = True
+                    break
+                if own == 1 and opp_cnt == 0 and emp == 2: # creates 2-config
+                    useful = True
+                    break
+                if opp_cnt == 2 and emp == 1:              # blocks opp
+                    blocks_opp_mill = True
+            # Two-for-one: blocking an opponent threat while creating own 2-config
+            if not useful and blocks_opp_mill:
+                for mill in MILLS:
+                    if pos not in mill:
+                        continue
+                    vals = [b.positions[p] for p in mill]
+                    if vals.count(c) == 1 and vals.count(o) == 0 and vals.count("") == 2:
+                        useful = True
+                        break
+            if useful:
+                result.append(pos)
+        return result
+
+    # ── Chain scan ────────────────────────────────────────────────────────────
+
+    my_threats = _threats(board, color)
+
+    # Seed path: current placement only creates a 1-config (no immediate 2-config).
+    # Try one "seed" placement that would create a 2-config, then continue the chain.
+    # Capped at level 3 because the seed step is not forced.
+    if not my_threats:
+        if our_rem < 2:
+            return 0
+        seeds = _productive(board, color)
+        if not seeds:
+            return 0
+        seed_best = 0
+        for seed in seeds[:4]:
+            if board.positions.get(seed) != "":
+                continue
+            b_seed = _place(board, color, seed)
+            t_seed = _threats(b_seed, color)
+            if not t_seed:
+                continue
+            seed_best = max(seed_best, 1)
+            if opp_rem <= 0:
+                seed_best = max(seed_best, 3 if len(t_seed) >= 2 else 2)
+                continue
+            for threat_sq in t_seed[:3]:
+                if b_seed.positions.get(threat_sq) != "":
+                    continue
+                b_blocked = _place(b_seed, opp, threat_sq)
+                for close_sq in POSITIONS:
+                    if (b_blocked.positions.get(close_sq) == ""
+                            and _closes_mill(b_blocked, color, close_sq)):
+                        seed_best = max(seed_best, 3)
+                        break
+                t2 = _threats(b_blocked, color)
+                if len(t2) >= 2:
+                    seed_best = max(seed_best, 3)
+                elif t2:
+                    seed_best = max(seed_best, 2)
+            if seed_best >= 3:
+                break
+        return seed_best
+
+    best = 1
+
+    # Opponent cannot respond (finished placing) — threats are permanent
+    if opp_rem <= 0:
+        return 3 if len(my_threats) >= 2 else 2
+
+    for threat in my_threats[:3]:
+        if board.positions.get(threat, "") != "":
+            continue
+        b1 = _place(board, opp, threat)
+
+        # After opp blocks, do we still have threats?
+        t1 = _threats(b1, color)
+
+        if len(t1) >= 2:
+            best = max(best, 3)
+        elif t1:
+            best = max(best, 2)
+
+        if our_rem < 2:
+            continue
+
+        # AI places a second piece — look for fork or mill closure
+        for ai_sq in _productive(b1, color)[:6]:
+            if b1.positions.get(ai_sq, "") != "":
+                continue
+
+            # Does this placement close a mill immediately?
+            if _closes_mill(b1, color, ai_sq):
+                best = max(best, 4)
+                break
+
+            b2 = _place(b1, color, ai_sq)
+            t2 = _threats(b2, color)
+
+            if len(t2) >= 2:
+                best = max(best, 3)
+            elif t2 and opp_rem >= 2 and our_rem >= 3:
+                # Continue one more round: opp blocks again
+                for block2 in t2[:2]:
+                    if b2.positions.get(block2, "") != "":
+                        continue
+                    b3 = _place(b2, opp, block2)
+                    for ai_sq3 in _productive(b3, color)[:4]:
+                        if b3.positions.get(ai_sq3, "") != "":
+                            continue
+                        if _closes_mill(b3, color, ai_sq3):
+                            best = max(best, 4)
+                            break
+                        b4 = _place(b3, color, ai_sq3)
+                        if len(_threats(b4, color)) >= 2:
+                            best = max(best, 3)
+                    if best >= 4:
+                        break
+
+            if best >= 4:
+                break
+
+        if best >= 4:
+            break
+
+    return best
+
+
 def tactical_move_bonus(
     before: BoardState,
     after: BoardState,
     color: str,
     weights: HeuristicWeights | None = None,
+    opp_last_weak: bool = False,
 ) -> int:
     """Delta-based tactical bonus added directly to the root-move score.
 
@@ -912,6 +1295,81 @@ def tactical_move_bonus(
     if after_phase == "fly" and own_two_after >= 2 and own_two_before < 2:
         fly_fork_bonus = 750
 
+    # Ring-crowding penalty: fires when own placement is the 6th+ piece on one ring
+    # (outer/middle/inner).  Concentrating ≥4 pieces on a single ring reduces
+    # movement-phase mobility severely — those pieces share few exit squares and can
+    # be blocked by opponent cardinal-point control.  Max one penalty per move.
+    ring_crowd_penalty = 0
+    if get_game_phase(before, color) == "place":
+        new_sq = next(
+            (p for p in POSITIONS
+             if after.positions[p] == color and before.positions[p] != color),
+            None,
+        )
+        if new_sq is not None:
+            for ring in _RINGS:
+                if new_sq in ring:
+                    own_on_ring = sum(1 for p in ring if before.positions[p] == color)
+                    if own_on_ring >= 5:  # placing the 6th+ piece on this ring
+                        ring_crowd_penalty = weights.ring_crowding_penalty
+                    break
+
+    # Placement busy-opponent chain scan.
+    # Rewards forcing sequences where every placement compels an opp response
+    # while building toward a mill. Skipped if the current move already closes a
+    # mill (in that case the close_mill bonus is dominant and chain planning is moot).
+    # Level 1 (single threat) gets modest credit; levels 2–4 scale up with chain
+    # length and quality. Amplified when opponent's last move was structurally weak.
+    busy_chain_bonus = 0
+    # Chain scan only fires when:
+    # (a) placement phase, (b) this move doesn't close a mill, and
+    # (c) the AI has NO immediate mill available from `before` (if one existed it
+    #     should have been taken via close_mill; chain planning is moot in that case).
+    if (get_game_phase(before, color) == "place"
+            and mills_delta == 0
+            and _closeable_mills(before, color) == 0):
+        chain = _placement_chain_scan(after, color)
+        if chain >= 1:
+            if chain == 1:
+                base = int(weights.placement_busy_scan * 0.4)
+            else:
+                base = weights.placement_busy_scan * (chain - 1)
+            if opp_last_weak:
+                base = int(base * 1.5)
+            busy_chain_bonus = base
+
+    # Convergence cluster disruption: bonus for placement that breaks an opponent
+    # convergence cluster — 3 opponent pieces that can each reach a distinct square
+    # in the same mill within 2 adjacency moves along unblocked paths.
+    # Only fires in placement phase (movement phase already has evaluate() for this).
+    conv_bonus = 0
+    if get_game_phase(before, color) == "place":
+        conv_before = _convergence_cluster_count(before, opp)
+        if conv_before > 0:
+            conv_after = _convergence_cluster_count(after, opp)
+            disrupted = max(0, conv_before - conv_after)
+            conv_bonus = disrupted * weights.convergence_block
+
+    # Double-mill convergence disruption: bonus for move-phase moves that reduce the
+    # number of opponent fork precursor pairs (shared closing square or shared pivot).
+    # Only fires in move phase — placement phase uses the separate convergence_block path.
+    dmc_bonus = 0
+    if get_game_phase(before, color) == "move":
+        dmc_before = _double_mill_convergence(before, opp)
+        if dmc_before > 0:
+            dmc_after = _double_mill_convergence(after, opp)
+            disrupted = max(0, dmc_before - dmc_after)
+            dmc_bonus = disrupted * weights.convergence_disrupt
+
+    # Mobility-reduction bonus: each opponent legal move removed by this move earns
+    # a direct reward in move phase.  Herding the opponent into a corner (zero moves)
+    # is a win condition, so moves that tighten the noose deserve explicit credit
+    # even when they don't close a mill or capture a piece.
+    mob_reduction_bonus = 0
+    if get_game_phase(before, color) == "move":
+        opp_mob_delta = max(0, _mobility(before, opp) - _mobility(after, opp))
+        mob_reduction_bonus = weights.mobility_reduction * opp_mob_delta
+
     return (
         weights.close_mill            * mills_delta
         + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
@@ -926,9 +1384,14 @@ def tactical_move_bonus(
         + late_mill_bonus
         + trap_build_bonus
         + fly_fork_bonus
+        + mob_reduction_bonus
         + capture_feeder_bonus
         + capture_diamond_bonus
+        + busy_chain_bonus
+        + conv_bonus
+        + dmc_bonus
         - outer_mill_penalty
+        - ring_crowd_penalty
     )
 
 

@@ -145,6 +145,8 @@ main {
   flex: 1;
   min-height: 0;
 }
+#chat-view[hidden],
+#profile-view[hidden] { display: none; }
 #profile-view {
   display: flex;
   flex-direction: column;
@@ -477,7 +479,9 @@ main {
 #btn-force-cap,
 #btn-draw,
 #btn-hint,
-#btn-undo {
+#btn-undo,
+#btn-handoff-w,
+#btn-handoff-b {
   flex-shrink: 0;
   background: none;
   border: 1px solid var(--border);
@@ -496,6 +500,10 @@ main {
 #btn-draw:hover:not(:disabled)       { border-color: var(--green);  color: var(--green); }
 #btn-hint:hover:not(:disabled)       { border-color: var(--tan);    color: var(--tan); }
 #btn-undo:hover:not(:disabled)       { border-color: var(--accent); color: var(--accent); }
+#btn-handoff-w,
+#btn-handoff-b { border-color: #405080; color: #6888b8; }
+#btn-handoff-w:hover { border-color: #88aadd; color: #88aadd; }
+#btn-handoff-b:hover { border-color: #88aadd; color: #88aadd; }
 @keyframes pulse-bad {
   0%, 100% { border-color: #803030; }
   50%       { border-color: #c05050; }
@@ -583,6 +591,19 @@ main {
   border-color: #806030;
   color: #c8a030;
   animation: pulse-border 1.8s ease-in-out infinite;
+}
+
+/* ── Tournament game badge ───────────────────────────────────────────── */
+.tournament-badge {
+  font-size: .78rem;
+  padding: 4px 12px;
+  margin-top: 4px;
+  border-radius: 6px;
+  border: 1px solid #5a4010;
+  background: #2a1a04;
+  color: #d4a030;
+  text-align: center;
+  letter-spacing: .02em;
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */

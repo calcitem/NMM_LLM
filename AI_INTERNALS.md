@@ -84,6 +84,9 @@ Additional terms added on top:
 | Mobility (own − opp) | ×3 | ×8 | ×20 | Number of available move destinations |
 | Mill threats (own − opp) | ×8 | ×12 | ×18 | Same as two-configurations but treated separately as an immediate-threat signal |
 | Position value (own − opp) | ×2 | ×2 | ×2 | Cross/cardinal nodes score 3; corner nodes score 2 |
+| Herding / encirclement | ×6 | ×18 | 0 | Own pieces adjacent to each opponent piece; rewards surrounding opponent pieces to shrink their escape space |
+| Near-blocked pressure (opp − own) | 0 | ×30 | 0 | Opponent pieces with **exactly 1 legal move** remaining — one step from total blockade |
+| Mill-wrapping pressure (own − opp) | 0 | ×40 | ×60 | Own pieces occupying exit squares of opponent closed mills; surrounded mills cannot easily cycle. Returns 0 when the opponent is in fly phase (adjacency confinement irrelevant). |
 
 Cross/cardinal nodes (`d7`, `a4`, `g4`, `d1`, and the equivalent middle and inner ring nodes) connect three lines instead of two, making them more tactically flexible.
 
@@ -103,6 +106,85 @@ Cross/cardinal nodes (`d7`, `a4`, `g4`, `d1`, and the equivalent middle and inne
 | `scatter_placement` | Placing non-adjacent to own pieces in the first 6 moves |
 | `late_mill_bonus` | Closing an outer/middle mill on placement moves 7–9 |
 | `mill_trap_build` | Gaining a 3rd+ open mill while already dominant (zugzwang builder) |
+| `mobility_reduction` | Each opponent legal move removed by this move (move phase only; herding bonus) |
+| `placement_busy_scan` | Placement-phase busy-opponent forcing chain (see below) |
+| `convergence_block` | Bonus for disrupting opponent convergence cluster (placement phase) |
+| `ring_crowding_penalty` | Penalty for placing the 6th+ own piece on a single ring (placement phase) |
+
+### Placement busy-opponent scan-ahead
+
+`_placement_chain_scan()` in `heuristics.py` is called from `tactical_move_bonus` during the placement phase. It performs a forward scan of up to 4 half-moves (AI placements interleaved with opponent responses) to find **forcing chains** — sequences where every AI placement compels an opponent response — and ideally ends with a mill closure on the final piece.
+
+#### Scan quality levels (returned value 0–4)
+
+| Level | Meaning |
+|-------|---------|
+| 0 | No forcing initiative from this position |
+| 1 | One immediate 2-config threat (opponent must block) |
+| 2 | Sustained pressure: forcing threat persists after one opponent response |
+| 3 | Fork reachable within the chain (2 simultaneous threats opponent cannot both block) |
+| 4 | Clean forcing sequence found where the final piece closes a mill |
+
+The bonus added to the root score is `placement_busy_scan × (level − 1)` for level ≥ 2 (level 1 gets 40% of the weight). Default `placement_busy_scan = 120`.
+
+#### Two-for-one placements
+
+The scan explicitly rewards placements that **block an opponent 2-config while simultaneously creating an own 2-config in a different mill line**. These "two-for-one" moves maintain initiative even when defending: the opponent's threat is neutralised but the AI immediately presents a new one.
+
+#### Weak-opponent amplification
+
+When the `Coordinator` observes that the opponent's last move scored below `poor_move_threshold` (the same threshold used for poor-move commentary), it sets `GameAI._opp_last_weak = True`. While this flag is active the placement busy-chain bonus is multiplied by 1.5, expressing the imperative: *exploit passive play by locking in a forcing sequence before the opponent gets back on track*. The flag is cleared automatically after the AI completes its move.
+
+#### Why this matters
+
+A strong human player builds placement sequences where every move creates a threat the opponent cannot ignore. This keeps the opponent "busy" responding while the real mill plan develops in a parallel part of the board. Without this scan the AI evaluates each placement in isolation and may pass up chains like:
+
+```
+Black:  e3 (→ future d3-e3-c3 threat)
+White responds to something else
+Black:  d3 (→ d3-e3 now a 2-config, c3 empty)  
+White still busy
+Black:  c3 (→ closes c3-d3-e3, captures)
+```
+
+With the scan, `c3` placement gets a level-4 bonus because the search found the chain; earlier moves in the chain (`e3`, `d3`) also get level-1/2 bonuses steering the AI toward building the sequence from the start.
+
+### Convergence cluster blocking
+
+`_convergence_cluster_count(board, opp)` counts mills where the opponent has 3 pieces that can each reach a distinct mill square within 2 adjacency moves, along paths not blocked by own pieces. Bipartite matching ensures 3 distinct pieces are assigned to 3 distinct squares.
+
+The tactical bonus fires during placement phase when a move reduces the opponent's convergence cluster count. Default weight `convergence_block = 250` per cluster disrupted.
+
+**Example** (game: 1.d6d7 2.f4a7 3.g7a1 4.b4a4×d6 5.d6b2 6.d1g4 7.f2f6 8.d3d2 9.c4 [Black to place]):
+
+White's pieces c4, d3, f4 form a convergence cluster on the c3-d3-e3 mill:
+- c4 → c3 (1 step)
+- d3 already at d3 (0 steps)
+- f4 → e4 → e3 (2 steps through empty e4)
+
+Black should place at c3 or e3 to disrupt the cluster, not at passive squares like b6.
+
+The detection covers any mill anywhere on the board — outer ring, middle ring, inner ring, and cross-ring mills.
+
+### Ring crowding penalty
+
+The three concentric rings (outer: a7/d7/g7/g4/g1/d1/a1/a4; middle: b6/d6/f6/f4/f2/d2/b2/b4; inner: c5/d5/e5/e4/e3/d3/c3/c4) each contain 8 positions. Concentrating 4 or more own pieces on a single ring during placement creates a "side-column" trap: those pieces share few exit squares and can be completely locked out of the board by an opponent who controls the cardinal connector squares between rings.
+
+`ring_crowding_penalty` (default 150) is subtracted from the tactical bonus whenever a placement would be the 6th+ own piece on any single ring. This fires only in placement phase — in move phase the penalty is not needed since distribution is already fixed.
+
+An opponent over-committing to one ring is *exploitable*, not dangerous — three pieces on a ring can be contained by controlling the two connecting cardinal-point squares adjacent to that ring plus one square within the ring. The AI does not penalise opponent ring crowding; instead, the existing cardinal_block bonus steers the AI to occupy those connector squares naturally.
+
+### Herding and mobility squeeze
+
+The AI can win by reducing the opponent's legal move count to zero — a "blockade" win — rather than by always chasing mill captures. Two dedicated signals support this strategy:
+
+**`_squeeze_count(board, color)`** counts pieces of `color` with **exactly 1 legal adjacent move** remaining. A fully-blocked piece (0 moves) is already counted by the blocked-pieces signal; squeeze captures the intermediate state — a piece with one escape route, close to being trapped. The move-phase weight `_NEAR_BLOCKED_WEIGHTS["move"] = 30` rewards positions where the opponent has more near-blocked pieces than you do.
+
+**`mobility_reduction` bonus** in `tactical_move_bonus`: each opponent legal move removed by the current move earns a direct reward (`default = 15` per move removed). This fires only in move phase. In the game-1 example, White playing `d3→c3` removes one escape from Black's c4 piece; the bonus accumulates alongside the near-blocked positional signal to guide the search toward the herding sequence even before the depth-4 forced-win is visible.
+
+**Move ordering — squeeze targets**: `_squeeze_targets(board)` returns the set of empty squares that are the *last* escape route of a nearly-trapped opponent piece. These squares are promoted to **priority 1** in `_order_moves` (same level as blocking an opponent mill threat), ensuring the search tree explores herding moves early and finds the forced blockade at lower depths.
+
+The herding strategy from book Figure 82 — where Black places one piece adjacent to every White piece and gradually closes in until White has no moves — is reflected in the combination of increased herding weight (`_HERD_WEIGHTS["move"] = 18`) and the new squeeze signal, which collectively reward positions that tighten the opponent's range of motion over several moves.
 
 ### Free-piece assembly
 

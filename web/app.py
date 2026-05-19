@@ -280,7 +280,7 @@ _PERSONALITY_WEIGHTS: dict[str, dict] = {
 class TournamentState:
     """Tracks one tournament run — 6 games vs the personality roster."""
 
-    QUALIFY_GAMES = 3  # games the human must play before unlocking
+    QUALIFY_GAMES = 0  # no qualification required — tournament always available
 
     ROSTER: list[dict] = [  # ordered weakest → strongest
         {"name": "chaos",      "label": "Chaos — The Trickster",      "diff": 2, "elo": 720},
@@ -316,13 +316,16 @@ class TournamentState:
         entry     = self.ROSTER[self.current_idx]
         human_won = (winner == human_color) if winner else None
         pts       = 2 if human_won is True else (1 if human_won is None else 0)
+        ai_color = "B" if human_color == "W" else "W"
         self.results.append({
-            "personality": entry["name"],
-            "label":       entry["label"],
-            "difficulty":  entry["diff"],
-            "human_color": human_color,
-            "result":      "W" if human_won is True else ("D" if human_won is None else "L"),
-            "points":      pts,
+            "personality":       entry["name"],
+            "label":             entry["label"],
+            "difficulty":        entry["diff"],
+            "human_color":       human_color,
+            "white_personality": "Human" if human_color == "W" else entry["label"],
+            "black_personality": "Human" if human_color == "B" else entry["label"],
+            "result":            "W" if human_won is True else ("D" if human_won is None else "L"),
+            "points":            pts,
         })
         # K=32 Elo update
         expected        = 1.0 / (1.0 + 10.0 ** ((entry["elo"] - self.player_elo) / 400.0))
@@ -699,6 +702,14 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
             await asyncio.to_thread(session.coordinator.on_game_end, record)
             await _commentary(ws, session)
             asyncio.create_task(_maybe_consolidate(ws))
+        return
+
+    # Discard stale result if the board changed while we were computing
+    # (e.g. the human pressed Undo mid-think).  GameEngine.apply_move always
+    # replaces session.engine.board with a new object, so identity comparison
+    # reliably detects any board change that happened during the await above.
+    if session.engine.board is not board:
+        log.warning("Stale AI move discarded — board changed during computation (undo race)")
         return
 
     # Snapshot state BEFORE applying so the human can mark this move as bad.
@@ -1087,6 +1098,100 @@ async def ws_endpoint(websocket: WebSocket):
                 await _send(websocket, _state(session))
                 _maybe_start_ai(force=True)  # force=True so it fires in human vs AI mode too
 
+            # ── handoff_to_ai — hand one side to the AI mid-game ─────────────
+            elif kind == "handoff_to_ai" and session and not session.engine.finished:
+                handoff_color = msg.get("color", "W")   # "W" or "B"
+                if handoff_color not in ("W", "B"):
+                    await _send(websocket, {"type": "error", "message": "Invalid color for handoff"})
+                    continue
+
+                human_color = "B" if handoff_color == "W" else "W"
+                diff = max(1, min(10, int(msg.get("difficulty", adaptive.current_difficulty))))
+                use_llm = bool(msg.get("use_llm", True))
+                _aw = {**_evolved_weights, **settings.get("ai_weights", {}),
+                       **(msg.get("ai_weights") or {})}
+                def _w(key, default): return int(_aw.get(key, default))
+                _hw = HeuristicWeights(
+                    close_mill=_w("close_mill", 500),
+                    cycling_mill=_w("cycling_mill", 300),
+                    block_opponent_mill=_w("block_opponent_mill", 400),
+                    stop_opponent_mills=_w("stop_opponent_mills", 450),
+                    feeder_diamond=_w("feeder_diamond", 200),
+                    mill_wrapping=_w("mill_wrapping", 150),
+                    cardinal_block=_w("cardinal_block", 400),
+                    scatter_placement=_w("scatter_placement", 100),
+                    setup_mill=_w("setup_mill", 150),
+                    mill_opening=_w("mill_opening", 200),
+                    long_term_position=_w("long_term_position", 100),
+                    mill_count_scale=_w("mill_count_scale", 100),
+                    mobility_scale=_w("mobility_scale", 100),
+                    blocked_scale=_w("blocked_scale", 100),
+                    make_mistakes=_w("make_mistakes", 0),
+                    opening_adherence=_w("opening_adherence", 50),
+                )
+                new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw)
+
+                new_coord = None
+                if use_llm:
+                    _s = _load_settings()
+                    url   = _s.get("ollama_url",   "http://localhost:11434")
+                    model = _s.get("ollama_model", "llama3.1:8b")
+                    mem   = MemoryManager(ollama_url=url, ollama_model=model)
+                    llm   = MillsLLM(memory=mem, ollama_url=url, model=model)
+                    book  = OpeningBook()
+                    rec   = OpeningRecognizer(book)
+                    egr   = EndgameRecognizer(
+                        active_threshold=_s.get("endgame_active_threshold", 11),
+                        deep_threshold=_s.get("endgame_deep_threshold", 8),
+                        zugzwang_threshold=_s.get("endgame_zugzwang_threshold", 0.4),
+                    )
+                    new_coord = Coordinator(
+                        game_ai=new_ai, mills_llm=llm, memory=mem,
+                        poor_move_threshold=_s.get("poor_move_threshold", 0.3),
+                        max_poor_move_comments=_s.get("max_poor_move_comments_per_game", 5),
+                        opening_recognizer=rec, endgame_recognizer=egr,
+                        trajectory_db=_trajectory_db,
+                        endgame_db=_endgame_db,
+                        vs_human=True,
+                        human_color=human_color,
+                    )
+                    # Seed coordinator with all moves played so far so trajectory hints work
+                    for m in session.engine.game_record.get("moves", []):
+                        new_coord._game_moves.append({
+                            "turn":            new_coord._turn_num,
+                            "color":           m.get("color", ""),
+                            "type":            "place",
+                            "from":            m.get("from"),
+                            "to":              m.get("to"),
+                            "capture":         m.get("capture"),
+                            "notation":        m.get("notation", ""),
+                            "board_fen_before": m.get("board_fen_before", ""),
+                            "opening_recognition": {"status": "inactive", "name": None, "confidence": 0.0},
+                        })
+                        new_coord._turn_num += 1
+                    await asyncio.to_thread(new_coord.on_game_start)
+
+                # Update the session — the handed-off side is now AI
+                session.game_ai    = new_ai
+                session.coordinator = new_coord
+                session.human_color = human_color
+                session.vs_human   = False
+                session.adaptive   = adaptive
+
+                # Mark the game record so it saves correctly
+                session.engine.game_record["human_color"] = human_color
+                session.engine.game_record["handoff_game"] = True
+                session.engine.game_record["handoff_ply"]  = len(
+                    session.engine.game_record.get("moves", [])
+                )
+
+                log.info("Handoff: %s → AI, human stays %s diff=%d", handoff_color, human_color, diff)
+                await _send(websocket, {"type": "handoff_ack", "ai_color": handoff_color,
+                                        "human_color": human_color})
+                await _send(websocket, _state(session))
+                await _commentary(websocket, session)
+                _maybe_start_ai()
+
             # ── move ──────────────────────────────────────────────────────────
             elif kind == "move" and session:
                 frm = msg.get("from")  # None for placement
@@ -1118,7 +1223,13 @@ async def ws_endpoint(websocket: WebSocket):
                     continue
 
                 board_before = board
-                session._board_history.append(board)
+                session._board_history.append((
+                    board,
+                    len(session.engine.game_record.get("moves", [])),
+                    list(session.engine._move_log),
+                    session.engine._post_placement_moves,
+                    session.engine._turn_num,
+                ))
                 session._can_undo_ai = False   # human move committed — no more undo of AI
                 session.engine.apply_move(move)
 
@@ -1150,7 +1261,13 @@ async def ws_endpoint(websocket: WebSocket):
                 session._pending["capture"] = cap
                 board_before    = session._board_before
                 completed_move  = dict(session._pending)   # save before clearing
-                session._board_history.append(board_before)
+                session._board_history.append((
+                    board_before,
+                    len(session.engine.game_record.get("moves", [])),
+                    list(session.engine._move_log),
+                    session.engine._post_placement_moves,
+                    session.engine._turn_num,
+                ))
                 session._can_undo_ai = False   # human move committed
                 session.engine.apply_move(completed_move)
                 session._pending      = None
@@ -1173,7 +1290,17 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── undo ──────────────────────────────────────────────────────────
             elif kind == "undo" and session and session._board_history:
-                session.engine.board       = session._board_history.pop()
+                # If the AI is mid-computation, interrupt it — the board is about to
+                # change so whatever move it returns will be for the wrong position.
+                if ai_thinking and session.game_ai:
+                    session.game_ai.force_stop()
+                snap = session._board_history.pop()
+                (session.engine.board,
+                 gr_len,
+                 session.engine._move_log,
+                 session.engine._post_placement_moves,
+                 session.engine._turn_num) = snap
+                session.engine.game_record["moves"] = session.engine.game_record["moves"][:gr_len]
                 session.engine.finished    = False
                 session.engine.winner      = None
                 session.engine.draw_reason = None
@@ -1378,12 +1505,6 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── tournament_start ──────────────────────────────────────────────
             elif kind == "tournament_start":
-                if session_games < TournamentState.QUALIFY_GAMES:
-                    await _send(websocket, {
-                        "type":    "error",
-                        "message": f"Play {TournamentState.QUALIFY_GAMES} games first to unlock Tournament Mode.",
-                    })
-                    continue
                 tournament = TournamentState()
                 nxt = tournament.current
                 await _send(websocket, {

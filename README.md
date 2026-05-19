@@ -216,6 +216,34 @@ After a game ends the Replay panel activates. Use ⏮ / ◀ / ▶ / ⏭ to step 
 
 Select any named opening from the dropdown to see its win/loss/draw record, then click **Replay Opening** to watch it played out at configurable speed. Choose **Practice — I play on** to continue from the end of the opening, or **Watch — AI continues** to observe both sides.
 
+### Named Openings
+
+When the AI plays a placement sequence it hasn't seen before, the opening is saved automatically with `needs_llm_name=True`. Names are assigned in two ways:
+
+- **During self-play** — pass `--name-openings` to `self_play.py` and MillsAI names each novel opening at the end of the run.
+- **On demand** — run `python tools/name_openings.py` to batch-name all un-named openings in one pass (requires Ollama).
+
+The opening book uses **UCB1 selection** to balance exploration and exploitation when choosing an opening at game start:
+
+```
+score = win_rate + C × √(ln(total_plays) / (plays_this_opening + 1))   C = 0.25
+```
+
+Openings are filtered to the AI's side: White-winning lines are only offered when the AI plays White, and vice versa.
+
+**Useful commands:**
+
+```bash
+# List all openings with win/loss/draw stats, sorted by win rate
+python tools/list_openings.py
+
+# Import curated game records from the strategy book (seeds win/loss stats)
+python tools/import_book_games.py
+
+# Name all un-named openings via LLM
+python tools/name_openings.py
+```
+
 ---
 
 ## Self-Play Training
@@ -338,6 +366,30 @@ python tools/evolve_weights.py --generations 20 --parallel 4
 # Longer run continuing from the current best weights
 python tools/evolve_weights.py --generations 50 --from-best --parallel 4
 ```
+
+### Value Network Training
+
+```bash
+python tools/train_value_net.py
+```
+
+Trains a small MLP (79 inputs → 128 → 64 → 1 output) on completed game records. Every board position in every saved game is labelled with the final outcome (win/loss/draw from that colour's perspective) and used as a training sample.
+
+- **Input**: 24 board positions × 3 channels (own/opponent/empty) + 7 scalar metadata = 79 features, encoded from the current player's perspective so the same weights handle both colours.
+- **Output**: `tanh` scalar in (−1, 1) — positive means the current player is likely to win.
+- **Training**: mini-batch SGD with MSE loss; runs entirely on CPU in pure numpy (no framework needed).
+- **Output file**: `data/value_net.npz`, loaded automatically by MCTS at server start.
+- When a value net is present, it **replaces** the heuristic evaluator at MCTS leaf nodes — faster and stronger than the hand-tuned formula after sufficient training data.
+- Inference is ~0.1 ms per position; no GPU required.
+
+| Flag | Description |
+|------|-------------|
+| `--games-dir PATH` | Source directory for JSONL game files (default: `data/games`) |
+| `--output PATH` | Where to write the trained weights (default: `data/value_net.npz`) |
+| `--epochs N` | Training epochs (default: 50) |
+| `--batch-size N` | Mini-batch size (default: 256) |
+
+Recommended: accumulate at least 200 self-play games before training for useful signal.
 
 ---
 

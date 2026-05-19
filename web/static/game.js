@@ -19,6 +19,7 @@ let thinkingInterval  = null; // setInterval handle while AI is thinking
 let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
 let canMarkBad        = false; // true only between ai_move and the next human move commit
+let isVsHuman         = false; // true when current game is human vs human (handoff buttons visible)
 let replayMoves       = [];   // moves with FEN data, populated when game ends
 let replayIdx         = -1;   // -1 = not replaying; 0..n-1 = ply index
 let _openingsData     = [];   // cached openings from /api/openings
@@ -27,8 +28,8 @@ let _openingsData     = [];   // cached openings from /api/openings
 let setupMode       = false;  // true while the position editor is open
 let setupGrid       = {};     // pos → "W"|"B"|"" for the editor board
 let setupBrush      = "";     // currently selected palette piece: ""|"W"|"B"
-let sessionGames    = 0;      // games finished this session; unlocks tournament at QUALIFY_GAMES
-const QUALIFY_GAMES = 3;      // mirror of server TournamentState.QUALIFY_GAMES
+let sessionGames    = 0;      // games finished this session
+const QUALIFY_GAMES = 0;      // no qualification required — tournament always available
 
 // ── Player profile state ──────────────────────────────────────────────────────
 let playerName = localStorage.getItem("nmm_player_name") || "";
@@ -382,6 +383,9 @@ function startNewGame() {
   updateHintButton();
   updateDrawButton();
 
+  isVsHuman = vs;
+  _updateHandoffButtons();
+
   if (ws) { ws.close(); ws = null; }
 
   const wsUrl = `ws://${location.host}/ws`;
@@ -406,6 +410,30 @@ function startNewGame() {
     if (phase !== "game_over") setStatus("Disconnected.");
   };
 }
+
+// ── Handoff to AI ─────────────────────────────────────────────────────────────
+
+function _updateHandoffButtons() {
+  const active = isVsHuman && phase === "playing";
+  $("btn-handoff-w").hidden = !active;
+  $("btn-handoff-b").hidden = !active;
+}
+
+function _handoffToAI(color) {
+  if (!ws || phase !== "playing") return;
+  const diff   = parseInt($("sel-difficulty").value);
+  const useLlm = $("chk-llm").checked;
+  ws.send(JSON.stringify({
+    type:       "handoff_to_ai",
+    color,
+    difficulty: diff,
+    use_llm:    useLlm,
+    ai_weights: _getWeights(),
+  }));
+}
+
+$("btn-handoff-w").addEventListener("click", () => _handoffToAI("W"));
+$("btn-handoff-b").addEventListener("click", () => _handoffToAI("B"));
 
 // ── Position setup ────────────────────────────────────────────────────────────
 
@@ -583,6 +611,7 @@ function handleMessage(msg) {
       phase = msg.finished ? "game_over" : "playing";
       stopThinkingTimer();
       $("btn-force-move").hidden = true;
+      _updateHandoffButtons();
       if (replayIdx === -1) {
         board.render(msg);
         if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
@@ -672,6 +701,8 @@ function handleMessage(msg) {
       $("btn-force-move").hidden = true;
       canMarkBad = false;
       $("btn-bad-move").hidden = true;
+      isVsHuman = false;
+      _updateHandoffButtons();
       const isResign = msg.result === "ai_resignation";
       const statusText = isResign
         ? `${msg.winner === "W" ? "White" : "Black"} wins — AI resigns!`
@@ -707,6 +738,14 @@ function handleMessage(msg) {
       }
       break;
     }
+
+    case "handoff_ack":
+      isVsHuman = false;
+      _updateHandoffButtons();
+      addCommentary("Game",
+        `${msg.ai_color === "W" ? "White" : "Black"} handed to AI — continuing from current position.`,
+        "ai");
+      break;
 
     case "draw_accepted":
       addCommentary("Game", "Draw offer accepted.", "ai");
@@ -1432,11 +1471,26 @@ function _renderTournamentInit(msg) {
   $("toggle-tournament").classList.add("btn-active");
 }
 
+function _setTournamentBadge(text) {
+  let badge = document.getElementById("tournament-badge");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.id = "tournament-badge";
+    badge.className = "tournament-badge";
+    const sb = $("status-bar");
+    sb.parentNode.insertBefore(badge, sb.nextSibling);
+  }
+  if (text === null) { badge.hidden = true; return; }
+  badge.hidden = false;
+  badge.textContent = text;
+}
+
 function _handleTournamentNext(msg) {
   const colorName = msg.human_color === "W" ? "White" : "Black";
   $("tournament-opponent-info").innerHTML =
     `Game ${msg.game_idx + 1} of 6: <strong>${msg.label}</strong><br>` +
     `You play as <strong>${colorName}</strong>`;
+  _setTournamentBadge(`🏆 Round ${msg.game_idx + 1}/6 — ${msg.label} · You play ${colorName}`);
   addCommentary("Tournament", `Game ${msg.game_idx + 1}: ${msg.label} — you play as ${colorName}`, "ai");
   // Auto-start the tournament game over the existing WebSocket
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1454,8 +1508,11 @@ function _updateTournamentScoreboard(msg) {
   $("tournament-rows").innerHTML = (msg.results || []).map(r => {
     const cls = r.result === "W" ? "t-win" : r.result === "L" ? "t-loss" : "t-draw";
     const sym = r.result === "W" ? "Win" : r.result === "L" ? "Loss" : "Draw";
+    const wp  = r.white_personality || "—";
+    const bp  = r.black_personality || "—";
     return `<tr class="${cls}">` +
       `<td>${r.label}</td>` +
+      `<td style="text-align:center;font-size:.8em">${wp}<br><span style="color:var(--text-dim)">vs</span><br>${bp}</td>` +
       `<td style="text-align:center">${sym}</td>` +
       `<td style="text-align:center">${r.points}</td>` +
       `</tr>`;
@@ -1464,6 +1521,7 @@ function _updateTournamentScoreboard(msg) {
 
 function _handleTournamentComplete(msg) {
   _updateTournamentScoreboard(msg);
+  _setTournamentBadge(null);
   $("tournament-opponent-info").textContent = "Tournament complete!";
   $("tournament-complete-info").hidden = false;
   $("tournament-rank").textContent      = msg.rank_label;

@@ -19,7 +19,7 @@ from typing import Optional, Tuple
 class _SearchAbort(Exception):
     """Raised inside _negamax when the search deadline has passed."""
 
-from game.board import ADJACENCY, MILLS, BoardState
+from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_all_legal_moves, is_terminal
 from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus
 
@@ -48,12 +48,36 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
     return threats
 
 
+def _squeeze_targets(board: BoardState) -> set[str]:
+    """Return empty squares that are the last escape route of an opponent piece.
+
+    When an opponent piece has exactly one empty neighbour, occupying that square
+    would fully block it.  Herding moves to these squares are searched at the
+    same priority as blocking opponent mills — they represent an equally urgent
+    path to a win (forcing zero-mobility blockade rather than a mill capture).
+    Only applies in move phase; fly-phase pieces can jump to any empty square so
+    adjacency blocking is irrelevant.
+    """
+    from game.rules import get_game_phase
+    opp = "B" if board.turn == "W" else "W"
+    if get_game_phase(board, board.turn) != "move":
+        return set()
+    targets: set[str] = set()
+    for pos in POSITIONS:
+        if board.positions[pos] == opp:
+            empties = [n for n in ADJACENCY[pos] if board.positions[n] == ""]
+            if len(empties) == 1:
+                targets.add(empties[0])
+    return targets
+
+
 def _order_moves(board: BoardState, moves: list) -> list:
     """Sort moves so the most urgent are tried first (better alpha-beta pruning).
 
     Priority 0 — close own mill (immediate win/capture) OR create a fork
                  (land on a diamond square — closing 2+ own 2-configs simultaneously).
-    Priority 1 — block opponent mill (prevent their immediate threat).
+    Priority 1 — block opponent mill (prevent their immediate threat)
+                 OR occupy the last escape square of an opponent piece (herding).
     Priority 2 — all other moves.
 
     In fly phase with ~54 legal moves per side, this ensures blocking/closing
@@ -85,6 +109,11 @@ def _order_moves(board: BoardState, moves: list) -> list:
         for sq, cnt in closing_count.items():
             if cnt >= 2:
                 close.add(sq)  # diamond squares join priority-0 (already in close)
+
+    # Squeeze moves: the last empty neighbour of a nearly-blocked opponent piece.
+    # Searched with the same urgency as blocking a mill threat.
+    squeeze = _squeeze_targets(board)
+    block |= squeeze
 
     if not close and not block:
         return moves  # nothing to prioritize — skip the pass
@@ -172,6 +201,9 @@ class GameAI:
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
+        # Set True by Coordinator when opponent's last move scored below poor_move_threshold.
+        # Amplifies the placement busy-chain bonus so the AI exploits passive opponent play.
+        self._opp_last_weak: bool = False
         # Position-specific move bans: board_fen → set of banned notations.
         # A ban only applies when the board is in the exact state it was in when
         # the move was marked bad; if any piece moves or is captured the position
@@ -261,10 +293,17 @@ class GameAI:
         if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
                 and not fast_early_game
                 and self.difficulty in _TIME_LIMIT):
+            # Cap search depth for the very first placements: on a near-empty board,
+            # deep iterative deepening produces horizon effects where corner-based
+            # mill-fork patterns score artificially high, overriding the structural
+            # preference for high-mobility cardinal/cross nodes.  Depth 6 gives 3 plies
+            # per side — enough for tactical awareness without the distortion.
+            early_max = 6 if total_on_board < 4 else 19
             return self._iterative_deepen(
                 board, _EARLY_GAME_TIME,
                 recognition=recognition, trajectory_hints=trajectory_hints,
                 top_n=top_n, moves=moves,
+                max_depth=early_max,
             )
 
         if self.difficulty in _TIME_LIMIT:
@@ -445,13 +484,17 @@ class GameAI:
         alpha = -INF
         all_scored: list[Tuple[dict, int]] = []
 
+        scored_any = False
         for move in moves:
             nb = board.apply_move(move)
             try:
                 score = -self._negamax(nb, depth - 1, -INF, -alpha)
             except _SearchAbort:
+                if not scored_any:
+                    raise  # no moves fully evaluated — propagate so _iterative_deepen keeps previous depth
                 break
-            score += tactical_move_bonus(board, nb, self.color, self._weights)
+            scored_any = True
+            score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
             if top_n > 1:
                 all_scored.append((move, score))
             if score > best_score:
@@ -524,7 +567,7 @@ class GameAI:
             nb = board.apply_move(move)
             try:
                 score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state)
-                score += tactical_move_bonus(board, nb, self.color, self._weights)
+                score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
                 results.append((move, score))
             except _SearchAbort:
                 worst = min(s for _, s in results) if results else -INF
@@ -558,6 +601,7 @@ class GameAI:
         trajectory_hints=None,
         top_n: int = 1,
         moves: list | None = None,
+        max_depth: int = 19,
     ) -> dict:
         """
         Iterative deepening up to `time_limit` seconds.
@@ -582,7 +626,7 @@ class GameAI:
             ) or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
         ) or _has_hard_bans
 
-        for depth in range(2, 20):
+        for depth in range(2, max_depth + 1):
             if time.time() >= self._deadline:
                 break
             try:
