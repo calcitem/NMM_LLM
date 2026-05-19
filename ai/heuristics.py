@@ -110,6 +110,11 @@ _FORK_WEIGHTS  = {"place": 6, "move": 14, "fly": 55}
 # Irrelevant in fly phase (pieces can jump anywhere).
 _HERD_WEIGHTS  = {"place": 2, "move": 12, "fly": 0}
 
+# Mill wrapping: own pieces occupying exit squares of opponent closed mills.
+# A surrounded mill cannot easily cycle — the pivot piece has nowhere to slide.
+# Not meaningful in placement (few closed mills exist yet).
+_WRAP_WEIGHTS  = {"place": 0, "move": 40, "fly": 60}
+
 # Fly-phase asymmetry: reward entering fly (3 pieces) when the opponent hasn't yet,
 # and penalise giving the opponent fly while we remain in move phase.
 # At 4v4 the search will prefer sacrificing a piece (3v4, us in fly) over
@@ -163,6 +168,8 @@ def evaluate(
     opp_fork   = _fork_threats(board, opp)
     our_herd   = _encirclement(board, color)
     opp_herd   = _encirclement(board, opp)
+    our_wrap   = _mill_wrapping_pressure(board, color)
+    opp_wrap   = _mill_wrapping_pressure(board, opp)
     fly_asym   = 0 if force_aggressive else _fly_asymmetry(board, color)
     our_dom    = _open_mill_domination(board, color)
     opp_dom    = _open_mill_domination(board, opp)
@@ -180,6 +187,7 @@ def evaluate(
         + _CYCLE_WEIGHTS[phase]  * (our_cycle - opp_cycle)
         + _FORK_WEIGHTS[phase]   * (our_fork  - opp_fork)
         + _HERD_WEIGHTS[phase]   * (our_herd  - opp_herd)
+        + _WRAP_WEIGHTS[phase]   * (our_wrap  - opp_wrap)
         + _FLY_ASYM_WEIGHTS[phase]   * fly_asym
         + _DOMINATION_WEIGHTS[phase] * (our_dom - opp_dom)
     )
@@ -712,8 +720,13 @@ def _mill_wrapping_pressure(board: BoardState, color: str) -> int:
     itself.  High coverage means the opponent's mill is surrounded and cannot
     be easily exploited by cycling (the pivot has nowhere to slide to).
     Counted per mill so a piece bordering two mills contributes twice.
+
+    Returns 0 when the opponent is in fly phase — fly pieces can jump to any
+    empty square, so blocking adjacency exits does not prevent mill cycling.
     """
     opp = "B" if color == "W" else "W"
+    if get_game_phase(board, opp) == "fly":
+        return 0
     total = 0
     for mill in MILLS:
         if all(board.positions[p] == opp for p in mill):
