@@ -305,9 +305,11 @@ def main() -> None:
     ap.add_argument('--docx', default=str(ROOT / 'book games.docx'))
     args = ap.parse_args()
 
-    book_path = ROOT / 'data' / 'openings' / 'openings.json'
-    opening_book = OpeningBook(book_path)
-    recognizer   = OpeningRecognizer(opening_book)
+    opening_book = OpeningBook(
+        book_path=str(ROOT / 'data' / 'openings' / 'book_openings.json'),
+        openings_path=str(ROOT / 'data' / 'openings' / 'openings.json'),
+    )
+    recognizer = OpeningRecognizer(opening_book)
 
     doc = Document(args.docx)
     out_dir = ROOT / 'data' / 'games'

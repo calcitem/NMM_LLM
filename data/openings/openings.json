@@ -1,7 +1,7 @@
-{
-  "mill-rush-parallel": {
+[
+  {
     "opening_id": "mill-rush-parallel",
-    "name": "Mill Rush \u2014 Parallel",
+    "name": "Mill Rush — Parallel",
     "aliases": [
       "Parallel Lines",
       "Double Horizontal"
@@ -24,7 +24,7 @@
         "branch_id": "mill-rush-parallel-b2-alt",
         "deviation_ply": 7,
         "deviation_move": "d1",
-        "name": "Mill Rush Parallel \u2014 d1 Variant",
+        "name": "Mill Rush Parallel — d1 Variant",
         "line_continuation": [
           "d1",
           "b6"
@@ -36,20 +36,6 @@
           "B": 0,
           "D": 0
         }
-      }
-    ],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........B.W.W.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........BBWWW.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "........BBBWWWWB........|W|4|4"
       }
     ],
     "strategic_notes": "W builds toward the b2-d2-f2 mill (line 2) and the f2-f4-f6 mill (line f). B mirrors with b6-d6-f6 (line 6), forcing parallel horizontal mills. W must fill b2 on ply 7 to close line 2; leaving it open risks B claiming it.",
@@ -65,9 +51,9 @@
       ]
     },
     "outcome_stats": {
-      "W": 4,
+      "W": 0,
       "B": 0,
-      "D": 6
+      "D": 0
     },
     "confidence": 1.0,
     "tags": [
@@ -77,12 +63,25 @@
       "placement",
       "parallel"
     ],
-    "source_reference": "Chapter 15.2, Game 1a \u2014 parallel lines mill rush",
-    "needs_llm_name": false
+    "source_reference": "Chapter 15.2, Game 1a — parallel lines mill rush",
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........BBWWW.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........BBBWWWWB........|W|4|4"
+      }
+    ]
   },
-  "mill-rush-perpendicular": {
+  {
     "opening_id": "mill-rush-perpendicular",
-    "name": "Mill Rush \u2014 Perpendicular",
+    "name": "Mill Rush — Perpendicular",
     "aliases": [
       "Perpendicular Lines"
     ],
@@ -100,20 +99,6 @@
       "d1"
     ],
     "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........B.W.W.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": "........BB.WWW.B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".....B..BBWWWW.B........|W|4|4"
-      }
-    ],
     "strategic_notes": "B does not claim f6, allowing W to form the f2-f4-f6 mill (vertical). W places d1 as piece 8 to contest the south cross-line and block B's potential b2-d2 mill. The two mills (line f vertical, line 2 horizontal) are perpendicular. W is more mobile than in the parallel setup.",
     "common_blunders": [
       "b2"
@@ -127,7 +112,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 4
+      "D": 0
     },
     "confidence": 1.0,
     "tags": [
@@ -137,12 +122,25 @@
       "placement",
       "perpendicular"
     ],
-    "source_reference": "Chapter 15.2, Game 2a \u2014 perpendicular lines mill rush",
-    "needs_llm_name": false
+    "source_reference": "Chapter 15.2, Game 2a — perpendicular lines mill rush",
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........BB.WWW.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....B..BBWWWW.B........|W|4|4"
+      }
+    ]
   },
-  "mill-rush-parallel-alt": {
+  {
     "opening_id": "mill-rush-parallel-alt",
-    "name": "Mill Rush \u2014 Parallel (Alt)",
+    "name": "Mill Rush — Parallel (Alt)",
     "aliases": [
       "Parallel Lines Alt"
     ],
@@ -162,6 +160,28 @@
       "b6"
     ],
     "branch_moves": [],
+    "strategic_notes": "B fills b2 to block W's line 2 mill. B gains potential b2-b4-b6. W should play d1 then redirect toward outer ring mills.",
+    "common_blunders": [
+      "g7",
+      "a7"
+    ],
+    "recommended_responses": {
+      "B": [
+        "b6"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "flank",
+      "placement",
+      "parallel"
+    ],
+    "source_reference": "Chapter 15.2, Game 1b — parallel lines (alt) mill rush",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -179,34 +199,11 @@
         "ply": 10,
         "fen": ".....W.BBBBWWWWB........|W|5|5"
       }
-    ],
-    "strategic_notes": "B fills b2 to block W's line 2 mill. B gains potential b2-b4-b6. W should play d1 then redirect toward outer ring mills.",
-    "common_blunders": [
-      "g7",
-      "a7"
-    ],
-    "recommended_responses": {
-      "B": [
-        "b6"
-      ]
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 0,
-      "D": 2
-    },
-    "confidence": 1.0,
-    "tags": [
-      "flank",
-      "placement",
-      "parallel"
-    ],
-    "source_reference": "Chapter 15.2, Game 1b \u2014 parallel lines (alt) mill rush",
-    "needs_llm_name": false
+    ]
   },
-  "mill-rush-perpendicular-alt": {
+  {
     "opening_id": "mill-rush-perpendicular-alt",
-    "name": "Mill Rush \u2014 Perpendicular (Alt)",
+    "name": "Mill Rush — Perpendicular (Alt)",
     "aliases": [
       "Perpendicular Lines Alt"
     ],
@@ -224,6 +221,28 @@
       "b6"
     ],
     "branch_moves": [],
+    "strategic_notes": "B fills b2 in the perpendicular setup, blocking W's line 2 and forming potential b2-b4-b6. W retains f2-f4-f6 vertical mill. B rarely does this as it costs tempo.",
+    "common_blunders": [
+      "d1"
+    ],
+    "recommended_responses": {
+      "W": [
+        "f6",
+        "g7"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "flank",
+      "placement",
+      "perpendicular"
+    ],
+    "source_reference": "Chapter 15.2, Game 2b — perpendicular lines (alt) mill rush",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -237,34 +256,11 @@
         "ply": 8,
         "fen": "........BBWWWWBB........|W|4|4"
       }
-    ],
-    "strategic_notes": "B fills b2 in the perpendicular setup, blocking W's line 2 and forming potential b2-b4-b6. W retains f2-f4-f6 vertical mill. B rarely does this as it costs tempo.",
-    "common_blunders": [
-      "d1"
-    ],
-    "recommended_responses": {
-      "W": [
-        "f6",
-        "g7"
-      ]
-    },
-    "outcome_stats": {
-      "W": 4,
-      "B": 0,
-      "D": 2
-    },
-    "confidence": 1.0,
-    "tags": [
-      "flank",
-      "placement",
-      "perpendicular"
-    ],
-    "source_reference": "Chapter 15.2, Game 2b \u2014 perpendicular lines (alt) mill rush",
-    "needs_llm_name": false
+    ]
   },
-  "mill-rush-extended-parallel": {
+  {
     "opening_id": "mill-rush-extended-parallel",
-    "name": "Mill Rush \u2014 Extended Parallel",
+    "name": "Mill Rush — Extended Parallel",
     "aliases": [
       "Extended Parallel"
     ],
@@ -284,6 +280,29 @@
       "b6"
     ],
     "branch_moves": [],
+    "strategic_notes": "W extends into the outer ring after sealing line 2, building toward a7-d7-g7 outer top mill. This is usually a stalemate if played correctly.",
+    "common_blunders": [
+      "d7"
+    ],
+    "recommended_responses": {
+      "B": [
+        "b6",
+        "d7"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "flank",
+      "placement",
+      "parallel",
+      "outer-ring"
+    ],
+    "source_reference": "Chapter 15.2, Game 3 — extended parallel mill rush",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -301,35 +320,11 @@
         "ply": 10,
         "fen": "B.W.....BBBWWWWB........|W|5|5"
       }
-    ],
-    "strategic_notes": "W extends into the outer ring after sealing line 2, building toward a7-d7-g7 outer top mill. This is usually a stalemate if played correctly.",
-    "common_blunders": [
-      "d7"
-    ],
-    "recommended_responses": {
-      "B": [
-        "b6",
-        "d7"
-      ]
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 2,
-      "D": 4
-    },
-    "confidence": 1.0,
-    "tags": [
-      "flank",
-      "placement",
-      "parallel",
-      "outer-ring"
-    ],
-    "source_reference": "Chapter 15.2, Game 3 \u2014 extended parallel mill rush",
-    "needs_llm_name": false
+    ]
   },
-  "inverted-mill-rush-parallel": {
+  {
     "opening_id": "inverted-mill-rush-parallel",
-    "name": "Inverted Mill Rush \u2014 Parallel",
+    "name": "Inverted Mill Rush — Parallel",
     "aliases": [
       "Inverted Parallel"
     ],
@@ -347,6 +342,30 @@
       "b2"
     ],
     "branch_moves": [],
+    "strategic_notes": "W starts at d7 (inverted) then builds f6-f4-f2 (line f, vertical). B mirrors on line b. After both sides form horizontal mills (line 6 for W, line 2 for B) the game resembles the standard parallel mill rush but mirrored. Piece 15 placement at c4 is critical.",
+    "common_blunders": [
+      "a7",
+      "g7"
+    ],
+    "recommended_responses": {
+      "B": [
+        "b2",
+        "d2"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "flank",
+      "placement",
+      "parallel",
+      "inverted"
+    ],
+    "source_reference": "Chapter 15.3 — Inverted Mill Rush, parallel lines",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -360,36 +379,11 @@
         "ply": 8,
         "fen": ".W...B..B.WWW.BB........|W|4|4"
       }
-    ],
-    "strategic_notes": "W starts at d7 (inverted) then builds f6-f4-f2 (line f, vertical). B mirrors on line b. After both sides form horizontal mills (line 6 for W, line 2 for B) the game resembles the standard parallel mill rush but mirrored. Piece 15 placement at c4 is critical.",
-    "common_blunders": [
-      "a7",
-      "g7"
-    ],
-    "recommended_responses": {
-      "B": [
-        "b2",
-        "d2"
-      ]
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 0,
-      "D": 4
-    },
-    "confidence": 1.0,
-    "tags": [
-      "flank",
-      "placement",
-      "parallel",
-      "inverted"
-    ],
-    "source_reference": "Chapter 15.3 \u2014 Inverted Mill Rush, parallel lines",
-    "needs_llm_name": false
+    ]
   },
-  "inverted-mill-rush-perpendicular": {
+  {
     "opening_id": "inverted-mill-rush-perpendicular",
-    "name": "Inverted Mill Rush \u2014 Perpendicular",
+    "name": "Inverted Mill Rush — Perpendicular",
     "aliases": [
       "Inverted Perpendicular"
     ],
@@ -407,20 +401,6 @@
       "c4"
     ],
     "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W...B..B.W.............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W...B..B.WW...B........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".W...B..B.WWW..B.......B|W|4|4"
-      }
-    ],
     "strategic_notes": "W builds f2-f4-f6 vertically; B is forced into perpendicular layout. W's c4 piece contests the west cross-line (a4-b4-c4) and restricts B. If W does not place c4, B can take it and dominate the inner square.",
     "common_blunders": [
       "a7"
@@ -443,10 +423,23 @@
       "perpendicular",
       "inverted"
     ],
-    "source_reference": "Chapter 15.3 \u2014 Inverted Mill Rush, perpendicular",
-    "needs_llm_name": false
+    "source_reference": "Chapter 15.3 — Inverted Mill Rush, perpendicular",
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W...B..B.W.............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W...B..B.WW...B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W...B..B.WWW..B.......B|W|4|4"
+      }
+    ]
   },
-  "battle-lines": {
+  {
     "opening_id": "battle-lines",
     "name": "Battle Lines",
     "aliases": [
@@ -468,6 +461,32 @@
       "d7"
     ],
     "branch_moves": [],
+    "strategic_notes": "W builds multiple potential mills aggressively across all ring sections. B responds by mirroring. The game rewards the side that converts potential mills first — W usually has more options if it keeps removing B pieces strategically and does not allow B to isolate its pieces.",
+    "common_blunders": [
+      "a7",
+      "g7",
+      "a1",
+      "g1"
+    ],
+    "recommended_responses": {
+      "B": [
+        "d5",
+        "c5",
+        "e3"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "aggressive",
+      "placement",
+      "centre"
+    ],
+    "source_reference": "Chapter 15.4 — Battle Lines",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -485,38 +504,11 @@
         "ply": 10,
         "fen": ".B...W..BBWWWWBB........|W|5|5"
       }
-    ],
-    "strategic_notes": "W builds multiple potential mills aggressively across all ring sections. B responds by mirroring. The game rewards the side that converts potential mills first \u2014 W usually has more options if it keeps removing B pieces strategically and does not allow B to isolate its pieces.",
-    "common_blunders": [
-      "a7",
-      "g7",
-      "a1",
-      "g1"
-    ],
-    "recommended_responses": {
-      "B": [
-        "d5",
-        "c5",
-        "e3"
-      ]
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 4,
-      "D": 0
-    },
-    "confidence": 1.0,
-    "tags": [
-      "aggressive",
-      "placement",
-      "centre"
-    ],
-    "source_reference": "Chapter 15.4 \u2014 Battle Lines",
-    "needs_llm_name": false
+    ]
   },
-  "z-mill-closed": {
+  {
     "opening_id": "z-mill-closed",
-    "name": "Z Mill \u2014 Closed",
+    "name": "Z Mill — Closed",
     "aliases": [
       "Z Mill",
       "Closed Z Mill"
@@ -539,7 +531,7 @@
         "branch_id": "z-mill-closed-c4-e3",
         "deviation_ply": 5,
         "deviation_move": "e5",
-        "name": "Z Mill \u2014 c4/e3 Variant",
+        "name": "Z Mill — c4/e3 Variant",
         "line_continuation": [
           "e5",
           "d3",
@@ -552,20 +544,6 @@
           "B": 0,
           "D": 0
         }
-      }
-    ],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........B...W..B......W|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........B...W..B.B.W..W|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".........B...W..BBB.WW.W|W|4|4"
       }
     ],
     "strategic_notes": "W builds c4 and e3 to create a Z-shaped arrangement of potential mills across the inner ring: c3-c4-c5 (left), e3-d3-c3 (bottom), and d1-d2-d3 (south cross). B must contest the inner ring to prevent W from dominating it. The Z shape creates cross-ring threats that are hard to block simultaneously.",
@@ -582,8 +560,8 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 2,
-      "D": 4
+      "B": 0,
+      "D": 0
     },
     "confidence": 1.0,
     "tags": [
@@ -592,12 +570,25 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.5 \u2014 The Z Mill",
-    "needs_llm_name": false
+    "source_reference": "Chapter 15.5 — The Z Mill",
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B...W..B......W|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B...W..B.B.W..W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".........B...W..BBB.WW.W|W|4|4"
+      }
+    ]
   },
-  "z-mill-open": {
+  {
     "opening_id": "z-mill-open",
-    "name": "Z Mill \u2014 Open",
+    "name": "Z Mill — Open",
     "aliases": [
       "Open Z Mill",
       "Z Mill Variation"
@@ -616,20 +607,6 @@
       "e5"
     ],
     "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".........B.W.W.B........|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".........B.W.W.BB......W|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": ".........B.W.W.BB.B.W..W|W|4|4"
-      }
-    ],
     "strategic_notes": "W first claims d2 and f4 (middle ring), then pivots to the inner ring with c4 and e3. This variation leaves the f2-f4-f6 mill potential partially open while threatening inner-ring control. B should contest d5 or e5 to prevent W from sealing the inner ring.",
     "common_blunders": [
       "g7",
@@ -644,7 +621,7 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 4
+      "D": 0
     },
     "confidence": 1.0,
     "tags": [
@@ -652,10 +629,23 @@
       "placement",
       "centre"
     ],
-    "source_reference": "Chapter 15.6 \u2014 The Open Z Mill",
-    "needs_llm_name": false
+    "source_reference": "Chapter 15.6 — The Open Z Mill",
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B.W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B.W.W.BB......W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".........B.W.W.BB.B.W..W|W|4|4"
+      }
+    ]
   },
-  "corner-gambit": {
+  {
     "opening_id": "corner-gambit",
     "name": "Corner Gambit",
     "aliases": [
@@ -675,6 +665,31 @@
       "f4"
     ],
     "branch_moves": [],
+    "strategic_notes": "W occupies all four outer ring corners early. Each pair threatens a potential mill along the outer ring sides. B must respond to contain the outer ring. This can be a gambit trap — the predictability of needing to block open mills can help W plan traps.",
+    "common_blunders": [
+      "d7",
+      "d1"
+    ],
+    "recommended_responses": {
+      "B": [
+        "d5",
+        "d2",
+        "f2"
+      ]
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 1.0,
+    "tags": [
+      "aggressive",
+      "outer-ring",
+      "placement",
+      "gambit"
+    ],
+    "source_reference": "Chapter 15 — A Gambit",
     "opening_fen_signatures": [
       {
         "ply": 4,
@@ -688,44 +703,14 @@
         "ply": 8,
         "fen": "W.W.W.W.BB.B...B........|W|4|4"
       }
-    ],
-    "strategic_notes": "W occupies all four outer ring corners early. Each pair threatens a potential mill along the outer ring sides. B must respond to contain the outer ring. This can be a gambit trap \u2014 the predictability of needing to block open mills can help W plan traps.",
-    "common_blunders": [
-      "d7",
-      "d1"
-    ],
-    "recommended_responses": {
-      "B": [
-        "d5",
-        "d2",
-        "f2"
-      ]
-    },
-    "outcome_stats": {
-      "W": 2,
-      "B": 3,
-      "D": 0,
-      "ai_wins": 2,
-      "human_losses": 2,
-      "human_wins": 1,
-      "ai_losses": 1
-    },
-    "confidence": 1.0,
-    "tags": [
-      "aggressive",
-      "outer-ring",
-      "placement",
-      "gambit"
-    ],
-    "source_reference": "Chapter 15 \u2014 A Gambit",
-    "needs_llm_name": false
+    ]
   },
-  "book-00-182e33": {
-    "opening_id": "book-00-182e33",
+  {
+    "opening_id": "book-00-287755",
     "name": "Game One",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "c5",
@@ -782,15 +767,15 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-01-260f7b": {
-    "opening_id": "book-01-260f7b",
+  {
+    "opening_id": "book-01-a3fa19",
     "name": "Try Try Again",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "W",
     "seed_source": "learned",
     "line_moves": [
       "d2",
@@ -847,15 +832,15 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-02-bc7264": {
-    "opening_id": "book-02-bc7264",
+  {
+    "opening_id": "book-02-c09756",
     "name": "Alternate Game Two",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "d2",
@@ -912,11 +897,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-03-c687b2": {
-    "opening_id": "book-03-c687b2",
+  {
+    "opening_id": "book-03-572229",
     "name": "Game Three",
     "aliases": [],
     "family": "Early Game",
@@ -970,18 +955,18 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 4
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-04-979bbb": {
-    "opening_id": "book-04-979bbb",
+  {
+    "opening_id": "book-04-b6d865",
     "name": "Gambit Play",
     "aliases": [],
     "family": "Early Game",
@@ -1040,15 +1025,15 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-06-ec4029": {
-    "opening_id": "book-06-ec4029",
+  {
+    "opening_id": "book-06-2971b5",
     "name": "Game Four",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -1097,23 +1082,23 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 3,
-      "D": 2
+      "B": 1,
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-07-089d4a": {
-    "opening_id": "book-07-089d4a",
+  {
+    "opening_id": "book-07-a33845",
     "name": "Game Five A",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "W",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -1170,15 +1155,15 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-08-214941": {
-    "opening_id": "book-08-214941",
+  {
+    "opening_id": "book-08-cd5e3d",
     "name": "Game Five B",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "W",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -1235,12 +1220,12 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-10-a47788": {
-    "opening_id": "book-10-a47788",
-    "name": "Game Seven \u2014 Patience",
+  {
+    "opening_id": "book-10-5ce37b",
+    "name": "Game Seven — Patience",
     "aliases": [],
     "family": "Early Game",
     "side": "both",
@@ -1293,18 +1278,18 @@
     "outcome_stats": {
       "W": 0,
       "B": 0,
-      "D": 2
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-11-6c94a1": {
-    "opening_id": "book-11-6c94a1",
+  {
+    "opening_id": "book-11-04f0dc",
     "name": "Creating Opportunities",
     "aliases": [],
     "family": "Early Game",
@@ -1365,11 +1350,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-12-7c2690": {
-    "opening_id": "book-12-7c2690",
+  {
+    "opening_id": "book-12-7c431c",
     "name": "Which Piece to Take",
     "aliases": [],
     "family": "Early Game",
@@ -1430,11 +1415,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-13-a3640f": {
-    "opening_id": "book-13-a3640f",
+  {
+    "opening_id": "book-13-a872a2",
     "name": "Right Angle Potential Mills",
     "aliases": [],
     "family": "Early Game",
@@ -1495,15 +1480,15 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-14-31b94f": {
-    "opening_id": "book-14-31b94f",
+  {
+    "opening_id": "book-14-b4b5b3",
     "name": "End Play Placements",
     "aliases": [],
     "family": "Early Game",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -1560,11 +1545,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-15-25ea09": {
-    "opening_id": "book-15-25ea09",
+  {
+    "opening_id": "book-15-1c9103",
     "name": "Early Game to Victory",
     "aliases": [],
     "family": "Early Game",
@@ -1614,20 +1599,20 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 2,
+      "W": 0,
       "B": 0,
-      "D": 2
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-16-dc305f": {
-    "opening_id": "book-16-dc305f",
+  {
+    "opening_id": "book-16-c24880",
     "name": "Cannon Fodder",
     "aliases": [],
     "family": "Early Game",
@@ -1688,11 +1673,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-19-8d0e77": {
-    "opening_id": "book-19-8d0e77",
+  {
+    "opening_id": "book-19-5af166",
     "name": "Sacrificial Mills",
     "aliases": [],
     "family": "Early Game",
@@ -1753,11 +1738,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-20-4be0ef": {
-    "opening_id": "book-20-4be0ef",
+  {
+    "opening_id": "book-20-d83371",
     "name": "Cardinal Point Abandonment",
     "aliases": [],
     "family": "Early Game",
@@ -1818,11 +1803,11 @@
       "book",
       "early-game"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-22-06af3c": {
-    "opening_id": "book-22-06af3c",
+  {
+    "opening_id": "book-22-7cd89e",
     "name": "Man-to-Man Marking",
     "aliases": [],
     "family": "Man-to-Man Marking",
@@ -1883,11 +1868,11 @@
       "book",
       "man-to-man-marking"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-23-186c54": {
-    "opening_id": "book-23-186c54",
+  {
+    "opening_id": "book-23-5f1cc8",
     "name": "Black Diamond",
     "aliases": [],
     "family": "Black Diamond",
@@ -1939,24 +1924,24 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 2,
+      "W": 0,
       "B": 0,
-      "D": 2
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "black-diamond"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-24-d5192b": {
-    "opening_id": "book-24-d5192b",
-    "name": "Mill Rush \u2014 Misplacement Loss",
+  {
+    "opening_id": "book-24-b516d2",
+    "name": "Mill Rush — Misplacement Loss",
     "aliases": [],
     "family": "Mill Rush",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -2013,12 +1998,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-25-f03c02": {
-    "opening_id": "book-25-f03c02",
-    "name": "Mill Rush \u2014 Parallel Lines",
+  {
+    "opening_id": "book-25-b14595",
+    "name": "Mill Rush — Parallel Lines",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2078,12 +2063,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-26-11476f": {
-    "opening_id": "book-26-11476f",
-    "name": "Mill Rush \u2014 Parallel Lines (Alt)",
+  {
+    "opening_id": "book-26-435cf0",
+    "name": "Mill Rush — Parallel Lines (Alt)",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2143,12 +2128,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-27-54cdc5": {
-    "opening_id": "book-27-54cdc5",
-    "name": "Mill Rush \u2014 Perpendicular Lines",
+  {
+    "opening_id": "book-27-93b19b",
+    "name": "Mill Rush — Perpendicular Lines",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2208,12 +2193,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-28-0180cc": {
-    "opening_id": "book-28-0180cc",
-    "name": "Mill Rush \u2014 Perpendicular Lines (Alt)",
+  {
+    "opening_id": "book-28-8ab76e",
+    "name": "Mill Rush — Perpendicular Lines (Alt)",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2273,12 +2258,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-29-72a62a": {
-    "opening_id": "book-29-72a62a",
-    "name": "Mill Rush \u2014 Extended Parallel",
+  {
+    "opening_id": "book-29-36a60f",
+    "name": "Mill Rush — Extended Parallel",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2338,12 +2323,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-30-c669f7": {
-    "opening_id": "book-30-c669f7",
-    "name": "Mill Rush \u2014 Alt Extended Parallel",
+  {
+    "opening_id": "book-30-a37ce9",
+    "name": "Mill Rush — Alt Extended Parallel",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2403,12 +2388,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-31-173eb1": {
-    "opening_id": "book-31-173eb1",
-    "name": "Mill Rush \u2014 Black's Alternate Response",
+  {
+    "opening_id": "book-31-3609fe",
+    "name": "Mill Rush — Black's Alternate Response",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2468,12 +2453,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-32-7128af": {
-    "opening_id": "book-32-7128af",
-    "name": "Mill Rush \u2014 Alternate Black Response",
+  {
+    "opening_id": "book-32-7819d1",
+    "name": "Mill Rush — Alternate Black Response",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2533,12 +2518,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-33-1b81cb": {
-    "opening_id": "book-33-1b81cb",
-    "name": "Inverted Mill Rush \u2014 Parallel Lines",
+  {
+    "opening_id": "book-33-86f7dc",
+    "name": "Inverted Mill Rush — Parallel Lines",
     "aliases": [],
     "family": "Inverted Mill Rush",
     "side": "both",
@@ -2598,12 +2583,12 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-34-ba238d": {
-    "opening_id": "book-34-ba238d",
-    "name": "Inverted Mill Rush \u2014 Perpendicular",
+  {
+    "opening_id": "book-34-de667b",
+    "name": "Inverted Mill Rush — Perpendicular",
     "aliases": [],
     "family": "Inverted Mill Rush",
     "side": "both",
@@ -2663,15 +2648,15 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-35-a7d107": {
-    "opening_id": "book-35-a7d107",
-    "name": "Inverted Mill Rush \u2014 White Mistake",
+  {
+    "opening_id": "book-35-94765e",
+    "name": "Inverted Mill Rush — White Mistake",
     "aliases": [],
     "family": "Inverted Mill Rush",
-    "side": "both",
+    "side": "B",
     "seed_source": "learned",
     "line_moves": [
       "d6",
@@ -2728,12 +2713,12 @@
       "book",
       "inverted-mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-36-3fed69": {
-    "opening_id": "book-36-3fed69",
-    "name": "Mill Rush \u2014 Endgame Stalemate",
+  {
+    "opening_id": "book-36-ca1431",
+    "name": "Mill Rush — Endgame Stalemate",
     "aliases": [],
     "family": "Mill Rush",
     "side": "both",
@@ -2793,12 +2778,12 @@
       "book",
       "mill-rush"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-37-56fc68": {
-    "opening_id": "book-37-56fc68",
-    "name": "Battle Lines \u2014 Black Loss",
+  {
+    "opening_id": "book-37-e4eb5c",
+    "name": "Battle Lines — Black Loss",
     "aliases": [],
     "family": "Battle Lines",
     "side": "both",
@@ -2858,12 +2843,12 @@
       "book",
       "battle-lines"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-38-e9e4be": {
-    "opening_id": "book-38-e9e4be",
-    "name": "Battle Lines \u2014 Better Response",
+  {
+    "opening_id": "book-38-fc8361",
+    "name": "Battle Lines — Better Response",
     "aliases": [],
     "family": "Battle Lines",
     "side": "both",
@@ -2923,11 +2908,11 @@
       "book",
       "battle-lines"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-39-aaaae3": {
-    "opening_id": "book-39-aaaae3",
+  {
+    "opening_id": "book-39-726701",
     "name": "Closed Z Mill",
     "aliases": [],
     "family": "Z Mill",
@@ -2988,11 +2973,11 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-40-b80834": {
-    "opening_id": "book-40-b80834",
+  {
+    "opening_id": "book-40-658b81",
     "name": "Open Z Mill",
     "aliases": [],
     "family": "Z Mill",
@@ -3053,12 +3038,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-41-42b007": {
-    "opening_id": "book-41-42b007",
-    "name": "Z Mill \u2014 Variation A",
+  {
+    "opening_id": "book-41-827489",
+    "name": "Z Mill — Variation A",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3118,12 +3103,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-42-de2d76": {
-    "opening_id": "book-42-de2d76",
-    "name": "Z Mill \u2014 Variation B",
+  {
+    "opening_id": "book-42-2538c4",
+    "name": "Z Mill — Variation B",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3183,12 +3168,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-43-be2a34": {
-    "opening_id": "book-43-be2a34",
-    "name": "Z Mill \u2014 Variation C",
+  {
+    "opening_id": "book-43-c3c1bd",
+    "name": "Z Mill — Variation C",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3244,12 +3229,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-44-630046": {
-    "opening_id": "book-44-630046",
-    "name": "Z Mill \u2014 Variation D",
+  {
+    "opening_id": "book-44-2f8c37",
+    "name": "Z Mill — Variation D",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3309,12 +3294,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-45-a6aab2": {
-    "opening_id": "book-45-a6aab2",
-    "name": "Z Mill \u2014 Variation E",
+  {
+    "opening_id": "book-45-ad1a60",
+    "name": "Z Mill — Variation E",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3374,12 +3359,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-47-6ce70d": {
-    "opening_id": "book-47-6ce70d",
-    "name": "Z Mill c4/e3 \u2014 Parallel Mills",
+  {
+    "opening_id": "book-47-502dd6",
+    "name": "Z Mill c4/e3 — Parallel Mills",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3439,12 +3424,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-48-dbe7b9": {
-    "opening_id": "book-48-dbe7b9",
-    "name": "Z Mill c4/e3 \u2014 Ring Round the Rosie",
+  {
+    "opening_id": "book-48-5c1df5",
+    "name": "Z Mill c4/e3 — Ring Round the Rosie",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3504,12 +3489,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-49-4707ce": {
-    "opening_id": "book-49-4707ce",
-    "name": "Z Mill c4/e3 \u2014 All Along the Watchtower",
+  {
+    "opening_id": "book-49-76adc2",
+    "name": "Z Mill c4/e3 — All Along the Watchtower",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3569,12 +3554,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-50-48b559": {
-    "opening_id": "book-50-48b559",
-    "name": "Z Mill c4/e3 \u2014 Perpendicular Mills",
+  {
+    "opening_id": "book-50-ac234f",
+    "name": "Z Mill c4/e3 — Perpendicular Mills",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3634,12 +3619,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-51-98d08e": {
-    "opening_id": "book-51-98d08e",
-    "name": "Z Mill c4/e3 \u2014 A Shoot-Out",
+  {
+    "opening_id": "book-51-b4d21a",
+    "name": "Z Mill c4/e3 — A Shoot-Out",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3699,12 +3684,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-52-40a6c0": {
-    "opening_id": "book-52-40a6c0",
-    "name": "Z Mill c4/e3 \u2014 Misdirection",
+  {
+    "opening_id": "book-52-70951b",
+    "name": "Z Mill c4/e3 — Misdirection",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3764,12 +3749,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-53-5ac589": {
-    "opening_id": "book-53-5ac589",
-    "name": "Z Mill c4/e3 \u2014 Cut the Bottom Out",
+  {
+    "opening_id": "book-53-56b4ad",
+    "name": "Z Mill c4/e3 — Cut the Bottom Out",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3829,12 +3814,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-54-8444f7": {
-    "opening_id": "book-54-8444f7",
-    "name": "Z Mill c4/e3 \u2014 Two L's",
+  {
+    "opening_id": "book-54-f97b6d",
+    "name": "Z Mill c4/e3 — Two L's",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3894,12 +3879,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-55-da8bdf": {
-    "opening_id": "book-55-da8bdf",
-    "name": "Z Mill c4/e3 \u2014 Hangman",
+  {
+    "opening_id": "book-55-b98a9e",
+    "name": "Z Mill c4/e3 — Hangman",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -3959,12 +3944,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-56-0da61a": {
-    "opening_id": "book-56-0da61a",
-    "name": "Z Mill c4/e3 \u2014 Perpendicular Mills 2",
+  {
+    "opening_id": "book-56-cde7dd",
+    "name": "Z Mill c4/e3 — Perpendicular Mills 2",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4024,12 +4009,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-57-0351a0": {
-    "opening_id": "book-57-0351a0",
-    "name": "Z Mill c4/e3 \u2014 Roof Falls In",
+  {
+    "opening_id": "book-57-266124",
+    "name": "Z Mill c4/e3 — Roof Falls In",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4089,11 +4074,11 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-58-b77e22": {
-    "opening_id": "book-58-b77e22",
+  {
+    "opening_id": "book-58-706988",
     "name": "Black L, White Wrap",
     "aliases": [],
     "family": "Z Mill",
@@ -4154,12 +4139,12 @@
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   },
-  "book-59-e63feb": {
-    "opening_id": "book-59-e63feb",
-    "name": "Into White \u2014 White to a1",
+  {
+    "opening_id": "book-59-a76197",
+    "name": "Into White — White to a1",
     "aliases": [],
     "family": "Z Mill",
     "side": "both",
@@ -4210,16 +4195,16 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 2,
+      "W": 0,
       "B": 0,
-      "D": 2
+      "D": 0
     },
     "confidence": 0.8,
     "tags": [
       "book",
       "z-mill"
     ],
-    "source_reference": "Nine Men's Morris Strategy \u2014 Brandwood",
+    "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false
   }
-}
+]

@@ -329,7 +329,10 @@ class OpeningRecognizer:
                     return result
 
         # ── Step 6: novel ─────────────────────────────────────────────────────
-        if ply >= _COMMIT_PLY:
+        # Always emit 'novel' when we previously matched plies and then deviated
+        # (the _COMMIT_PLY guard must not suppress a genuine deviation signal).
+        # For brand-new sequences with no prior match, defer until _COMMIT_PLY.
+        if self._prev_candidates or ply >= _COMMIT_PLY:
             result = RecognitionResult(
                 opening_id=None,
                 name=None,
@@ -349,7 +352,7 @@ class OpeningRecognizer:
             self._active_candidates = []
             return result
 
-        # ply < 4 and no match yet — stay inactive (too early to classify).
+        # Too early to classify (no prior match and ply < _COMMIT_PLY) — stay inactive.
         self.current_result = INACTIVE_RESULT
         self._active_candidates = []
         return self.current_result
