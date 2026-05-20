@@ -8,6 +8,10 @@ Covers the full game (placement + movement phases) using checkpoint depths
 that grow from 4 to 48 half-moves.  Longer matches are preferred; the query
 falls back to shorter prefixes when no deep match is found.
 
+D4 board symmetry is applied at indexing time: every prefix is stored in its
+canonical (lex-min under D4) form so rotations and reflections of the same
+game share statistics.
+
 After each game the caller should invoke add_game() to keep the index
 current without a full reload.
 """
@@ -17,6 +21,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+
+from ai.board_symmetry import (
+    canonical_sequence as _canonical_sequence,
+    prefix_query_canonicals as _prefix_query_canonicals,
+    transform_notation as _transform_notation,
+    SYM_INVERSE as _SYM_INVERSE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +46,13 @@ class TrajectoryDB:
     """
     In-memory index of historical game trajectories.
 
-    The index maps  prefix_string → {next_notation → outcome_counts}
-    where prefix_string is the pipe-joined list of the first D normalised
-    move notations in a game, and outcome_counts is
+    The index maps  canon_prefix → {canon_next_notation → outcome_counts}
+    where canon_prefix is the pipe-joined D4-canonical form of the first D
+    normalised move notations, and outcome_counts is
         {"W": int, "B": int, "D": int, "total": int}.
+
+    All 8 D4 symmetric equivalents of a game share statistics, multiplying
+    effective sample size by up to 8×.
 
     query() returns a per-move score delta (positive = historically good for
     the colour about to move, negative = historically bad) so the engine can
@@ -48,7 +62,7 @@ class TrajectoryDB:
     def __init__(self, games_dir: Path | str) -> None:
         self._games_dir = Path(games_dir)
         self._index: dict[str, dict[str, dict]] = {}
-        self._bans:  dict[str, set[str]] = {}   # prefix → set of banned notations
+        self._bans:  dict[str, set[str]] = {}   # actual prefix → set of banned notations
         self._game_count = 0
 
     # ── Build / update ────────────────────────────────────────────────────────
@@ -65,12 +79,14 @@ class TrajectoryDB:
             logger.warning("TrajectoryDB: games directory not found: %s", self._games_dir)
             return
         for path in sorted(self._games_dir.glob("*.jsonl")):
-            try:
-                text = path.read_text(encoding="utf-8").strip()
-                if text:
-                    self._index_game(json.loads(text))
-            except Exception as exc:
-                logger.debug("TrajectoryDB: skipping %s — %s", path.name, exc)
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    self._index_game(json.loads(line))
+                except Exception as exc:
+                    logger.debug("TrajectoryDB: skipping line in %s — %s", path.name, exc)
         logger.info(
             "TrajectoryDB: indexed %d games → %d prefix entries.",
             self._game_count, len(self._index),
@@ -96,11 +112,19 @@ class TrajectoryDB:
         for depth in _DEPTHS:
             if len(notations) <= depth:
                 break
-            prefix   = "|".join(notations[:depth])
-            next_mv  = notations[depth]
 
-            bucket = self._index.setdefault(prefix, {})
-            entry  = bucket.setdefault(next_mv, {"W": 0, "B": 0, "D": 0, "total": 0})
+            prefix_notations = notations[:depth]
+            next_mv_raw      = notations[depth]
+
+            # Canonicalise the prefix; transform the next move by the same symmetry.
+            canon_prefix_list, sym_idx = _canonical_sequence(prefix_notations)
+            canon_next_mv = _transform_notation(next_mv_raw, sym_idx)
+            if canon_next_mv is None:
+                continue
+
+            canon_prefix_key = "|".join(canon_prefix_list)
+            bucket = self._index.setdefault(canon_prefix_key, {})
+            entry  = bucket.setdefault(canon_next_mv, {"W": 0, "B": 0, "D": 0, "total": 0})
             entry["total"] += 1
             if winner in ("W", "B"):
                 entry[winner] += 1
@@ -128,6 +152,8 @@ class TrajectoryDB:
         Returns {}      when no trajectory data are found for the current depth.
 
         Tries the longest matching prefix first and falls back to shorter ones.
+        All 8 D4 symmetric equivalents of each prefix are queried; results are
+        inverse-transformed back to the actual game notation.
         Normalises notation before lookup so ×/x variants both match.
         """
         normed = [_norm(n) for n in move_notations]
@@ -135,18 +161,41 @@ class TrajectoryDB:
         for depth in reversed(_DEPTHS):
             if len(normed) < depth:
                 continue
-            prefix     = "|".join(normed[:depth])
-            candidates = self._index.get(prefix)
-            if not candidates:
+
+            # Collect stats across all D4 equivalents of this query prefix.
+            merged: dict[str, dict] = {}
+            found_any = False
+
+            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
+                candidates = self._index.get(canon_prefix_key)
+                if not candidates:
+                    continue
+                found_any = True
+                inv = _SYM_INVERSE[sym_idx]
+                for canon_notation, stats in candidates.items():
+                    actual_notation = _transform_notation(canon_notation, inv)
+                    if actual_notation is None:
+                        continue
+                    if actual_notation not in merged:
+                        merged[actual_notation] = {"W": 0, "B": 0, "D": 0, "total": 0}
+                    entry = merged[actual_notation]
+                    entry["total"] += stats["total"]
+                    entry["W"]     += stats["W"]
+                    entry["B"]     += stats["B"]
+                    entry["D"]     += stats["D"]
+
+            if not found_any:
                 continue
 
-            total_samples = sum(c["total"] for c in candidates.values())
+            total_samples = sum(c["total"] for c in merged.values())
             if total_samples < min_samples:
                 continue
 
-            banned = self._bans.get(prefix, set())
+            # Bans are stored in actual (non-canonical) notation so they apply
+            # precisely to the specific sequence the user flagged.
+            banned = self._bans.get("|".join(normed[:depth]), set())
             result: dict[str, float] = {}
-            for notation, stats in candidates.items():
+            for notation, stats in merged.items():
                 if _norm(notation) in banned:
                     result[notation] = -1.0   # hard-ban sentinel (outside statistical range)
                     continue
@@ -155,24 +204,21 @@ class TrajectoryDB:
                     continue
                 wins  = stats.get(current_color, 0)
                 draws = stats.get("D", 0)
-                # Win rate (draws worth 0.4), centred on 0.0
                 score = (wins + 0.4 * draws) / total
                 result[notation] = score - 0.5
-            # Surface any bans that don't appear in statistical data yet
             for bad_n in banned:
                 if bad_n not in result:
-                    result[bad_n] = -1.0   # hard-ban sentinel
+                    result[bad_n] = -1.0
             return result
 
-        # Even with no statistical match, surface bans at the shortest depth
-        normed = [_norm(n) for n in move_notations]
+        # Even with no statistical match, surface bans at the shortest applicable depth.
         for depth in _DEPTHS:
             if len(normed) < depth:
                 break
             prefix = "|".join(normed[:depth])
             banned = self._bans.get(prefix, set())
             if banned:
-                return {n: -1.0 for n in banned}   # hard-ban sentinel
+                return {n: -1.0 for n in banned}
 
         return {}
 
@@ -181,11 +227,11 @@ class TrajectoryDB:
     def mark_bad_move(self, prior_notations: list[str], bad_notation: str) -> None:
         """
         Permanently penalise `bad_notation` from the position described by
-        `prior_notations`.  query() will return -0.5 (maximum penalty) for that
+        `prior_notations`.  query() will return -1.0 (hard-ban) for that
         move at any prefix depth that matches.
 
-        Does NOT affect the statistical index — the ban is a clean override so
-        real game data cannot gradually rehabilitate an explicitly-flagged move.
+        Bans are stored in actual notation (not canonical) so they apply
+        precisely to the specific game situation the user flagged.
         """
         normed_prior = [_norm(n) for n in prior_notations]
         normed_bad   = _norm(bad_notation)
