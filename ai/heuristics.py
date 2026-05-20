@@ -812,6 +812,20 @@ def _is_mill_locked(board: BoardState, color: str, mill: tuple) -> bool:
     return True
 
 
+def _is_anchored_blocker(board: BoardState, sq: str, color: str) -> bool:
+    """True when the piece at sq is frozen — it must stay or color closes a mill.
+
+    Frozen means sq is the sole missing piece in a 2-config of color: the
+    opponent cannot leave without handing color an immediate mill next turn.
+    """
+    for mill in MILLS:
+        if sq not in mill:
+            continue
+        if all(board.positions[p] == color for p in mill if p != sq):
+            return True
+    return False
+
+
 def _creates_redirected_pin(
     board: BoardState, color: str, from_sq: str, to_sq: str
 ) -> bool:
@@ -1801,18 +1815,22 @@ def tactical_move_bonus(
             None,
         )
         if _from_sq and _to_sq_mv:
-            # Locked mill escape: moving out of a locked mill toward a new 2-config
-            for mill in MILLS:
-                if _from_sq in mill and all(before.positions[p] == color for p in mill):
-                    if _is_mill_locked(before, color, mill):
-                        # Check destination contributes to a 2-config in `after`
-                        for m2 in MILLS:
-                            if _to_sq_mv in m2:
-                                vals = [after.positions[p] for p in m2]
-                                if vals.count(color) == 2 and vals.count("") == 1:
-                                    locked_escape_bonus = weights.locked_mill_escape
-                                    break
-                    break
+            opp = "B" if color == "W" else "W"
+            # Locked mill escape: the piece was adjacent to a frozen opponent blocker.
+            # A blocker is frozen when it sits on the closing square of our 2-config —
+            # moving it would hand us a mill, so the opponent must keep it there.
+            # Our piece next to it is stuck in a dead zone; moving away gains freedom.
+            for nb in ADJACENCY[_from_sq]:
+                if before.positions[nb] == opp and _is_anchored_blocker(before, nb, color):
+                    # Destination must contribute to a new 2-config
+                    for m2 in MILLS:
+                        if _to_sq_mv in m2:
+                            vals = [after.positions[p] for p in m2]
+                            if vals.count(color) == 2 and vals.count("") == 1:
+                                locked_escape_bonus = weights.locked_mill_escape
+                                break
+                    if locked_escape_bonus:
+                        break
             # Redirected pin: move causes opponent piece to double-block two own 2-configs
             if _creates_redirected_pin(before, color, _from_sq, _to_sq_mv):
                 redirected_pin_bonus = weights.redirected_pin
