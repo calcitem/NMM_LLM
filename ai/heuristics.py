@@ -1816,13 +1816,14 @@ def tactical_move_bonus(
         )
         if _from_sq and _to_sq_mv:
             opp = "B" if color == "W" else "W"
-            # Locked mill escape: the piece was adjacent to a frozen opponent blocker.
+            # Locked mill escape — two cases, same bonus:
+            #
+            # Case A: piece was adjacent to a frozen opponent blocker.
             # A blocker is frozen when it sits on the closing square of our 2-config —
             # moving it would hand us a mill, so the opponent must keep it there.
             # Our piece next to it is stuck in a dead zone; moving away gains freedom.
             for nb in ADJACENCY[_from_sq]:
                 if before.positions[nb] == opp and _is_anchored_blocker(before, nb, color):
-                    # Destination must contribute to a new 2-config
                     for m2 in MILLS:
                         if _to_sq_mv in m2:
                             vals = [after.positions[p] for p in m2]
@@ -1830,6 +1831,19 @@ def tactical_move_bonus(
                                 locked_escape_bonus = weights.locked_mill_escape
                                 break
                     if locked_escape_bonus:
+                        break
+            # Case B: piece was in a closed mill with an opponent exit-blocker adjacent.
+            # Moving the mill piece out opens the mill for cycling and steps away from
+            # the piece that was holding it frozen. Opening a closed mill always creates
+            # a 2-config in the vacated mill, so no separate destination check needed.
+            if not locked_escape_bonus:
+                for mill in MILLS:
+                    if _from_sq in mill and all(before.positions[p] == color for p in mill):
+                        mill_set = set(mill)
+                        for nb in ADJACENCY[_from_sq]:
+                            if nb not in mill_set and before.positions[nb] == opp:
+                                locked_escape_bonus = weights.locked_mill_escape
+                                break
                         break
             # Redirected pin: move causes opponent piece to double-block two own 2-configs
             if _creates_redirected_pin(before, color, _from_sq, _to_sq_mv):
