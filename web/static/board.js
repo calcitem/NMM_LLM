@@ -202,9 +202,19 @@ export class Board {
         g.setAttribute("class", "piece-arrive");
         g.style.transformOrigin = `${x}px ${y}px`;
       } else if (movedPiece && movedPiece.pos === name) {
-        g.setAttribute("class", "piece-slide");
-        g.style.setProperty("--nmm-dx", `${movedPiece.dx}px`);
-        g.style.setProperty("--nmm-dy", `${movedPiece.dy}px`);
+        const dx = movedPiece.dx, dy = movedPiece.dy, sg = g;
+        g.setAttribute("transform", `translate(${dx},${dy})`);
+        const t0 = performance.now(), dur = 250;
+        const slide = ts => {
+          const p    = Math.min((ts - t0) / dur, 1);
+          const ease = 1 - Math.pow(1 - p, 3);
+          if (sg.parentNode) {
+            sg.setAttribute("transform", `translate(${dx*(1-ease)},${dy*(1-ease)})`);
+            if (p < 1) requestAnimationFrame(slide);
+            else sg.removeAttribute("transform");
+          }
+        };
+        requestAnimationFrame(slide);
       }
 
       // Shadow

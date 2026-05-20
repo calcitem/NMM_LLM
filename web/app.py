@@ -727,7 +727,7 @@ def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
     if total_pieces < 10:
         return 4.0
     # Time-limited levels: return the actual budget so the UI countdown matches.
-    budgets = {5: 15, 6: 24, 7: 36, 8: 60, 9: 60, 10: 90}
+    budgets = {5: 12, 6: 18, 7: 20, 8: 30, 9: 40, 10: 60}
     if difficulty in budgets:
         return float(budgets[difficulty])
     # Fixed-depth levels (1–4): generous estimate so force_move doesn't fire mid-search.

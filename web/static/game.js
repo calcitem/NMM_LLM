@@ -675,6 +675,7 @@ function handleMessage(msg) {
     case "capture_required":
       phase = "capture";
       board.isHuman = true;   // ensure _drawHints() draws capture rings
+      board.selected = null;
       if (msg.projected_board) board.grid = msg.projected_board;
       board._drawPieces();
       board.enterCapture(msg.legal_captures);
@@ -899,6 +900,7 @@ function onNodeClick(name) {
       board.animateMoveOptimistic(src, name);
       board._drawPieces();
       board._drawHints();
+      setStatus("Move sent — AI calculating…");
       ws.send(JSON.stringify({ type: "move", from: src, to: name }));
     } else if (gameState.legal_sources.includes(name) &&
                gameState.board[name] === gameState.turn) {
