@@ -657,6 +657,7 @@ function handleMessage(msg) {
         }
       }
       $("btn-undo").disabled = (phase === "idle" || phase === "game_over");
+      if (msg.hints_left !== undefined) hintsLeft = msg.hints_left;
       updateHintButton(msg.is_human_turn && phase !== "game_over");
       if ((msg.post_placement_moves ?? 0) >= 40) drawUnlocked = true;
       updateDrawButton();

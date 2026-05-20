@@ -376,6 +376,15 @@ class TournamentState:
 
 _HINT_CAP = 3
 
+
+def _hint_cap_for_elo(elo: int) -> int:
+    """More hints for lower-rated players; experienced players get the baseline."""
+    if elo < 900:  return 7
+    if elo < 1100: return 5
+    if elo < 1300: return 4
+    return _HINT_CAP
+
+
 class Session:
     def __init__(
         self,
@@ -390,6 +399,7 @@ class Session:
         self.coordinator = coordinator
         self.human_color = human_color
         self.vs_human    = vs_human
+        self.hint_cap:  int  = _HINT_CAP   # adjusted per player ELO after creation
         self.hints_used: int = 0
         self._pending: Optional[dict] = None   # move awaiting a capture choice
         self._board_before = None              # board snapshot before human move
@@ -586,6 +596,7 @@ def _state(session: Session) -> dict:
         "winner":                engine.winner,
         "draw_reason":           engine.draw_reason,
         "post_placement_moves":  engine._post_placement_moves,
+        "hints_left":            max(0, session.hint_cap - session.hints_used),
         "early_families":        early_families,
         "adaptive": (
             {
@@ -827,6 +838,7 @@ async def ws_endpoint(websocket: WebSocket):
     session_games: int = 0
     tournament: Optional[TournamentState] = None
     player_name: str = ""          # set from new_game; persists for the connection
+    player_elo:  int = 1000        # updated when profile is loaded; used for hint cap
 
     async def _after_game_end() -> None:
         nonlocal session_games
@@ -934,6 +946,7 @@ async def ws_endpoint(websocket: WebSocket):
                     player_name = _name_in_msg
                     if not adaptive._ever_played:
                         _profile = await asyncio.to_thread(load_profile, player_name)
+                        player_elo = _profile.elo
                         # Restore only the difficulty level — streaks/blunder reset per session.
                         adaptive.base_difficulty    = _profile.current_difficulty
                         adaptive.current_difficulty = _profile.current_difficulty
@@ -1028,6 +1041,7 @@ async def ws_endpoint(websocket: WebSocket):
                 session.is_tournament_game = is_tournament
                 if not vs_human:
                     session.adaptive = adaptive
+                    session.hint_cap = _hint_cap_for_elo(player_elo)
                 log.info("New game  human=%s diff=%s vs_human=%s llm=%s tournament=%s",
                          hc, diff, vs_human, use_llm, is_tournament)
                 await _send(websocket, _state(session))
@@ -1413,14 +1427,14 @@ async def ws_endpoint(websocket: WebSocket):
                 if not session.game_ai:
                     await _send(websocket, {"type": "error", "message": "Hints require an AI opponent."})
                     continue
-                if session.hints_used >= _HINT_CAP:
+                if session.hints_used >= session.hint_cap:
                     await _send(websocket, {"type": "error", "message": "No hints remaining this game."})
                     continue
 
                 board = session.engine.board
                 hint_move = await asyncio.to_thread(session.game_ai.choose_move, board)
                 session.hints_used += 1
-                hints_left = _HINT_CAP - session.hints_used
+                hints_left = session.hint_cap - session.hints_used
 
                 explanation: Optional[str] = None
                 if session.coordinator:
