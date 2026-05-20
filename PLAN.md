@@ -37,6 +37,23 @@
 | 12 | Advanced Search (MCTS / NN) | ✅ Complete |
 
 
+## Known Issues / Deferred Ideas
+
+### Opening variety — alternative approach (logged, not implemented)
+
+The current solution forces the book move for the first 2 AI placements and uses temperature-weighted UCB sampling in `select_opening()`.
+
+An alternative considered but not implemented: **force difficulty level 1–3 for the first 4–6 moves**, then restore the configured difficulty for the rest of the game. This would make the early-game search shallower so the opening-book bonus reliably dominates over positional heuristics without requiring any explicit forcing logic.
+
+This was not implemented because:
+1. The explicit `force_book_early` path is more surgical and doesn't affect the quality of tactical play on moves 3–9.
+2. Reduced difficulty for the first 6 moves would also suppress mandatory-block detection (`_immediate_mill_threats`), potentially causing the AI to miss obvious defensive plays in the early placement phase.
+3. The first-two-placement force already covers the observable symptom (d7 always first).
+
+If the forcing approach proves insufficient after extended play, revisit this option as a fallback.
+
+---
+
 ## Completed Stages
 
 ### Stage 1 — Core Game Engine ✅

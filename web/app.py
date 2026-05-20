@@ -1132,13 +1132,23 @@ async def ws_endpoint(websocket: WebSocket):
                 if bad_move_dict.get("capture"):
                     bad_notation += f"x{bad_move_dict['capture']}"
 
-                # Ban the move for this exact board position only.
-                # If any piece moves or is captured afterward, the FEN changes and
-                # the move becomes legal again — matching the player's expectation
-                # that the ban is contextual, not permanent.
+                # Ban the move for this exact board position.
+                # The per-game FEN ban makes the AI pick differently right now;
+                # the trajectory-DB ban persists across games via -1.0 sentinel.
                 _ban_fen = session._pre_ai_board.to_fen_string()
                 session.game_ai.ban_move(bad_notation, _ban_fen)
                 log.info("Bad move banned: %r  at fen=%s", bad_notation, _ban_fen[:24])
+
+                # Persist the ban so future games avoid this move from this sequence.
+                prior_notations = [
+                    m.get("notation", "") for m in (
+                        session.coordinator._game_moves if session.coordinator else []
+                    ) if m.get("notation")
+                ]
+                await asyncio.to_thread(
+                    _trajectory_db.save_bad_move,
+                    _BAD_MOVES_PATH, prior_notations, bad_notation,
+                )
 
                 # ── Restore engine to pre-AI-move state ──────────────────────
                 session.engine.board                 = session._pre_ai_board

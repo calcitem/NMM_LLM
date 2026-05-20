@@ -534,15 +534,19 @@ class OpeningBook:
         self,
         ai_color: str = "W",
         exploration_rate: float = 0.25,
+        temperature: float = 0.18,
     ) -> Optional["Opening"]:
         """
-        Pick an opening for the AI to target at game start using UCB1.
+        Pick an opening for the AI to target at game start using UCB1 with
+        temperature-weighted random sampling so different openings are tried
+        each game rather than the same UCB-max winner every time.
 
-        UCB1 naturally balances exploitation of known-good openings with
-        exploration of under-tried ones.  exploration_rate scales the
-        exploration term; higher values favour variety over winning percentage.
+        temperature controls variety: lower → more deterministic (best always
+        picked); higher → more random.  0.18 gives good first-move variety
+        while still strongly preferring well-scored openings.
         """
         import math
+        import random
 
         openings = [
             o for o in self._index.values()
@@ -569,7 +573,17 @@ class OpeningBook:
             )
             return base + exploration_rate * math.sqrt(log_n / (local + 1))
 
-        return max(openings, key=_ucb)
+        scores = [_ucb(op) for op in openings]
+        max_score = max(scores)
+        weights = [math.exp((s - max_score) / temperature) for s in scores]
+        total = sum(weights)
+        r = random.random() * total
+        cumulative = 0.0
+        for op, w in zip(openings, weights):
+            cumulative += w
+            if r <= cumulative:
+                return op
+        return openings[-1]
 
     def record_deviation(
         self, opening_id: str, ply: int, move_played: str, board_fen: str

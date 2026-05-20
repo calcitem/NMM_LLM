@@ -51,6 +51,7 @@ export class Board {
     this.svg        = svgEl;
     this.onNodeClick = onNodeClick;
     this.grid       = {};       // position → "W"|"B"|null
+    this._prevGrid  = {};       // grid snapshot before last render (for animation diff)
     this.legalDests = new Set();
     this.legalSrcs  = new Set();
     this.selected   = null;     // currently selected source node
@@ -59,6 +60,7 @@ export class Board {
     this.capMode    = false;    // awaiting capture click
     this.legalCaps  = new Set();
     this._millNodes = new Set();
+    this._newPieces = new Set(); // positions that gained a piece since last render
     this._init();
   }
 
@@ -137,7 +139,13 @@ export class Board {
   }
 
   render(state) {
-    this.grid        = state.board || {};
+    const newGrid = state.board || {};
+    // Find positions that newly have a piece (placement or move destination).
+    this._newPieces = new Set();
+    for (const [pos, color] of Object.entries(newGrid)) {
+      if (color && !this.grid[pos]) this._newPieces.add(pos);
+    }
+    this.grid        = newGrid;
     this.phase       = state.phase;
     this.isHuman     = state.is_human_turn;
     this.legalDests  = new Set(state.legal_dests || []);
@@ -157,11 +165,15 @@ export class Board {
   }
 
   _drawPieces() {
+    const animating = this._newPieces;
+    this._newPieces = new Set(); // clear after use so re-draws don't re-animate
     this._pieceGroup.innerHTML = "";
     for (const [name, color] of Object.entries(this.grid)) {
       if (!color) continue;
       const [x, y] = nodeXY(name);
-      const g = _el("g", { "data-node": name });
+      const attrs = { "data-node": name };
+      if (animating.has(name)) attrs.class = "piece-arrive";
+      const g = _el("g", attrs);
 
       // Shadow
       g.appendChild(_el("circle", { cx:x+2, cy:y+2, r:PIECE_R,

@@ -352,11 +352,20 @@ class Coordinator:
             self.emit("GameAI", f"Disrupting opponent cycling mill pivot at {pivots}")
 
         # 4. GameAI picks its best move (with opening bonus, trajectory hints, endgame depth)
+        # Force the book move for the AI's first 2 placements so opening variety is
+        # visible regardless of adherence slider.  At 100% adherence the book move is
+        # forced for any ply where recognition is active.
+        ai_placements_so_far = sum(
+            1 for m in self._game_moves
+            if m.get("color") == self.game_ai.color and m.get("type") == "place"
+        )
+        force_book_early = (phase == "place" and ai_placements_so_far < 2)
         ai_move = self.game_ai.choose_move(
             board,
             recognition=recognition,
             endgame_state=endgame_state,
             trajectory_hints=trajectory_hints,
+            force_book_early=force_book_early,
         )
         ai_score = self.game_ai.score_move(board, ai_move)
 

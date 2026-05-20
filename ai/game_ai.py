@@ -167,6 +167,25 @@ _EARLY_GAME_PIECE_THRESHOLD = 10  # covers roughly the first 5 placements per si
 _EARLY_GAME_TIME            = 4.0  # seconds
 
 
+def _parse_book_move(book_move_str: str, legal_moves: list) -> dict | None:
+    """Return the legal move dict that matches the book move notation, or None."""
+    if not book_move_str:
+        return None
+    if "-" in book_move_str:
+        parts = book_move_str.split("-", 1)
+        from_pos = parts[0]
+        to_pos   = parts[1].split("x")[0]
+        return next(
+            (m for m in legal_moves if m.get("from") == from_pos and m["to"] == to_pos),
+            None,
+        )
+    to_pos = book_move_str.split("x")[0]
+    return next(
+        (m for m in legal_moves if not m.get("from") and m["to"] == to_pos),
+        None,
+    )
+
+
 class GameAI:
     """
     Minimax AI for Nine Men's Morris.
@@ -257,6 +276,7 @@ class GameAI:
         trajectory_hints=None,      # dict[str, float] from TrajectoryDB.query()
         top_n: int = 1,             # if >1, pick randomly from top-N moves (self-play noise)
         fast_early_game: bool = False,  # skip the 4s early-game budget (self-play mode)
+        force_book_early: bool = False, # force book move for first 2 AI placements
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color."""
         self._force_stop = False
@@ -295,6 +315,19 @@ class GameAI:
                 unpinned = [m for m in moves if m.get("from") not in pinned]
                 if unpinned:
                     moves = unpinned
+
+        # Book forcing: early-game forcing (first 2 AI placements) or 100% adherence.
+        # Applied after ban filtering so a banned book move is never forced.
+        if recognition is not None and recognition.book_move:
+            _should_force = (
+                force_book_early
+                or self._weights.opening_adherence >= 100
+            )
+            if _should_force:
+                book_mv = _parse_book_move(recognition.book_move, moves)
+                if book_mv is not None:
+                    self.last_was_blunder = False
+                    return book_mv
 
         # Blunder mode: occasionally play a bad move on purpose
         if self.blunder_probability > 0.0 and random.random() < self.blunder_probability:

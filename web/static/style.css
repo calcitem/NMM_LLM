@@ -606,6 +606,18 @@ main {
   letter-spacing: .02em;
 }
 
+/* ── Piece arrival animation ─────────────────────────────────────────── */
+@keyframes nmm-place {
+  0%   { opacity: 0; transform: scale(0.2); }
+  65%  { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.piece-arrive {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nmm-place 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 860px) {
   main {

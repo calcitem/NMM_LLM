@@ -20,7 +20,13 @@ A special early-game fast path applies while fewer than 10 pieces are on the boa
 
 #### Bad-move bans and LLM override safety
 
-The player can flag any AI move as bad (via the "Bad Move" button in the UI). This bans the move's notation for the exact board FEN it was played from. The ban is stored in `GameAI._pos_bans` and filtered out at the top of `choose_move()` before the search runs.
+The player can flag any AI move as bad (via the "Bad Move" button in the UI). This bans the move's notation for the exact board FEN it was played from.
+
+Two layers enforce the ban:
+
+1. **In-game positional ban** (`GameAI._pos_bans`): filtered at the top of `choose_move()` before the search runs. The ban is keyed on the exact board FEN so it applies only to the specific position, not to the same move in a different position. Bans are lost when a new `GameAI` instance is created for the next game.
+
+2. **Persistent trajectory ban** (`TrajectoryDB.mark_bad_move()`): called alongside the positional ban in `app.py`. This writes a `−1.0` hard-ban sentinel to the trajectory database and to `data/bad_moves.json`. On subsequent games, when `TrajectoryDB.query()` returns hints, any banned notation receives `−INF+1` in `_apply_trajectory_hints()` so it is always placed last in the scored list — effectively barred while remaining technically legal (safety guard). The persistent ban loads automatically from `data/bad_moves.json` on each server start.
 
 When the `Coordinator` (LLM mode) is active, after `choose_move()` returns its (already filtered) best move, the Coordinator may override it with the LLM's recommendation if the LLM's score exceeds the engine's score plus `LLM_BONUS`. To prevent a banned move from re-entering through this path, `deliberate()` checks the ban set against the LLM's suggestion before adopting it — if the LLM recommends the banned move, the suggestion is discarded and the engine's choice is kept.
 
@@ -49,14 +55,40 @@ Leaf evaluation uses `heuristics.evaluate()` mapped through `tanh` to `[−1, 1]
 
 ### Opening book and trajectory adjustments
 
-When an opening has been recognised, the scored move list is adjusted before final selection. The adjustment size scales with the **Opening Adherence** slider (0–100 %):
+When an opening has been recognised (or synthesised from the `_target_opening`), the scored move list is adjusted before final selection. The adjustment size scales with the **Opening Adherence** slider (0–100 %):
 
 - The book's recommended next move receives an absolute bonus of up to `3000` internal score units at 100 % adherence, scaling linearly down to zero at 0 %.
 - Moves listed as common blunders for the current opening receive a penalty of up to `1500` units.
 
+**100% adherence forcing**: when the slider is at exactly 100 and a book move is available and legal (and not banned), `choose_move()` returns it immediately without running any search. This guarantees the AI follows the book exactly for as long as the game remains on-book.
+
+**First-two-placement forcing**: for the first 2 AI placements in a game (regardless of the adherence slider), the Coordinator passes `force_book_early=True` to `choose_move()`. This ensures different games begin with the opening's first move rather than the negamax-preferred cross-node (`d7`) which scores highest unconditionally on an empty board. Together with temperature-based opening selection (see below), this produces visible opening variety across games.
+
+### Opening selection variety (temperature sampling)
+
+`OpeningBook.select_opening()` uses **UCB1 with temperature-weighted random sampling** instead of deterministic `max()`:
+
+```
+weight_i = exp((UCB_i − max_UCB) / temperature)
+```
+
+with `temperature = 0.18`. A random opening is drawn proportional to these weights. The best-scoring opening is still most likely to be chosen, but under-explored openings with competitive UCB values get genuine play time. This directly fixes the problem where the AI always targeted the same `d6`-family opening on every game.
+
 The **TrajectoryDB** (`ai/trajectory_db.py`) indexes every completed game by move-notation prefix. After the opening phase, winner moves receive positive score deltas and loser moves receive negative ones. Deltas in `[−0.5, +0.5]` are statistical hints; a delta of exactly `−1.0` is a hard ban (set by the Bad Move button) and causes the move to receive `−INF+1` regardless of adherence — it is never chosen.
 
 Bad-move bans are also enforced directly inside `choose_move()` via per-FEN position bans (`_pos_bans`), so a banned move cannot be re-played even if the trajectory hint is somehow bypassed.
+
+### D4 board symmetry in learning databases
+
+Both `TrajectoryDB` and `EndgameDB` use the **D4 dihedral group** (4 rotations + 4 reflections) to pool symmetric game positions. Every prefix or board state is stored in its **canonical (lex-min) form** across all 8 D4 transforms; queries search all 8 equivalents and merge statistics, then inverse-transform move notations back to the actual board orientation.
+
+This multiplies effective sample size by up to 8× with no additional games needed. The helpers are in `ai/board_symmetry.py`:
+
+- `canonical_sequence(notations)` → `(canonical_list, sym_idx)` for trajectory prefixes.
+- `canonical_board_str(board_24)` → `(canonical_str, sym_idx)` for endgame positions.
+- `prefix_query_canonicals(notations, depth)` → all unique canonical equivalents for a query prefix.
+- `board_query_canonicals(board_24)` → all unique canonical equivalents for a query position.
+- `SYM_INVERSE[sym_idx]` → the inverse symmetry index for back-transforming move notations.
 
 ---
 
