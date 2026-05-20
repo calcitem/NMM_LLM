@@ -18,7 +18,9 @@ let forceAggressive = false;  // when true, AI ignores fly-sacrifice heuristic
 let thinkingInterval  = null; // setInterval handle while AI is thinking
 let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
+let _hintCountdown    = null; // setInterval handle for hint countdown
 let canMarkBad        = false; // true only between ai_move and the next human move commit
+let pendingAiMove     = null;  // { from, to } from ai_move, consumed by next state render
 let lastAiBadMoveDesc = "";   // move notation shown in the ban confirmation dialog
 let canMarkGoodGame   = false; // true after a draw ends (AI vs human)
 let isVsHuman         = false; // true when current game is human vs human (handoff buttons visible)
@@ -242,8 +244,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-hint").addEventListener("click", () => {
     if (!ws || phase === "idle" || phase === "game_over") return;
     if (!gameState || !gameState.is_human_turn || hintsLeft <= 0) return;
-    $("btn-hint").disabled = true;
     ws.send(JSON.stringify({ type: "hint_request" }));
+    startHintCountdown();
   });
   $("btn-draw").addEventListener("click", () => {
     if (!ws || !drawUnlocked || phase !== "playing") return;
@@ -634,6 +636,10 @@ function handleMessage(msg) {
       $("btn-force-move").hidden = true;
       _updateHandoffButtons();
       if (replayIdx === -1) {
+        if (pendingAiMove) {
+          board.setNextMoveAnim(pendingAiMove.from, pendingAiMove.to);
+          pendingAiMove = null;
+        }
         board.render(msg);
         if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
       }
@@ -687,6 +693,7 @@ function handleMessage(msg) {
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
       addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
+      if (msg.from && msg.to) pendingAiMove = { from: msg.from, to: msg.to };
       if (msg.can_mark_bad) {
         canMarkBad = true;
         lastAiBadMoveDesc = msg.from + "→" + msg.to + (msg.capture ? "×" + msg.capture : "");
@@ -853,6 +860,7 @@ function onNodeClick(name) {
       board.grid = { ...gameState.board, [name]: gameState.turn };
       board.legalDests = new Set();
       board.legalSrcs  = new Set();
+      board._newPieces = new Set([name]);
       board._drawPieces();
       board._drawHints();
       ws.send(JSON.stringify({ type: "move", from: null, to: name }));
@@ -887,6 +895,7 @@ function onNodeClick(name) {
       board.selected = null;
       board.legalDests = new Set();
       board.legalSrcs  = new Set();
+      board.animateMoveOptimistic(src, name);
       board._drawPieces();
       board._drawHints();
       ws.send(JSON.stringify({ type: "move", from: src, to: name }));
@@ -1004,7 +1013,24 @@ function updateDrawButton() {
   btn.disabled = !drawUnlocked || phase !== "playing";
 }
 
+function startHintCountdown() {
+  stopHintCountdown();
+  const btn = $("btn-hint");
+  btn.disabled = true;
+  let secs = 0;
+  btn.textContent = "Calculating hint…";
+  _hintCountdown = setInterval(() => {
+    secs++;
+    btn.textContent = `Calculating hint… ${secs}s`;
+  }, 1000);
+}
+
+function stopHintCountdown() {
+  if (_hintCountdown) { clearInterval(_hintCountdown); _hintCountdown = null; }
+}
+
 function updateHintButton(isHumanTurn = false) {
+  stopHintCountdown();
   const btn = $("btn-hint");
   if (hintsLeft <= 0) {
     btn.textContent = "No hints left";

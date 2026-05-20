@@ -606,16 +606,29 @@ main {
   letter-spacing: .02em;
 }
 
-/* ── Piece arrival animation ─────────────────────────────────────────── */
+/* ── Piece animations ────────────────────────────────────────────────── */
+
+/* Placement: pop in with a spring overshoot.
+   transform-origin is set inline to the piece's SVG coordinates so the
+   scale pivots on the piece centre rather than the viewport origin. */
 @keyframes nmm-place {
   0%   { opacity: 0; transform: scale(0.2); }
   65%  { opacity: 1; transform: scale(1.12); }
   100% { opacity: 1; transform: scale(1); }
 }
 .piece-arrive {
-  transform-box: fill-box;
-  transform-origin: center;
   animation: nmm-place 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Movement: slide from the source square.
+   --nmm-dx / --nmm-dy are set inline on the element before the animation
+   runs, providing the (oldX - newX, oldY - newY) offset in SVG px units. */
+@keyframes nmm-slide {
+  from { transform: translate(var(--nmm-dx), var(--nmm-dy)); }
+  to   { transform: translate(0px, 0px); }
+}
+.piece-slide {
+  animation: nmm-slide 0.25s ease-out both;
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */

@@ -90,6 +90,35 @@ This multiplies effective sample size by up to 8× with no additional games need
 - `board_query_canonicals(board_24)` → all unique canonical equivalents for a query position.
 - `SYM_INVERSE[sym_idx]` → the inverse symmetry index for back-transforming move notations.
 
+### Per-game D4 symmetry for White AI opening variety
+
+On top of the learning-database D4 pooling, the **Coordinator** randomises a per-game symmetry index for the White AI player at the start of every game:
+
+```python
+# ai/coordinator.py — on_game_start()
+if self.game_ai.color == "W":
+    self._game_sym_idx = random.randint(0, 7)   # 0 = identity, 1–7 = one of the 7 non-trivial D4 transforms
+```
+
+During the placement phase, every book move retrieved from the `OpeningRecognizer` is inverse-transformed through `_game_sym_idx` before being returned to `choose_move()`. The effect is that a `d6` book opening can play as `d6` (sym 0), `b4` (sym 1), `d2` (sym 2), `f4` (sym 3), `a7` (sym 4), etc., depending on the game. A human opponent cannot learn to anticipate a fixed first move. This index is only set when the AI is White; Black's variety comes from the recognizer's own D4 scan (see below).
+
+### Black opening variety via recognizer D4 scan
+
+The `OpeningRecognizer` runs a **D4 symmetry scan** at Step 3 of its pipeline whenever no direct match is found and no symmetry has yet been established (`_active_symmetry == 0`). When the human (White) plays a first move that is a D4 variant of a known opening's first move — for example `f4` instead of `d6` — the scan detects that symmetry index 3 maps `f4` → `d6`, sets `_active_symmetry = 3`, and subsequently inverse-transforms book moves for Black's responses through `SYM_INVERSE[3]`. The Coordinator's `force_book_early=True` flag then forces those transformed book moves for Black's first two placements. The net result is that Black plays a contextually correct reply to whatever rotated opening the human has begun, with no extra code needed in the Coordinator.
+
+### Novel opening storage for "inactive" games
+
+When a game ends with no opening ever matched (the recognizer status stays `"inactive"` throughout — no move in the book matched, including via D4 scan), the game was previously silently dropped and never learned from. `on_game_end()` in `ai/coordinator.py` now treats `"inactive"` the same as `"novel"`:
+
+```python
+# Before:  if final.status == "novel":
+# After:
+if final.status in ("novel", "inactive"):
+    self._save_novel_opening(...)
+```
+
+The existing guard in `_save_novel_opening()` — `if len(placement_moves) < 6: return` — prevents trivially short or incomplete games from being stored, so this change is safe.
+
 ---
 
 ## 2. How the Position Strength Meter Works

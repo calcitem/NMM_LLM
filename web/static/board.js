@@ -51,7 +51,9 @@ export class Board {
     this.svg        = svgEl;
     this.onNodeClick = onNodeClick;
     this.grid       = {};       // position → "W"|"B"|null
-    this._prevGrid  = {};       // grid snapshot before last render (for animation diff)
+    this._animFrom  = null;     // pending move-anim source (set before render)
+    this._animTo    = null;     // pending move-anim destination
+    this._movedPiece = null;    // { pos, dx, dy } for current render cycle
     this.legalDests = new Set();
     this.legalSrcs  = new Set();
     this.selected   = null;     // currently selected source node
@@ -138,13 +140,35 @@ export class Board {
     this._hintTimer = null;
   }
 
+  setNextMoveAnim(from, to) {
+    this._animFrom = from;
+    this._animTo   = to;
+  }
+
+  animateMoveOptimistic(from, to) {
+    if (!from || !to) { this._movedPiece = null; return; }
+    const [ox, oy] = nodeXY(from);
+    const [nx, ny] = nodeXY(to);
+    this._movedPiece = { pos: to, dx: ox - nx, dy: oy - ny };
+  }
+
   render(state) {
     const newGrid = state.board || {};
-    // Find positions that newly have a piece (placement or move destination).
-    this._newPieces = new Set();
+    this._newPieces  = new Set();
+    this._movedPiece = null;
     for (const [pos, color] of Object.entries(newGrid)) {
-      if (color && !this.grid[pos]) this._newPieces.add(pos);
+      if (color && !this.grid[pos]) {
+        if (this._animTo === pos && this._animFrom) {
+          const [ox, oy] = nodeXY(this._animFrom);
+          const [nx, ny] = nodeXY(pos);
+          this._movedPiece = { pos, dx: ox - nx, dy: oy - ny };
+        } else {
+          this._newPieces.add(pos);
+        }
+      }
     }
+    this._animFrom = null;
+    this._animTo   = null;
     this.grid        = newGrid;
     this.phase       = state.phase;
     this.isHuman     = state.is_human_turn;
@@ -165,15 +189,23 @@ export class Board {
   }
 
   _drawPieces() {
-    const animating = this._newPieces;
-    this._newPieces = new Set(); // clear after use so re-draws don't re-animate
+    const animating  = this._newPieces;
+    const movedPiece = this._movedPiece;
+    this._newPieces  = new Set();
+    this._movedPiece = null;
     this._pieceGroup.innerHTML = "";
     for (const [name, color] of Object.entries(this.grid)) {
       if (!color) continue;
       const [x, y] = nodeXY(name);
-      const attrs = { "data-node": name };
-      if (animating.has(name)) attrs.class = "piece-arrive";
-      const g = _el("g", attrs);
+      const g = _el("g", { "data-node": name });
+      if (animating.has(name)) {
+        g.setAttribute("class", "piece-arrive");
+        g.style.transformOrigin = `${x}px ${y}px`;
+      } else if (movedPiece && movedPiece.pos === name) {
+        g.setAttribute("class", "piece-slide");
+        g.style.setProperty("--nmm-dx", `${movedPiece.dx}px`);
+        g.style.setProperty("--nmm-dy", `${movedPiece.dy}px`);
+      }
 
       // Shadow
       g.appendChild(_el("circle", { cx:x+2, cy:y+2, r:PIECE_R,
