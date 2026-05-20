@@ -169,7 +169,7 @@ class Coordinator:
 
         if self.opening_recognizer:
             final = self.opening_recognizer.get_current_result()
-            if final.status == "novel":
+            if final.status in ("novel", "inactive"):
                 self._save_novel_opening(game_record)
             elif final.opening_id and final.status in ("exact", "probable", "transposition"):
                 # Record this game's outcome against the recognised opening so
