@@ -813,16 +813,19 @@ def _is_mill_locked(board: BoardState, color: str, mill: tuple) -> bool:
 
 
 def _is_anchored_blocker(board: BoardState, sq: str, color: str) -> bool:
-    """True when the piece at sq is frozen — it must stay or color closes a mill.
+    """True when the piece at sq is frozen — removing it benefits color.
 
-    Frozen means sq is the sole missing piece in a 2-config of color: the
-    opponent cannot leave without handing color an immediate mill next turn.
+    Case A: sq is the sole missing piece in a color 2-config (move it → color closes a mill).
+    Case B: sq is adjacent to a color closed mill piece (move it → color gains a cycling exit).
     """
     for mill in MILLS:
-        if sq not in mill:
-            continue
-        if all(board.positions[p] == color for p in mill if p != sq):
-            return True
+        if sq in mill:
+            if all(board.positions[p] == color for p in mill if p != sq):
+                return True  # Case A
+        else:
+            if all(board.positions[p] == color for p in mill):
+                if any(sq in ADJACENCY[p] for p in mill):
+                    return True  # Case B
     return False
 
 
@@ -1816,35 +1819,43 @@ def tactical_move_bonus(
         )
         if _from_sq and _to_sq_mv:
             opp = "B" if color == "W" else "W"
-            # Locked mill escape — two cases, same bonus:
+            # Locked mill escape: piece was adjacent to a frozen opponent blocker.
+            # Two blocker types, same bonus but different destination requirements:
             #
-            # Case A: piece was adjacent to a frozen opponent blocker.
-            # A blocker is frozen when it sits on the closing square of our 2-config —
-            # moving it would hand us a mill, so the opponent must keep it there.
-            # Our piece next to it is stuck in a dead zone; moving away gains freedom.
+            # Case A — 2-config blocker: opponent sits on our mill's closing square.
+            #   Moving it hands us a mill, so it can't leave. Destination must build
+            #   a new 2-config (we're sacrificing a mill threat for freedom elsewhere).
+            #
+            # Case B — mill-exit blocker: opponent sits adjacent to a piece in our
+            #   closed mill, guarding that exit. Any piece adjacent to the blocker —
+            #   including the mill piece itself and pieces nearby like c3 — gains
+            #   freedom by stepping away, since the blocker can't give chase.
+            #   No destination check: moving away from a frozen exit-guard is
+            #   inherently good regardless of where we land.
             for nb in ADJACENCY[_from_sq]:
-                if before.positions[nb] == opp and _is_anchored_blocker(before, nb, color):
+                if before.positions[nb] != opp:
+                    continue
+                is_case_a = any(
+                    nb in mill and all(before.positions[p] == color for p in mill if p != nb)
+                    for mill in MILLS
+                )
+                is_case_b = (not is_case_a) and any(
+                    nb not in mill
+                    and all(before.positions[p] == color for p in mill)
+                    and any(nb in ADJACENCY[p] for p in mill)
+                    for mill in MILLS
+                )
+                if is_case_a:
                     for m2 in MILLS:
                         if _to_sq_mv in m2:
                             vals = [after.positions[p] for p in m2]
                             if vals.count(color) == 2 and vals.count("") == 1:
                                 locked_escape_bonus = weights.locked_mill_escape
                                 break
-                    if locked_escape_bonus:
-                        break
-            # Case B: piece was in a closed mill with an opponent exit-blocker adjacent.
-            # Moving the mill piece out opens the mill for cycling and steps away from
-            # the piece that was holding it frozen. Opening a closed mill always creates
-            # a 2-config in the vacated mill, so no separate destination check needed.
-            if not locked_escape_bonus:
-                for mill in MILLS:
-                    if _from_sq in mill and all(before.positions[p] == color for p in mill):
-                        mill_set = set(mill)
-                        for nb in ADJACENCY[_from_sq]:
-                            if nb not in mill_set and before.positions[nb] == opp:
-                                locked_escape_bonus = weights.locked_mill_escape
-                                break
-                        break
+                elif is_case_b:
+                    locked_escape_bonus = weights.locked_mill_escape
+                if locked_escape_bonus:
+                    break
             # Redirected pin: move causes opponent piece to double-block two own 2-configs
             if _creates_redirected_pin(before, color, _from_sq, _to_sq_mv):
                 redirected_pin_bonus = weights.redirected_pin
