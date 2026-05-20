@@ -51,9 +51,6 @@ export class Board {
     this.svg        = svgEl;
     this.onNodeClick = onNodeClick;
     this.grid       = {};       // position → "W"|"B"|null
-    this._animFrom  = null;     // pending move-anim source (set before render)
-    this._animTo    = null;     // pending move-anim destination
-    this._movedPiece = null;    // { pos, dx, dy } for current render cycle
     this.legalDests = new Set();
     this.legalSrcs  = new Set();
     this.selected   = null;     // currently selected source node
@@ -62,7 +59,6 @@ export class Board {
     this.capMode    = false;    // awaiting capture click
     this.legalCaps  = new Set();
     this._millNodes = new Set();
-    this._newPieces = new Set(); // positions that gained a piece since last render
     this._init();
   }
 
@@ -140,35 +136,8 @@ export class Board {
     this._hintTimer = null;
   }
 
-  setNextMoveAnim(from, to) {
-    this._animFrom = from;
-    this._animTo   = to;
-  }
-
-  animateMoveOptimistic(from, to) {
-    if (!from || !to) { this._movedPiece = null; return; }
-    const [ox, oy] = nodeXY(from);
-    const [nx, ny] = nodeXY(to);
-    this._movedPiece = { pos: to, dx: ox - nx, dy: oy - ny };
-  }
-
   render(state) {
     const newGrid = state.board || {};
-    this._newPieces  = new Set();
-    this._movedPiece = null;
-    for (const [pos, color] of Object.entries(newGrid)) {
-      if (color && !this.grid[pos]) {
-        if (this._animTo === pos && this._animFrom) {
-          const [ox, oy] = nodeXY(this._animFrom);
-          const [nx, ny] = nodeXY(pos);
-          this._movedPiece = { pos, dx: ox - nx, dy: oy - ny };
-        } else {
-          this._newPieces.add(pos);
-        }
-      }
-    }
-    this._animFrom = null;
-    this._animTo   = null;
     this.grid        = newGrid;
     this.phase       = state.phase;
     this.isHuman     = state.is_human_turn;
@@ -189,33 +158,11 @@ export class Board {
   }
 
   _drawPieces() {
-    const animating  = this._newPieces;
-    const movedPiece = this._movedPiece;
-    this._newPieces  = new Set();
-    this._movedPiece = null;
     this._pieceGroup.innerHTML = "";
     for (const [name, color] of Object.entries(this.grid)) {
       if (!color) continue;
       const [x, y] = nodeXY(name);
       const g = _el("g", { "data-node": name });
-      if (animating.has(name)) {
-        g.setAttribute("class", "piece-arrive");
-        g.style.transformOrigin = `${x}px ${y}px`;
-      } else if (movedPiece && movedPiece.pos === name) {
-        const dx = movedPiece.dx, dy = movedPiece.dy, sg = g;
-        g.setAttribute("transform", `translate(${dx},${dy})`);
-        const t0 = performance.now(), dur = 250;
-        const slide = ts => {
-          const p    = Math.min((ts - t0) / dur, 1);
-          const ease = 1 - Math.pow(1 - p, 3);
-          if (sg.parentNode) {
-            sg.setAttribute("transform", `translate(${dx*(1-ease)},${dy*(1-ease)})`);
-            if (p < 1) requestAnimationFrame(slide);
-            else sg.removeAttribute("transform");
-          }
-        };
-        requestAnimationFrame(slide);
-      }
 
       // Shadow
       g.appendChild(_el("circle", { cx:x+2, cy:y+2, r:PIECE_R,

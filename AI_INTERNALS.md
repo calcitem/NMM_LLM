@@ -175,8 +175,15 @@ Cross/cardinal nodes (`d7`, `a4`, `g4`, `d1`, and the equivalent middle and inne
 | `mill_trap_build` | Gaining a 3rd+ open mill while already dominant (zugzwang builder) |
 | `mobility_reduction` | Each opponent legal move removed by this move (move phase only; herding bonus) |
 | `placement_busy_scan` | Placement-phase busy-opponent forcing chain (see below) |
+| `defer_for_chain` | Extra bonus (pieces 7-9 only) for skipping an available mill to execute a level-4 forcing chain |
 | `convergence_block` | Bonus for disrupting opponent convergence cluster (placement phase) |
 | `ring_crowding_penalty` | Penalty for placing the 6th+ own piece on a single ring (placement phase) |
+| `ring_cardinal_bonus` | Bonus for placing on a cardinal connector when opponent has 3+ pieces on one ring (placement phase) |
+| `fork_anticipation` | Bonus for blocking a square the opponent could use within 2 placements to create a double mill threat |
+| `locked_mill_penalty` | Penalty per own closed mill that has zero exit squares (all neighbours opponent-occupied) — applied in `evaluate()` move phase |
+| `locked_mill_escape` | Bonus for moving a piece out of a locked mill toward a new 2-config (move phase) |
+| `redirected_pin` | Bonus when a move causes an opponent piece to simultaneously guard two distinct own 2-configs |
+| `block_cycling_priority` | Bonus for blocking the fork arm with higher cycling freedom (placement + move phase, not fly) |
 
 ### Placement busy-opponent scan-ahead
 
@@ -261,7 +268,16 @@ In the move phase, two complementary signals create a pull gradient that steers 
 
 **`_assembly_reach_count(board, color)`** counts the same category of free pieces that are **2 adjacency steps** from any 2-config piece — adjacent to a step-1 neighbour but not adjacent to the 2-config piece itself. This captures pieces that are still converging from further away. Weight: ×22.
 
-Together the two terms create a distance-graduated incentive: step-1 pieces (×65) are strongly rewarded for being close; step-2 pieces (×22) receive a softer pull. A piece 3+ steps from any 2-config earns nothing, so only pieces making genuine convergence progress are rewarded. Neither term fires in fly phase, where adjacency constraints do not limit assembly.
+Four terms create a distance-graduated incentive:
+
+| Step | Weight | Function |
+|------|--------|----------|
+| 1 (adjacent) | ×65 | `_free_piece_assembly` |
+| 2 | ×22 | `_assembly_reach_count` |
+| 3 | ×10 | `_assembly_step3_count` |
+| 4 | ×4  | `_assembly_step4_count` |
+
+The gradient (65 / 22 / 10 / 4) creates a smooth pull inward: the closer a free piece gets to a formation, the more valuable its position becomes. A piece 5+ steps from any 2-config earns nothing. Neither term fires in fly phase, where adjacency constraints do not limit assembly. A piece more than 4 hops away provides no positional benefit and the AI should not sacrifice other priorities to drag it across the board.
 
 ### Fly-phase pin rule
 
@@ -292,6 +308,167 @@ where `scale` is phase-dependent: 120 during placement, 180 during movement, 280
 
 A positive value (top half of the graph) means White is ahead; negative (bottom half) means Black is ahead. The dot colour follows the leading side: white circle when White leads, dark circle when Black leads.
 
+---
+
+## 3. Fly-Phase Imperatives and AI Limitations
+
+### What the fly phase is
+
+A player enters fly phase when they are reduced to exactly 3 pieces and all 9 of their pieces have already been placed. In fly phase, the player may move any own piece to any empty square in a single move — adjacency no longer restricts movement. The fly phase is both an opportunity (freedom of motion) and a danger signal (one more capture loses the game).
+
+### Phase transitions that matter
+
+| Own pieces | Opponent pieces | Own phase | Opp phase | Description |
+|------------|-----------------|-----------|-----------|-------------|
+| ≥ 4 | ≥ 4 | move | move | Normal movement. Both sides restricted to adjacency. |
+| 4 | 4 | move | move | **4v4 — imminent fly transition.** See below. |
+| ≥ 4 | 3 | move | fly | **3v4 from AI's perspective** (AI has more pieces). AI has adjacency restriction, opponent flies freely. |
+| 3 | ≥ 4 | fly | move | **4v3 from AI's perspective** (AI is in fly). AI jumps anywhere, opponent restricted. |
+| 3 | 3 | fly | fly | Both players fly. Winner is determined by mill structure and tactical precision. |
+
+### 4v4 — The fly-sacrifice hesitation
+
+When both sides have exactly 4 pieces, neither has entered fly phase yet. An AI capture would reduce the opponent to 3 pieces, giving them fly freedom. This is the source of the **fly-sacrifice hesitation**: unless the AI has a structurally strong position or a dominant mill setup, giving the opponent fly may be disadvantageous — a flying opponent can escape adjacency traps that were nearly complete.
+
+**Heuristic signal:** `_fly_asymmetry()` returns a non-zero penalty when the AI's colour is in move phase and the opponent would enter fly phase as a result of a capture. The penalty weight is `_FLY_ASYM_WEIGHTS["move"] = 80` per asymmetry unit. This is suppressed when `force_aggressive=True`.
+
+**When to override:** The Force Capture button (`btn-force-cap`) sends `force_aggressive: true` to the server, which sets `force_aggressive=True` in `evaluate()`. This removes the fly-asymmetry penalty entirely, making the AI treat 4v4 captures as neutral or positive. The button is meaningful only when the human player has 4 pieces — once the human drops below 4, the hesitation is gone regardless (opponent is already in fly or the position is beyond the 4v4 threshold). Enhancement B-1 (see PLAN.md) gates the button's availability to exactly this condition.
+
+**When the hesitation is correct:**
+- The AI has a cycling mill setup (it can force captures without a direct capture).
+- The 4v4 position is tense and the AI's mill structure is stronger.
+- Giving fly prematurely creates a 3v4 scenario where the flying opponent evades traps.
+
+**When the hesitation is wrong:**
+- The AI has a strong 3-piece structure (two pieces in a 2-config, third ready to close) — fly from the better structure wins.
+- The opponent's 4 remaining pieces are on a single ring with no connected mills.
+- A capture opens an immediate 3v3 flying endgame the AI can win from the mill-structure advantage.
+
+### 4v3 from AI's perspective (AI has 4, opponent flies)
+
+When the AI has 4 pieces and the opponent is flying (3 pieces), the AI retains adjacency restriction while the opponent can jump anywhere.
+
+**Priority order in this phase:**
+1. **Close own mills** — mills must be closed via adjacency (AI cannot fly). Any available mill closure is urgent.
+2. **Avoid abandoning pinned squares** — the fly-phase pin rule (`_pinned_fly_squares`) does not apply here (AI is not in fly), but effectively the AI should never leave the closing square of an opponent 2-config unguarded if the opponent can fly there immediately.
+3. **Block opponent mills** — the opponent can close a mill from any empty square in a single move. Every own 2-config the opponent has is an immediate threat if the closing square is empty. Weight: `block_opponent_mill` (400) fires as normal since the opponent can close their mills regardless of adjacency.
+4. **Maintain piece pressure** — with 4 vs 3, the AI has a material advantage. Avoid unnecessary captures that would reduce the AI to 3 (3v3 is less decisive than 4v3 if the AI's structure is weaker).
+5. **Encirclement signal** — `_NEAR_BLOCKED_WEIGHTS["move"] = 30` rewards squeezing the opponent's movement. In 4v3, the opponent flies freely so this signal is suppressed for the opponent (fly pieces are never "near-blocked").
+
+**AI limitation in 4v3:** The AI's adjacency restriction means it cannot re-position quickly to respond to the flying opponent's threatening placements. If the AI has pieces scattered on different rings without connecting mills, the flying opponent can exploit this by landing on closing squares the AI cannot reach in one move. The 4v3 phase rewards the side with a **pre-formed 2-config** — one move from a mill — rather than scattered material.
+
+### 3v4 from AI's perspective (AI flies, opponent has 4)
+
+When the AI has 3 pieces and flies, the opponent retains adjacency restriction.
+
+**Priority order in this phase:**
+1. **Fly-phase pin rule** — `_pinned_fly_squares()` identifies AI pieces sitting on the closing square of an opponent 2-config (AI piece is the sole blocker of an immediate opponent mill). Moving such a piece gives the opponent a free mill closure + capture. The search filters out moves that slide from a pinned square, unless all squares are pinned (safety guard preserves at least one move).
+2. **Build or close own mills** — with fly freedom, the AI can jump to any empty square in one move. The first priority is to close an available mill (capturing an opponent piece) or to complete a 2-config if none exists.
+3. **Fly fork setup** — when the AI has two separate 2-configs, both closeable from different empty squares, the opponent cannot block both with one piece placement. This "fly fork" is the fly-phase equivalent of a double mill. Bonus: `fly_fork_bonus` (default 200) in `tactical_move_bonus()` fires when the AI transitions from < 2 own 2-configs to ≥ 2 in the same move.
+4. **Fly-free-close bonus** — reward closing a mill using a piece that was previously NOT in a 2-config (jumped in from a non-threatening square). This is the unpredictability advantage of fly: the opponent cannot predict where the closing piece will come from. Bonus weight: `fly_free_close_bonus` (default 150).
+5. **Avoid 3v3 if structure is weak** — if the AI has 3 pieces but a poor structure (no 2-configs, pieces scattered), capturing the opponent down to 3 creates 3v3 flying from a disadvantaged position. The `_fly_asymmetry()` signal in evaluate() suppresses aggressive captures in this scenario (`_FLY_ASYM_WEIGHTS["fly"] = 0` means this weight is unused in fly-vs-move; the 3v4 protection is instead encoded in the `_fly_asymmetry()` function's `phase == "fly" and opp_pieces == 4` branch, which rewards separated opponent groups — disconnected pieces are harder to defend when the AI can fly).
+
+**Fly-phase mill-wrapping:** The mill-wrapping signal (`_MILL_WRAP_WEIGHTS["fly"] = 60`) is active when the AI is in fly phase and the opponent is not. The AI can jump to any exit square of an opponent closed mill, physically surrounding it. This score is computed but `_mill_wrapping()` explicitly returns 0 when the opponent is also in fly phase (surrounded mills become irrelevant when the surrounded pieces can jump away).
+
+### 3v3 — Both players fly
+
+When both players have 3 pieces and both are in fly phase:
+
+- Adjacency is irrelevant for both sides.
+- Every empty square is 1 move away.
+- The winner is determined almost entirely by **mill structure** (who has a 2-config or can form one first) and **tactical precision** (who avoids giving the opponent an unguarded closing square).
+
+**Key signal:** `fly_fork_bonus` becomes decisive. The player who first achieves two simultaneous 2-configs that cannot both be blocked wins by force. All evaluation weights in the `["fly"]` columns apply (mobility ×20, mill-wrapping ×60, blocked ×350).
+
+**AI limitation in 3v3:** The AI's search tree expands rapidly (up to ~54 legal fly moves per side at depth 3). At lower difficulties the search may not reach the decisive fork, allowing the opponent to gain the fork first. At difficulty 7+ with iterative deepening, the search reliably finds the forcing fork within the time budget.
+
+### The `force_aggressive` flag
+
+Setting `force_aggressive=True` (via the Force Capture button) suppresses three distinct hesitation behaviours:
+1. **`_fly_asymmetry`**: no penalty for captures that give the opponent fly phase.
+2. **3v4 opponent-separation reward**: the term that rewards keeping the flying opponent's pieces separated is disabled, so the AI no longer prefers cautious non-capture moves.
+3. **6v4 sacrifice-to-fly quality check**: the AI no longer evaluates whether its own 3-piece structure is strong enough before accepting 6v4 → 3v4 transitions.
+
+This flag is session-local (resets on new game) and is not recorded in training data.
+
+### Current AI limitations in fly phase
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| Pin-rule filter can leave obvious winning moves unexplored | In rare positions where all 3 fly pieces are simultaneously pinned, all moves are re-enabled (safety guard). The AI may then choose a suboptimal move. | The safety guard is correct; the position is usually already losing. |
+| 3v3 search tree depth at difficulty < 5 | AI may miss a 2-move forced fork at depth 2. | Increase difficulty or use Force Move to get a deeper search result. |
+| Fly-fork detection requires 2+ own 2-configs to exist at once | The bonus fires reactively (after moving into the fork), not proactively. The AI does not pre-plan the move sequence that will *create* the fork. | Enhancement B-4 (fork anticipation) addresses the pre-planning gap for the placement phase; a similar anticipation bonus for the fly phase is a future enhancement. |
+| `_mill_wrapping` returns 0 in 3v3 | Mill wrapping is disabled in 3v3 since the wrapped pieces can fly away. | Correct by design. Mill wrapping is only useful when opponent pieces are adjacency-constrained. |
+| Assembly signals (`_free_piece_assembly`, `_assembly_reach_count`) are off in fly phase | Fly pieces can jump anywhere so step-counting is meaningless. These signals are correctly disabled. | No workaround needed — by fly phase pieces should already be assembled. Enhancement B-5 addresses assembly before reaching fly phase. |
+
 ### Terminal positions
 
 If the position is already won or lost, `evaluate()` returns `±INF` immediately without computing any features. The negamax search propagates these wins/losses back through the tree, and a win found at a shallower depth is ranked above one found deeper by subtracting the remaining depth from INF (`INF - depth`). This ensures the AI takes the fastest available win and defends against the most immediate threats first.
+
+---
+
+## 4. Advanced Tactical Enhancements (B-Series)
+
+### B-2 — Placement chain deferral
+
+`_placement_chain_scan()` now runs even when an immediate mill closure is available, but **only during the late placement window (pieces 7–9, i.e. `pieces_placed >= 6`) and only when the scan returns level 4** (a clean forcing sequence that closes a mill on the final piece). In that case an extra `defer_for_chain` bonus (default 300) is added on top of the normal chain bonus, giving the AI an incentive to forgo an early mill in favour of a superior 9th-piece closing sequence.
+
+Earlier in the game (pieces 1–6), an immediate mill closure combined with a capture is categorically more forcing than a 2-move-deferred mill, so the defer override is intentionally suppressed. The scan also now detects 4-level chains when the AI has exactly 2 pieces left to place (`our_rem >= 2` instead of the previous `>= 3`).
+
+### B-3 — Ring crowding: cardinal position preference
+
+When the opponent has concentrated 3 or more pieces on a single ring, the AI receives a bonus for placing on **cardinal cross-node squares adjacent to that ring** — the connector positions between rings that control the opponent's exit lines.
+
+- Outer ring concentrated → prefer middle-ring cardinals (`d6`, `f4`, `d2`, `b4`).
+- Middle ring concentrated → prefer outer or inner cardinals.
+- Inner ring concentrated → prefer middle-ring cardinals.
+
+The bonus is `cardinal_block × 0.5` per ring concentration. This supplements the existing `cardinal_block` bonus (which rewards placing on cross-nodes generally) with a ring-aware context signal.
+
+### B-4 — Fork mill anticipation
+
+`_fork_in_n(board, opp, n=2)` returns the set of empty squares that, if occupied by the opponent within `n` moves, would create a double mill threat (two simultaneous 2-configs). Placing on any of these squares blocks the anticipated fork before it materialises.
+
+A `fork_anticipation` bonus (default 90) fires when the AI's placement or move lands on a fork-in-2 square. This fires in placement phase and move phase; not fly phase. Unlike the existing `block_opponent_mill` (which only reacts to threats closeable this turn), fork anticipation looks one step further ahead, preventing the structural conditions for a fork from arising.
+
+### B-6 — Opponent losing-line exploitation
+
+`TrajectoryDB.query_opponent_loss(notations, opp_color)` provides a second signal complementing the existing `query()`. Where `query()` scores moves by how often *we* win from this position, `query_opponent_loss()` scores moves by how often the *opponent* loses — a different signal when the database contains many drawn games.
+
+The `Coordinator` merges both signals with a blending formula controlled by the `loss_exploit` slider (default 150 → 1.5× weight on the loss-exploit signal):
+
+```
+blended = (win_rate_delta + loss_exploit_multiplier × loss_rate_delta) / (1 + loss_exploit_multiplier)
+```
+
+If no win-rate data exists for a line, the loss-exploit hint stands alone weighted down by the same formula. This keeps the signal in the same `[-0.5, +0.5]` statistical range as the win-rate signal.
+
+**Personality presets:** Aggressive = 200 (2×); Defensive = 100 (1×); Scholar/Positional = 180 (1.8×); Balanced = 150 (1.5×); Chaos = 50 (0.5×).
+
+### B-7 — Locked mill escape and redirected-pin creation
+
+**Locked mill:** A closed mill is *locked* when every exit square (any neighbour of any mill piece that is not within the mill itself) is occupied by an opponent piece. A locked mill contributes zero cycling value — the pivot piece has nowhere to slide to force repeated captures.
+
+`_is_mill_locked(board, color, mill)` detects this condition. A `locked_mill_penalty` (default 80) is subtracted from `evaluate()` per own locked mill in move phase, reflecting the stranded capital cost.
+
+When the AI moves a piece **out** of a locked mill toward a new 2-config, a `locked_mill_escape` bonus (default 160) is added. The bonus is gated: it does not fire if the destination square does not contribute to any own 2-config in the resulting position (the freed piece must immediately start contributing elsewhere). Neither signal fires in fly phase (adjacency locks dissolve) or placement phase.
+
+**Redirected pin:** `_creates_redirected_pin(board, color, from_sq, to_sq)` detects when a move causes an opponent piece to simultaneously occupy the blocking position for **two distinct** own 2-configs — a "double-pin". A pinned piece in this sense cannot move without surrendering at least one mill threat.
+
+A `redirected_pin` bonus (default 140) fires in move phase when this condition is detected. The bonus is capped at 1 per move regardless of how many pieces are double-pinned. It does not fire in fly phase.
+
+### B-8 — Forked mill blocking: choose the higher-cycling fork arm
+
+When the opponent threatens two mills simultaneously (a fork), the AI must choose which arm to block. The default is to block the arm on a cardinal cross-node square (`cardinal_block` preference). However, the strategically correct choice depends on **cycling freedom** — how many empty exit squares a closed mill has.
+
+A mill with high cycling freedom (several empty exits) can repeatedly open and re-close to force captures. A mill with low cycling freedom (few empty exits, verging on locked) is nearly static. The AI should block the high-cycling arm and surrender the low-cycling arm.
+
+**`_mill_cycling_freedom(board, color, mill)`** counts empty non-mill exit squares. Higher = more dangerous to surrender.
+
+**`_opponent_fork_arms(board, color)`** returns all (mill, closing_square) pairs where the opponent has 2 pieces and 1 empty. When 2+ exist simultaneously it is a fork.
+
+**Cardinal exception:** If an own piece already occupies any square adjacent to the *closing square* of the cardinal arm (`_own_piece_adj_to_closing`), that piece constrains the cardinal mill's cycling in practice. In that case the cardinal priority is removed for that arm and a pure cycling-freedom comparison is used.
+
+**Signal:** A `block_cycling_priority` bonus (default 120) fires when the AI's placement or move occupies the closing square of the highest-effective-cycling-freedom fork arm. The bonus scales with the freedom differential: `block_cycling_priority × (1 + freedom_diff × 0.1)`. Gate: placement and move phase only, not fly phase.
+
+**Example (cardinal exception):** White threatens g7-g4-g1 (1 exit if closed) and g4-f4-e4 (4 exits if closed). Black has a piece at e3, adjacent to e4 (g4-f4-e4's closing square). Black should block g7 (give White the cardinal mill), because e3 already constrains the cardinal mill's most dangerous exit. Without e3, Black would block e4 instead.

@@ -20,7 +20,6 @@ let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
 let _hintCountdown    = null; // setInterval handle for hint countdown
 let canMarkBad        = false; // true only between ai_move and the next human move commit
-let pendingAiMove     = null;  // { from, to } from ai_move, consumed by next state render
 let lastAiBadMoveDesc = "";   // move notation shown in the ban confirmation dialog
 let canMarkGoodGame   = false; // true after a draw ends (AI vs human)
 let isVsHuman         = false; // true when current game is human vs human (handoff buttons visible)
@@ -72,11 +71,25 @@ const WEIGHT_DEFAULTS = [
     tip: "Scales how much having more legal moves than the opponent is valued" },
   { key: "blocked_scale",        group: "Positional", label: "Blocked pieces weight %",     def: 100, min: 0,   max: 500,  step: 5,
     tip: "Scales the bonus for having opponent pieces with no legal moves" },
+  // ── Tactical (continued) — Defensive additions ───────────────────────
+  { key: "fork_anticipation",    group: "Tactical",   label: "Fork anticipation block",     def: 90,  min: 0,   max: 300,  step: 10,
+    tip: "Bonus for blocking squares the opponent could use within 2 moves to create a double mill threat (fork)" },
+  { key: "locked_mill_escape",   group: "Tactical",   label: "Locked mill escape",          def: 160, min: 0,   max: 400,  step: 10,
+    tip: "Bonus for moving a piece out of a locked mill (all exits blocked by opponent) toward a new 2-config" },
+  { key: "redirected_pin",       group: "Tactical",   label: "Redirected pin creation",     def: 140, min: 0,   max: 400,  step: 10,
+    tip: "Bonus when a move forces an opponent piece to simultaneously guard two own mill threats (double-pin)" },
+  // ── Positional (continued) ─────────────────────────────────────────────
+  { key: "defer_for_chain",      group: "Positional", label: "Defer mill for chain bonus",  def: 300, min: 0,   max: 600,  step: 25,
+    tip: "Extra bonus (pieces 7-9 only) for skipping an available mill to execute a 4-step forcing sequence ending with a mill" },
+  { key: "block_cycling_priority", group: "Positional", label: "Block cycling fork arm",   def: 120, min: 0,   max: 300,  step: 10,
+    tip: "Bonus for blocking the fork arm with higher cycling freedom — surrendering the arm the opponent cannot easily exploit" },
   // ── Behaviour ─────────────────────────────────────────────────────────
   { key: "make_mistakes",        group: "Behaviour",  label: "Make mistakes %",             def: 0,   min: 0,   max: 100,  step: 5,
     tip: "Probability (%) of playing a deliberately bad move each turn" },
   { key: "opening_adherence",    group: "Behaviour",  label: "Opening book adherence %",    def: 50,  min: 0,   max: 100,  step: 5,
     tip: "How strongly the AI follows its chosen opening line. 0 = ignores the book entirely; 100 = always prefers the book destination over tactical moves." },
+  { key: "loss_exploit",         group: "Behaviour",  label: "Exploit opponent losing lines %", def: 150, min: 0, max: 300, step: 10,
+    tip: "How strongly to follow game lines where the opponent historically loses. 150 = 1.5× weight on opponent-loss trajectory hints." },
 ];
 
 // ── Personality presets ───────────────────────────────────────────────────────
@@ -96,7 +109,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 450, feeder_diamond: 200, mill_wrapping: 150,
     cardinal_block: 200, scatter_placement: 75, setup_mill: 100, mill_opening: 200,
     long_term_position: 100, mill_count_scale: 100, mobility_scale: 100, blocked_scale: 100,
-    make_mistakes: 0, opening_adherence: 30,
+    fork_anticipation: 90, locked_mill_escape: 160, redirected_pin: 140,
+    defer_for_chain: 300, block_cycling_priority: 120,
+    make_mistakes: 0, opening_adherence: 30, loss_exploit: 150,
   },
   // Hunts mills relentlessly; ignores cycling in favour of immediate mill closure.
   aggressive: {
@@ -104,7 +119,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 150, feeder_diamond: 350, mill_wrapping: 50,
     cardinal_block: 300, scatter_placement: 25, setup_mill: 200, mill_opening: 350,
     long_term_position: 70, mill_count_scale: 180, mobility_scale: 50, blocked_scale: 80,
-    make_mistakes: 0, opening_adherence: 15,
+    fork_anticipation: 50, locked_mill_escape: 100, redirected_pin: 80,
+    defer_for_chain: 200, block_cycling_priority: 60,
+    make_mistakes: 0, opening_adherence: 15, loss_exploit: 200,
   },
   // Smothers every opponent threat; wraps opponent mills; builds resilient diamond setups.
   defensive: {
@@ -112,7 +129,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 800, feeder_diamond: 350, mill_wrapping: 350,
     cardinal_block: 150, scatter_placement: 75, setup_mill: 100, mill_opening: 100,
     long_term_position: 150, mill_count_scale: 75, mobility_scale: 200, blocked_scale: 250,
-    make_mistakes: 0, opening_adherence: 25,
+    fork_anticipation: 150, locked_mill_escape: 220, redirected_pin: 200,
+    defer_for_chain: 350, block_cycling_priority: 200,
+    make_mistakes: 0, opening_adherence: 25, loss_exploit: 100,
   },
   // Spreads out, controls cross nodes, builds long-term structures.
   positional: {
@@ -120,7 +139,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 350, feeder_diamond: 300, mill_wrapping: 250,
     cardinal_block: 400, scatter_placement: 350, setup_mill: 175, mill_opening: 175,
     long_term_position: 200, mill_count_scale: 80, mobility_scale: 300, blocked_scale: 150,
-    make_mistakes: 0, opening_adherence: 40,
+    fork_anticipation: 120, locked_mill_escape: 180, redirected_pin: 160,
+    defer_for_chain: 320, block_cycling_priority: 180,
+    make_mistakes: 0, opening_adherence: 40, loss_exploit: 180,
   },
   // Methodical opening, solid diamond structures, balanced wrapping awareness.
   scholar: {
@@ -128,7 +149,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 400, feeder_diamond: 250, mill_wrapping: 200,
     cardinal_block: 300, scatter_placement: 300, setup_mill: 150, mill_opening: 225,
     long_term_position: 175, mill_count_scale: 100, mobility_scale: 200, blocked_scale: 125,
-    make_mistakes: 0, opening_adherence: 50,
+    fork_anticipation: 100, locked_mill_escape: 160, redirected_pin: 150,
+    defer_for_chain: 300, block_cycling_priority: 140,
+    make_mistakes: 0, opening_adherence: 50, loss_exploit: 180,
   },
   // Scatters pieces randomly, ignores strategy, makes frequent blunders.
   chaos: {
@@ -136,7 +159,9 @@ const PERSONALITY_PRESETS = {
     stop_opponent_mills: 150, feeder_diamond: 75, mill_wrapping: 25,
     cardinal_block: 0, scatter_placement: 500, setup_mill: 50, mill_opening: 75,
     long_term_position: 10, mill_count_scale: 50, mobility_scale: 50, blocked_scale: 50,
-    make_mistakes: 45, opening_adherence: 0,
+    fork_anticipation: 20, locked_mill_escape: 50, redirected_pin: 30,
+    defer_for_chain: 100, block_cycling_priority: 30,
+    make_mistakes: 45, opening_adherence: 0, loss_exploit: 50,
   },
 };
 
@@ -636,10 +661,6 @@ function handleMessage(msg) {
       $("btn-force-move").hidden = true;
       _updateHandoffButtons();
       if (replayIdx === -1) {
-        if (pendingAiMove) {
-          board.setNextMoveAnim(pendingAiMove.from, pendingAiMove.to);
-          pendingAiMove = null;
-        }
         board.render(msg);
         if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
       }
@@ -661,7 +682,21 @@ function handleMessage(msg) {
       updateHintButton(msg.is_human_turn && phase !== "game_over");
       if ((msg.post_placement_moves ?? 0) >= 40) drawUnlocked = true;
       updateDrawButton();
-      $("btn-force-cap").disabled = (phase === "idle" || phase === "game_over");
+      {
+        // B-1: Force Capture only makes sense when human has exactly 4 pieces
+        // (the AI's fly-sacrifice hesitation only applies at that count).
+        const humanColor = msg.human_color;
+        const humanPieces = humanColor
+          ? Object.values(msg.board || {}).filter(c => c === humanColor).length
+          : 0;
+        const capDisable = (phase === "idle" || phase === "game_over" || humanPieces !== 4);
+        $("btn-force-cap").disabled = capDisable;
+        if (capDisable && forceAggressive) {
+          forceAggressive = false;
+          $("btn-force-cap").classList.remove("btn-active");
+          ws.send(JSON.stringify({ type: "force_aggressive", active: false }));
+        }
+      }
       $("btn-bad-move").hidden = !canMarkBad;
       if (msg.is_human_turn && replayIdx === -1) {
         setStatus(
@@ -695,7 +730,6 @@ function handleMessage(msg) {
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
       addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
-      if (msg.from && msg.to) pendingAiMove = { from: msg.from, to: msg.to };
       if (msg.can_mark_bad) {
         canMarkBad = true;
         lastAiBadMoveDesc = msg.from + "→" + msg.to + (msg.capture ? "×" + msg.capture : "");
@@ -862,7 +896,6 @@ function onNodeClick(name) {
       board.grid = { ...gameState.board, [name]: gameState.turn };
       board.legalDests = new Set();
       board.legalSrcs  = new Set();
-      board._newPieces = new Set([name]);
       board._drawPieces();
       board._drawHints();
       ws.send(JSON.stringify({ type: "move", from: null, to: name }));
@@ -897,7 +930,6 @@ function onNodeClick(name) {
       board.selected = null;
       board.legalDests = new Set();
       board.legalSrcs  = new Set();
-      board.animateMoveOptimistic(src, name);
       board._drawPieces();
       board._drawHints();
       setStatus("Move sent — AI calculating…");

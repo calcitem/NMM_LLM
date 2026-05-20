@@ -222,6 +222,71 @@ class TrajectoryDB:
 
         return {}
 
+    def query_opponent_loss(
+        self,
+        move_notations: list[str],
+        opponent_color: str,
+        min_samples: int = 2,
+    ) -> dict[str, float]:
+        """Score candidate moves by how often the opponent loses from this position.
+
+        Positive delta  → opponent historically loses frequently after this next move
+                          (max +0.5 when opponent always loses).
+        Negative delta  → opponent wins frequently; avoid this line.
+        Returns {}      when no trajectory data match.
+
+        Complements query(): where query() rewards moves that correlate with
+        our wins, this method rewards moves that correlate with their losses —
+        a subtly different signal when the database has many drawn games.
+        """
+        normed = [_norm(n) for n in move_notations]
+
+        for depth in reversed(_DEPTHS):
+            if len(normed) < depth:
+                continue
+
+            merged: dict[str, dict] = {}
+            found_any = False
+
+            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
+                candidates = self._index.get(canon_prefix_key)
+                if not candidates:
+                    continue
+                found_any = True
+                inv = _SYM_INVERSE[sym_idx]
+                for canon_notation, stats in candidates.items():
+                    actual_notation = _transform_notation(canon_notation, inv)
+                    if actual_notation is None:
+                        continue
+                    if actual_notation not in merged:
+                        merged[actual_notation] = {"W": 0, "B": 0, "D": 0, "total": 0}
+                    entry = merged[actual_notation]
+                    entry["total"] += stats["total"]
+                    entry["W"]     += stats["W"]
+                    entry["B"]     += stats["B"]
+                    entry["D"]     += stats["D"]
+
+            if not found_any:
+                continue
+
+            total_samples = sum(c["total"] for c in merged.values())
+            if total_samples < min_samples:
+                continue
+
+            result: dict[str, float] = {}
+            for notation, stats in merged.items():
+                total = stats["total"]
+                if total == 0:
+                    continue
+                opp_losses = stats.get(
+                    "W" if opponent_color == "B" else "B", 0
+                )
+                loss_rate = opp_losses / total
+                result[notation] = loss_rate - 0.5
+            return result
+
+        return {}
+
     # ── Bad move bans ─────────────────────────────────────────────────────────
 
     def mark_bad_move(self, prior_notations: list[str], bad_notation: str) -> None:

@@ -39,6 +39,20 @@
 
 ## Known Issues / Deferred Ideas
 
+### ❌ BROKEN — Novel Opening Detection and Naming Prompt Not Working
+
+Opening recognition is silently disabled whenever LLM is off (`use_llm=False`), and the frontend naming dialog was never implemented. Both problems mean new openings are never saved and users cannot name them.
+
+**Full details and fix plan:** see **Bug B-0** in the Enhancement Backlog section below.
+
+**Summary of what is broken:**
+1. `session.coordinator` is `None` when LLM is off → `OpeningRecognizer` never runs → `opening_recognition_status: null` in all no-LLM game records → nothing saved to `learned_openings.json`.
+2. Server sends `name_opening_prompt` WS message after any novel opening is saved (LLM path only) → **no handler exists in `game.js`** → message silently dropped → user sees no prompt and cannot name the opening.
+
+**Status:** No new openings have been added to `learned_openings.json` since 2026-05-20 14:05 despite 5+ games played. The 54 existing learned entries were bulk-imported, not discovered through live play.
+
+---
+
 ### Opening variety — alternative approach (logged, not implemented)
 
 The current solution forces the book move for the first 2 AI placements and uses temperature-weighted UCB sampling in `select_opening()`.
@@ -1114,6 +1128,598 @@ If Ollama is already running but the model is missing, only the pull is needed. 
 5. **Training Tools** — brief guide to `self_play.py`, `evolve_weights.py`, `train_value_net.py`, and `import_book_games.py`.
 
 **Deliverable:** README.md (or separate GUIDE.md) updated with these five sections.
+
+## Enhancement Backlog (2026-05-20)
+
+The following five enhancements were requested after extended play testing. Each is a self-contained improvement to an existing system; none requires a new stage number.
+
+---
+
+### Bug B-0 — New Openings Not Appearing in Openings Panel ⬜
+
+**Symptom:** Games played in recent sessions are not generating new entries in the Openings panel. All five games played after the last `learned_openings.json` update have `recognised_opening_id: null` and `opening_recognition_status: null` in their saved game records.
+
+**Root cause:** Opening recognition only runs when `use_llm=True` (i.e. when the `Coordinator` is instantiated). The `Coordinator` owns the `OpeningRecognizer`. When LLM is disabled, `session.coordinator` is `None` and the no-LLM game-over path (`elif not session.vs_human and session.game_ai`) saves the game record to `TrajectoryDB`/`EndgameDB` **without ever running opening recognition**. As a result:
+- Novel game sequences are never detected.
+- Nothing is written to `learned_openings.json`.
+- The `/api/openings` endpoint (which reads `learned_openings.json` on every call) has nothing new to return.
+
+**Confirmed by inspection:**
+- `data/openings/learned_openings.json` — 54 entries, last modified 14:05.
+- Five game records created after 14:05 all show `"opening_recognition_status": null`.
+- The `OpeningBook._index` contains 65 entries (11 book + 54 learned) and the API correctly returns all 65 — but no new entries have been added for days of play.
+
+**Secondary issue:** The Openings panel is populated once on page load (`DOMContentLoaded`). Even if a novel opening IS saved during a session (LLM path), the panel list does not refresh until the user reloads the page. The `name_opening_prompt` WS message is sent but the frontend only handles it as a naming prompt, not as a signal to refresh the dropdown.
+
+**Fix:**
+
+**Part 1 — Run opening recognition without LLM:**
+
+- `web/app.py` — In `_start_game()` (the `new_game` handler), always instantiate an `OpeningRecognizer` attached to the shared `OpeningBook`, even when `use_llm=False`. Store it as `session.opening_recognizer`.
+
+- `web/app.py` — In the AI-move handler, forward each placement move to `session.opening_recognizer.step(move)` so recognition progresses throughout placement phase.
+
+- `web/app.py` — In the no-LLM game-over path (`elif not session.vs_human`), after saving the trajectory/endgame record, run a lightweight novel-opening save:
+
+  ```python
+  if session.opening_recognizer:
+      final = session.opening_recognizer.get_recognition()
+      if final and final.status in ("novel", "inactive"):
+          placement_moves = [m["notation"] for m in record.get("moves", [])
+                             if m.get("type") == "place"]
+          if len(placement_moves) >= 6:
+              first3 = "-".join(placement_moves[:3])
+              auto_name = f"Novel — {first3}"
+              book = session.opening_recognizer.book
+              book.save_novel_opening(
+                  line_moves=placement_moves,
+                  name=auto_name,
+                  needs_llm_name=True,  # flag for future LLM naming pass
+                  seed_source="learned",
+              )
+  ```
+
+  The `needs_llm_name=True` flag allows `tools/name_openings.py` to retroactively name these entries the next time it is run.
+
+**Part 2 — Refresh the Openings panel when a new opening is saved:**
+
+- `web/app.py` — After any novel opening is saved (both LLM and no-LLM paths), send a `"openings_updated"` WebSocket message: `{"type": "openings_updated"}`.
+
+- `web/static/game.js` — Handle `"openings_updated"`: call `_loadOpenings()` to re-fetch `/api/openings` and rebuild the dropdown.
+
+**Part 3 — Record opening status in no-LLM game records:**
+
+- `web/app.py` — In the no-LLM game-over path, if `session.opening_recognizer` is set, populate the game record fields before saving:
+  ```python
+  record["recognised_opening_id"]   = final.opening_id if final else None
+  record["recognised_opening_name"] = final.opening_name if final else None
+  record["opening_recognition_status"] = final.status if final else None
+  ```
+  This makes game records searchable and consistent regardless of whether LLM was on.
+
+**Part 4 — Wire up the naming prompt in the frontend (MISSING):**
+
+The server already sends `{"type": "name_opening_prompt", "opening_id": ..., "auto_name": ..., "moves": [...]}` after a novel opening is saved. This message is currently **not handled anywhere in game.js** — no case in `handleMessage()`, no UI element, nothing. The user never sees the prompt.
+
+- `web/static/game.js` — Add `"name_opening_prompt"` case in `handleMessage()`:
+  - Show a small inline dialog or a prompt in the commentary feed:
+    - Text: `"New opening sequence detected! AI suggested name: "<auto_name>". Accept or rename?"`
+    - Two inputs: a text field pre-filled with `auto_name`, and `[Save]` / `[Skip]` buttons.
+  - On `[Save]`: send `{"type": "rename_opening", "opening_id": ..., "name": <userText>}` over `ws`.
+  - On `[Skip]`: do nothing (the opening is already saved with the auto-name and `needs_llm_name: true`).
+  - After Save: call `_loadOpenings()` to refresh the dropdown so the new entry appears immediately.
+
+- `web/static/game.js` — Add `"rename_opening_ack"` case in `handleMessage()`:
+  - Call `_loadOpenings()` to refresh the opening dropdown.
+  - Show a brief confirmation in the commentary feed: `"Opening saved as '<name>'."`.
+
+- A lightweight approach (no modal overlay needed) is to inject the prompt into the `#commentary-ai` feed as a special styled entry with the two buttons inline, so it appears alongside other game commentary without interrupting play.
+
+**Example of intended experience:**
+
+After the game `1.d7 f4 2.d6 d5 3.b4 d2 4.b6 b2 5.f6×d2 a4 ...` ends, if the opening recognizer finds no match, the user should see in the commentary:
+
+```
+[Opening] New sequence detected: "Novel — d7-f4-d6" · Rename: [___________] [Save] [Skip]
+```
+
+**Deliverables:**
+- `web/app.py` — `session.opening_recognizer` in no-LLM games; lightweight novel-save in no-LLM game-over path; `openings_updated` WS message.
+- `web/static/game.js` — `openings_updated` handler; `name_opening_prompt` handler with inline naming UI; `rename_opening_ack` handler.
+- `web/static/style.css` — Styles for the inline naming prompt entry in the commentary feed.
+
+---
+
+### Enhancement B-6 — Trajectory: Exploit Opponent's Losing Lines ✅
+
+**Goal:** When the current game's move sequence matches a historical game in which the **opponent's side eventually lost**, the AI should recognise this and apply a stronger, more deliberate follow-through on the winning continuation — not just a statistical hint, but an active exploitation of a known losing pattern the opponent is re-entering.
+
+**Concept:**
+
+The current `TrajectoryDB.query()` scores each candidate move by win-rate for `current_color` across all matching historical games at the deepest matching prefix. This is symmetric: a move that historically won for White also gets penalised when queried from Black's side. The result is a statistical hint that nudges the AI toward historically better moves.
+
+What is missing is a **pattern-recognition layer**: when the opponent's most recent moves exactly match the opening moves of a historical game that ended in their defeat, the AI should:
+
+1. **Recognise the match** — "the human is heading into the sequence from Game X, which Black lost."
+2. **Commit more strongly to the winning line** — increase the trajectory hint multiplier for moves that appeared in the winning side of that specific game, beyond the standard win-rate delta.
+3. **Comment** — tell the player (via commentary) that this pattern was seen before and went badly for their side.
+
+**Why the current implementation doesn't fully cover this:**
+
+`TrajectoryDB` aggregates win/loss counts across *all* matching games at a given depth. If 10 games matched this prefix and White won 7 of them, White's move from those games gets roughly `+0.2` delta. But if the opponent's *exact move sequence* so far appears in 3 of those 10 games and White won all 3 of those, that signal (100% win rate on the exact sub-trajectory) is diluted into the aggregate `+0.2`. The AI cannot distinguish "this specific sequence is catastrophic for Black" from "White generally does well from here."
+
+**Fix — Part 1: Opponent-loss trajectory query**
+
+- `ai/trajectory_db.py` — Add `query_opponent_loss(notations, opponent_color)` method that queries the same index but scores moves by: `(loss_by_opponent / total)` rather than `(win_by_current / total)`. Returns `{notation: float}` deltas in `[0, +0.5]` where `+0.5` means the opponent lost 100% of the time from this position after this move. Uses the same D4 canonical lookup and prefix-depth fallback.
+
+  ```python
+  # loss_rate = how often opponent_color lost when this move was played
+  loss_rate = (stats[opp_color_loses] / total)
+  delta = loss_rate - 0.5   # range [-0.5, +0.5]; +0.5 = opponent always loses here
+  ```
+
+  Where `opp_color_loses` is: `stats["W"]` when `opponent_color == "B"` (White wins = Black loses), or `stats["B"]` when `opponent_color == "W"`.
+
+- `ai/coordinator.py` — In `deliberate()`, after the standard `trajectory_db.query()` call, call `trajectory_db.query_opponent_loss(game_moves, opp_color)`. Merge the result into `trajectory_hints` with a `loss_exploitation_multiplier` (default 1.5×): moves that appear in the opponent-loss query get their hint bonus scaled up by this factor.
+
+  ```python
+  exploit_hints = self._trajectory_db.query_opponent_loss(notations, opp_color)
+  for notation, delta in exploit_hints.items():
+      if notation in trajectory_hints:
+          trajectory_hints[notation] = trajectory_hints[notation] * 1.5 + delta * 0.5
+      else:
+          trajectory_hints[notation] = delta * 0.5
+  ```
+
+**Fix — Part 2: Commentary trigger**
+
+- `ai/coordinator.py` — When `query_opponent_loss` returns at least one move with delta ≥ 0.3 (opponent lost ≥ 80% of the time from this position), set a flag `_opponent_in_losing_line = True` and record the approximate game depth at which this was detected.
+
+- In `react_to_human_move()`: if `_opponent_in_losing_line` was just set (first detection), emit a commentary line via `MillsAI` (or a direct string if LLM is off):
+  > "I recognise this pattern — your position has entered a line where [color] has historically struggled. I'll press the advantage."
+
+- Clear the flag after the commentary fires (so it only triggers once per recognised sequence, not every move).
+
+**Fix — Part 3: Opening panel integration**
+
+- In the Openings panel, add a visual indicator when the current game is tracking a historical losing line for the human player — a small "⚠ Danger Zone" label next to the matching opening name if available.
+
+**Configuration:**
+
+`loss_exploitation_multiplier` is exposed as a UI slider in the AI Tuning panel (range 0–3, default 1.5, step 0.1) under the existing **Behaviour** group alongside `make_mistakes` and `opening_adherence`. It follows the same path as all other tuning weights:
+
+1. `WEIGHT_DEFAULTS` in `game.js` declares the slider (key `"loss_exploit"`, range 0–300, default 150, displayed as a percentage internally scaled to a float: `150 / 100 = 1.5×`).
+2. `_getWeights()` includes it in the `ai_weights` dict sent with each `new_game` request.
+3. `HeuristicWeights.loss_exploit: int = 150` stores it (same integer-percentage convention as `opening_adherence`).
+4. The coordinator reads `self.game_ai._weights.loss_exploit / 100.0` as the float multiplier when merging the exploit hints.
+
+Personality presets in `PERSONALITY_PRESETS` (game.js) set the value per personality:
+
+| Personality | `loss_exploit` | Multiplier |
+|-------------|----------------|------------|
+| Aggressive  | 200            | 2.0×       |
+| Defensive   | 100            | 1.0×       |
+| Positional  | 160            | 1.6×       |
+| Scholar     | 180            | 1.8×       |
+| Balanced    | 150            | 1.5×       |
+| Chaos       | 50             | 0.5×       |
+
+Setting `loss_exploit = 0` disables opponent-loss exploitation entirely and falls back to standard win-rate hints only.
+
+**Example scenario:**
+
+The human plays `1.d7 f4 2.d6 d5 3.b4 d2 4.b6 b2 5.f6×d2...`. TrajectoryDB finds that in a historical game (`learned_openings.json` entry) this line led to Black losing at move 14. The standard hint would give White's move 5 response a `+0.2` delta. With opponent-loss exploitation, it gets `+0.35` delta (boosted by 1.5×), and the coordinator comments that Black entered a historically losing pattern.
+
+**Deliverables:**
+- `ai/trajectory_db.py` — `query_opponent_loss(notations, opponent_color)` method.
+- `ai/coordinator.py` — Exploit hint merge in `deliberate()`; `_opponent_in_losing_line` flag; commentary in `react_to_human_move()`.
+- `ai/heuristics.py` — `loss_exploitation_multiplier` field in `HeuristicWeights`.
+- `web/static/game.js` — Optional: Openings panel "Danger Zone" indicator when matching a losing line.
+
+---
+
+### Enhancement B-7 — Mill Abandonment: Locked Mill Escape and Redirected-Pin Creation ✅
+
+**Goal:** Teach the AI two related tactics that both involve deliberately moving away from an established or partially-built mill:
+
+1. **Locked mill escape** — recognise when a closed mill's cycling value is zero because every exit square is occupied by opponent pieces, and treat the pieces as "stranded capital" that should be redeployed elsewhere.
+2. **Redirected-pin creation** — recognise that moving a piece away from a stalled mill attempt (where an opponent piece is already pinning the formation) can create a second simultaneous threat on that same blocker, freezing it in place while the AI operates freely elsewhere.
+
+These are unified by the same underlying idea: a piece committed to a mill that cannot progress is worth less than a piece that creates new threats.
+
+---
+
+#### Form 1 — Locked Mill (Example 2)
+
+```
+1.f4 d6  2.f2 d2  3.f6×d6 d6  4.d7 e4  5.e3 g4  6.g1
+```
+
+After move 6 White has closed the f6-f4-f2 mill, but:
+
+- f6 can only exit to d6 — occupied by Black.
+- f4 can only exit to g4 or e4 — both occupied by Black.
+- f2 can only exit to d2 — occupied by Black.
+
+Every exit square from every piece in the mill is blocked. The mill **cannot cycle** — White can never open it to force a capture and re-close it. It contributes exactly zero dynamic value. White's other pieces (d7, e3, g1) are outside the locked formation and could form their own mill or 2-configs if the locked pieces were freed.
+
+**Detection:** `_is_mill_locked(board, color, mill)` — returns True when for every piece `p` in `mill`, every neighbour of `p` that is not another piece in the same mill is occupied by the opponent. Equivalently: the mill has no legal "open" move (no piece can slide out).
+
+**Heuristic signal:**
+- In `evaluate()`, add a move-phase penalty for each own locked mill: `−locked_mill_penalty × count`. Suggested default weight: 80 per locked mill. This makes the static position score reflect the immobility cost.
+- In `tactical_move_bonus()`, add a bonus for moves that: (a) move a piece OUT of a locked mill, AND (b) the destination square is in a new 2-config or adjacent to a 2-config piece elsewhere (i.e., the piece contributes immediately to a new formation). Bonus: `locked_mill_escape` weight (default 160).
+- The bonus must be gated: do not fire if breaking the mill gives the opponent an immediate capture (i.e., the moved piece was the only blocker of an opponent 2-config or 3-config).
+
+**What this does NOT mean:** A mill with at least one free exit is NOT locked — the AI should keep it and try to cycle. Only zero-exit mills trigger this logic.
+
+---
+
+#### Form 2 — Redirected-Pin Creation (Example 1)
+
+```
+1.f4 d6  2.g1 e4  3.g4 g7  4.d7 d1  5.e5 f2
+```
+
+White has g1, g4 — a 2-config in the g7-g4-g1 mill. Black's g7 is pinning it (if g7 moves, White completes the mill). White also has d7 (adjacent to g7 via the outer top edge). The move **d7 → a7** does the following:
+
+- d7 was on the a7-d7-g7 outer top mill line (where White had only d7, so no threat there yet).
+- After d7→a7, White now has a7 and the square d7 is empty.
+- Black's g7 is now simultaneously blocking **two** White formations:
+  1. g7-g4-g1 (White has g4, g1; needs g7)
+  2. a7-d7-g7 (White has a7; d7 is empty and one step from being filled; g7 is the shared closing square)
+
+Black's g7 **cannot move** without surrendering at least one of these threats. If g7 → d7, the g7-g4-g1 threat is real (White has g4, g1 and g7 is now empty, reachable by a7→d7 or another piece). If g7 stays, White freely develops elsewhere.
+
+The user's clarifying note: this would NOT apply if Black had a piece at d5, because d5 blocks the d7-d6-d5 cross line which doesn't directly affect the g7 pin — but if Black had a piece at d7 already (instead of g7 being the blocker), then d7 would BE a blocking piece and the situation is different.
+
+**Detection:** `_creates_redirected_pin(board, color, from_sq, to_sq)` — after the hypothetical move `from_sq→to_sq`:
+
+1. Find all opponent pieces `b` such that `b` is the sole blocker of a White 2-config (White has 2 pieces in a mill line, `b` occupies the 3rd square).
+2. For each such blocker `b`, check if `b` is also the **sole blocker or only missing piece** of a SECOND White 2-config or new potential mill line created by the move.
+3. If yes: this move has created a "double-pin" on `b` — it must simultaneously guard two White threats.
+
+**Heuristic signal:**
+- In `tactical_move_bonus()`, add a bonus when `_creates_redirected_pin` fires. Bonus: `redirected_pin` weight (default 140, in the Tactical group alongside `mill_wrapping`).
+- The bonus should scale with the quality of the second threat: a clean 2-config (one empty square away from completing) scores the full bonus; a more distant formation scores half.
+- Cap at 1 per move (even if the move creates double-pins on multiple pieces, award once).
+
+**Relationship to mill_wrapping:** Mill wrapping occupies exit squares of *opponent* closed mills. Redirected-pin creation forces an opponent piece to guard *own* forming mills. They are complementary: wrapping restricts the opponent from cycling; pin creation restricts the opponent from moving their blockers. Both should scale together, so expose `redirected_pin` weight in the AI Tuning panel and include it in mill-wrapping-oriented personality presets (higher in Positional and Defensive, lower in Chaos).
+
+---
+
+#### Shared conditions where neither signal should fire
+
+- **Fly phase**: pieces can jump anywhere; adjacency locks and pin relationships dissolve. Neither signal applies.
+- **Placement phase**: pieces are being placed, not moved; locked-mill escape is irrelevant. Redirected-pin creation could theoretically apply during placement (placing a piece to create a double-pin on an opponent blocker) but is deferred to a future pass.
+- **The escape is clearly losing**: if moving a piece out of a locked mill immediately allows the opponent to complete a mill next turn (the escaped piece was a blocker), the locked_mill_escape bonus must not fire.
+
+---
+
+**Deliverables:**
+- `ai/heuristics.py` — `_is_mill_locked(board, color, mill)` helper; `locked_mill_penalty` term in `evaluate()` move-phase; `locked_mill_escape` bonus and `redirected_pin` bonus in `tactical_move_bonus()`.
+- `ai/heuristics.py` — `_creates_redirected_pin(board, color, from_sq, to_sq)` helper.
+- `ai/heuristics.py` — `HeuristicWeights`: add `locked_mill_penalty: int = 80`, `locked_mill_escape: int = 160`, `redirected_pin: int = 140`.
+- `web/static/game.js` — `WEIGHT_DEFAULTS`: add sliders for `locked_mill_escape` and `redirected_pin` in the Tactical group; update `PERSONALITY_PRESETS` with appropriate values.
+
+---
+
+### Enhancement B-8 — Forked Mill Blocking: Choose the Mill with Less Cycling Freedom ✅
+
+**Goal:** When the opponent threatens to complete two mills simultaneously (a fork), teach the AI to block the mill that leaves the opponent with *more* cycling freedom — surrendering the mill whose pieces are more constrained — rather than always blocking the cardinal mill or defaulting to whichever scoring branch comes first.
+
+**Core rule:** Block the fork arm whose closure would give the opponent the *highest* cycling freedom score. The surrendered arm should be the one with the *lowest* cycling freedom (i.e., the pieces would be nearly locked in place after closure, limiting the opponent's ability to harvest captures).
+
+**Cardinal exception:** The existing `cardinal_block` preference (block fork arms on cardinal squares) is *overridden* when an **own piece is already adjacent to a key exit square** of the cardinal arm. In that case the own adjacent piece functionally reduces the cardinal mill's cycling freedom; blocking the non-cardinal arm is better.
+
+---
+
+#### Key Concept — Cycling Freedom
+
+A closed mill's **cycling freedom** is the count of empty exit squares reachable by any piece in that mill (squares that are not occupied by own pieces and are not the other mill pieces themselves). A mill with high cycling freedom can be repeatedly opened and re-closed to force opponent captures. A mill with zero exits is a locked mill (see B-7).
+
+```python
+def _mill_cycling_freedom(board, color, mill):
+    """Count of empty non-mill exit squares reachable from pieces in `mill`."""
+    mill_set = set(mill)
+    count = 0
+    for sq in mill:
+        for nb in ADJACENCY[sq]:
+            if nb not in mill_set and board.get(nb) is None:
+                count += 1
+    return count
+```
+
+---
+
+#### Example 1 — Cardinal Exception (`1.f4 d6 2.g1 d1 3.b4 e3 4.g4`)
+
+White threatens two mills simultaneously:
+- **g7-g4-g1** — needs g7. If closed: only exit is g7→d7 (1 free exit at the time of analysis). Low cycling freedom.
+- **g4-f4-e4** (cardinal arm, f4 is a cardinal square) — needs e4. If closed: exits are g4→g7, f4→f6, f4→f2, e4→e5 (4 free exits). High cycling freedom.
+
+Black has a piece at e3. e3 is adjacent to e4 (an exit square of the cardinal arm g4-f4-e4). This own piece materially constrains the cardinal mill's practical cycling — if White closes g4-f4-e4 and tries to exit via e4→e5, Black at e3 cannot fully be ignored, and the e3 adjacency reduces effective cycling.
+
+**Without the cardinal exception (naive rule):** block e4 (cardinal arm), give White g7-g4-g1.
+**With the cardinal exception:** Black's e3 is adjacent to e4 → override cardinal preference → block g7 instead → White gets the g4-f4-e4 cardinal mill but e3 constrains its cycling exit.
+
+---
+
+#### Example 2 — Standard Case (`1.d6 d2 2.f4 b4 3.c4 e4 4.d7 d5 5.f6`)
+
+White threatens two mills simultaneously:
+- **b6-d6-f6** — needs b6. If closed: d6 is surrounded by d7 (White), f6 (White), b6 (White), d5 (Black) — the only exit from d6 is back into the mill or toward d5 which is occupied. Very low cycling freedom (near-locked).
+- **f6-f4-f2** — needs f2. If closed: f4 can exit to g4 (if empty) or elsewhere. Meaningfully higher cycling freedom.
+
+**Decision:** block f2 (the arm with higher cycling freedom), surrender b6-d6-f6 to White. White's b6-d6-f6 mill will have near-zero cycling value — d6's neighbourhood is already crowded — so this concession costs little.
+
+---
+
+#### Detection and Signal
+
+**Fork detection:** already partially present via `_fork_in_n()` from B-4. Extend or create a specific helper:
+
+```python
+def _opponent_fork_arms(board, color):
+    """Return list of (mill, closing_square) pairs where opponent
+    has 2 pieces in the mill and closing_square is empty."""
+    opp = "B" if color == "W" else "W"
+    arms = []
+    for mill in MILLS:
+        opp_count = sum(1 for sq in mill if board.get(sq) == opp)
+        empty = [sq for sq in mill if board.get(sq) is None]
+        if opp_count == 2 and len(empty) == 1:
+            arms.append((mill, empty[0]))
+    return arms
+```
+
+When 2+ arms exist (a fork), score each arm's closure by `_mill_cycling_freedom(board, opp, mill)` evaluated *after* hypothetically placing the opponent piece at `closing_square`.
+
+**Cardinal exception check:**
+
+```python
+def _own_piece_adjacent_to_exit(board, color, mill):
+    """True if own piece occupies a neighbour of any non-mill exit square of mill."""
+    mill_set = set(mill)
+    for sq in mill:
+        for nb in ADJACENCY[sq]:
+            if nb not in mill_set and board.get(nb) is None:
+                # nb is an exit square; check if own piece is a neighbour of nb
+                for nb2 in ADJACENCY[nb]:
+                    if nb2 not in mill_set and board.get(nb2) == color:
+                        return True
+    return False
+```
+
+If `_own_piece_adjacent_to_exit` returns True for the cardinal arm, remove the cardinal priority override for that arm and use pure cycling-freedom comparison.
+
+**Heuristic signal:** In `tactical_move_bonus()`, when a move blocks the closing square of a fork arm that has the *higher* cycling freedom (or the non-cardinal arm when the cardinal exception fires), add a bonus scaled by the freedom differential:
+
+```python
+freedom_diff = high_freedom - low_freedom
+bonus = block_cycling_priority * (1 + freedom_diff * 0.1)
+```
+
+New weight: `block_cycling_priority: int = 120` (in the Defensive group in AI Tuning).
+
+**Gate:** only fire in placement phase and movement phase; not fly phase (cycling freedom analysis assumes adjacency constraints hold).
+
+---
+
+**Deliverables:**
+- `ai/heuristics.py` — `_mill_cycling_freedom(board, color, mill)` helper.
+- `ai/heuristics.py` — `_opponent_fork_arms(board, color)` helper.
+- `ai/heuristics.py` — `_own_piece_adjacent_to_exit(board, color, mill)` helper (cardinal exception check).
+- `ai/heuristics.py` — `HeuristicWeights`: add `block_cycling_priority: int = 120`.
+- `ai/heuristics.py` — `tactical_move_bonus()`: integrate fork-arm cycling comparison, apply cardinal exception, emit `block_cycling_priority` bonus.
+- `web/static/game.js` — `WEIGHT_DEFAULTS`: add `block_cycling_priority` slider in the Defensive group; update `PERSONALITY_PRESETS` (higher for Defensive/Positional, lower for Aggressive/Chaos).
+
+---
+
+### Enhancement B-1 — Force Capture Button: Restrict to 4-Piece Gate ✅
+
+**Goal:** The Force Capture button should only be enabled when the **human player** has exactly 4 pieces on the board — the condition where the AI's fly-sacrifice hesitation actually applies. Enabling it in all other situations is misleading and creates noise.
+
+**Background:** The AI's `_fly_asym` heuristic penalises captures that would reduce the opponent to 3 pieces (triggering fly phase) unless `force_aggressive=True`. This hesitation is only meaningful when the *opponent* (from the AI's perspective) is at 4 pieces. Since the human is the AI's opponent, the button only makes strategic sense when `humanPieces === 4`.
+
+**Implementation:**
+
+- `web/static/game.js` — In the `state` handler, update the Force Capture button's disabled logic:
+
+  ```javascript
+  // Current:
+  $("btn-force-cap").disabled = (phase === "idle" || phase === "game_over");
+
+  // New:
+  const humanPieces = Object.values(msg.board || {})
+    .filter(c => c === humanColor).length;
+  $("btn-force-cap").disabled = (
+    phase === "idle" || phase === "game_over" || humanPieces !== 4
+  );
+  ```
+
+  The `humanColor` is the colour chosen by the player, already available as the `human_color` field in the state message (or derivable from `gameState.turn` / `gameState.is_human_turn`).
+
+- When `forceAggressive` is toggled on but `humanPieces` later moves away from 4 (e.g. after a capture), auto-disable the button and send `force_aggressive: false` to keep server state consistent.
+
+**Deliverables:** `web/static/game.js` — gated enable/disable logic.
+
+---
+
+### Enhancement B-2 — Placement Busy Scan: Defer Mill to Execute Chain ✅
+
+**Goal:** When a level-4 forcing chain exists (last piece closes a mill), the AI should prefer executing the full chain — even when an immediate mill closure is available earlier — rather than taking the early mill and abandoning the superior sequence.
+
+**Background:** `_placement_chain_scan()` is currently gated by `_closeable_mills(before, color) == 0` (line 1439 of `heuristics.py`). This means the scan never fires when the AI already has a closeable mill on the board. In the following game the AI places piece 7 to close a mill instead of building the chain that closes with piece 9:
+
+```
+1.d6 d2  2.f4 b4  3.c4 e4  4.d1 d5  5.a7 g4
+6.d3
+   e5
+7.c5  ← AI should place here and keep building...
+   c3
+8.e3  b2
+9.f2  b6×d6          ← piece 9 closes mill, captures
+```
+
+or the similar variant:
+
+```
+1.d6 a4  2.f4 c4  3.b4 d5  4.d3 d2
+5.d1  c5   6.e5  c3×f4   7.a1 g1   8.b6 b2   9.f6×d2
+```
+
+**Root cause:** The gate condition `_closeable_mills(before, color) == 0` blocks the scan when the AI can already close a mill this turn. If `close_mill` bonus (500) wins over the deferred-chain approach, the AI forgets the chain. The game examples show chains where piece 9 — not piece 7 — closes the decisive mill; pieces 6–8 are setup, not tactical.
+
+**Fix:**
+
+- `ai/heuristics.py` — Relax the gate: allow the chain scan to fire when `_closeable_mills(before, color) > 0` **if** the scan returns level 4. Compare the chain bonus against `close_mill` weight to decide whether to defer:
+
+  ```python
+  if (get_game_phase(before, color) == "place" and mills_delta == 0):
+      if _closeable_mills(before, color) == 0:
+          chain = _placement_chain_scan(after, color)
+      else:
+          # Only run the expensive scan if a level-4 chain is plausible
+          chain = _placement_chain_scan(after, color) if our_rem >= 2 else 0
+          if chain < 4:
+              chain = 0  # don't override close_mill for weaker chains
+  ```
+
+  When `chain == 4` and a mill was available but not taken, apply a "defer mill" bonus of `weights.placement_busy_scan × 3` (level-4 bonus). This should exceed `close_mill` (500) at default weight 120 × 3 = 360 — still lower, so increase the level-4 multiplier or add a separate `defer_for_chain: int = 180` weight that is added to the level-4 chain bonus when the AI deliberately skips an available mill.
+
+- `ai/heuristics.py` — Fix the level-3 continuation condition at line 1189:
+
+  ```python
+  # Current: our_rem >= 3
+  elif t2 and opp_rem >= 2 and our_rem >= 2:   # was >= 3, now >= 2
+  ```
+
+  This allows the scan to detect 4-level chains when the AI has exactly 2 pieces left to place (pieces 8 and 9).
+
+- Add a `defer_for_chain: int = 180` weight field to `HeuristicWeights`. Default 180 added to the level-4 busy-chain bonus specifically when a mill was available but the chain involves a better late-closing mill.
+
+**Scan description for reference (what `_placement_chain_scan` can detect):**
+
+The function performs a 4-half-move lookahead interleaving AI placements and forced opponent responses. At each step it identifies "threats" — squares the AI is 1 piece away from filling to close a mill — and checks whether the opponent can block all of them in a single placement. When the opponent cannot cover all threats (level 3: fork) or when the final AI placement closes a mill (level 4), it returns the quality level. Currently the function reliably finds:
+
+- Level 1: a single immediate mill threat (opponent must respond or lose a piece next turn)
+- Level 2: the threat survives one opponent block (still present after forced response)
+- Level 3: a fork — two simultaneous threats the opponent cannot both cover with one piece
+- Level 4: a complete forcing chain where piece 9 closes a mill
+
+The missing behaviour is simply that the gate `_closeable_mills == 0` prevents levels 3 and 4 from registering when the AI already has a mill available at an earlier step.
+
+**Deliverables:** `ai/heuristics.py` — relaxed gate, `our_rem >= 2` fix, `defer_for_chain` weight.
+
+---
+
+### Enhancement B-3 — Ring Crowding: Cardinal Position Preference ✅
+
+**Goal:** When the opponent has concentrated 3+ pieces on a single ring (outer, middle, or inner), the AI should prefer **cardinal cross-node positions** adjacent to that ring — the connector squares between rings — rather than continuing to fill other positions on the same ring. This makes the AI start "surrounding" the opponent's ring cluster rather than passively matching it.
+
+**Background:** The existing `ring_crowding_penalty` (weight 150) penalises the *AI* for putting 6+ own pieces on a single ring. It does not reward exploiting an opponent who over-commits to one ring. Cardinal squares (d7, g4, d1, a4, d6, f4, d2, b4, d5, e4, d3, c4) connect rings via cross-lines; controlling them constrains where the opponent's ring pieces can exit.
+
+**Example (from user):**
+
+```
+1.d7 g4
+2.a4 d1   ← d1 blocks opponent from placing a 3rd outer-ring piece; AI should follow
+           with cross-node occupancy e.g. e4, c4, f4 to wrap the opponent's outer
+           ring structure rather than continue on a7/g7/g1.
+```
+
+**Fix:**
+
+- `ai/heuristics.py` — Add `_opponent_ring_concentration(board, color)`: for each ring, count opponent pieces; return a dict `{ring_id: count}`. If any ring has ≥ 3 opponent pieces, flag it.
+
+- `ai/heuristics.py` — Add a placement-phase bonus in `tactical_move_bonus()` for placing on a **cardinal square adjacent to a concentrated opponent ring**. The "cardinal squares adjacent to a ring" are the cross-line connector squares that can attack two squares on that ring simultaneously.
+
+  - Outer ring connectors: `d7` (connects to `a7` and `g7`), `g4`, `d1`, `a4`.
+  - Middle ring connectors: `d6`, `f4`, `d2`, `b4`.
+  - Inner ring connectors: `d5`, `e4`, `d3`, `c4`.
+
+  When `opponent_ring_concentration[outer_ring] >= 3`, bonus for placing on `d6, b4, f4, d2` (the middle-ring connectors that threaten the outer ring).
+
+- Link to the existing `cardinal_block` weight (currently 200) as the scaling factor: `cardinal_block × 0.5` per concentrated-ring cardinal.
+
+- This should have D4 symmetry: the same logic applies to any rotation of the described pattern.
+
+**Deliverables:** `ai/heuristics.py` — `_opponent_ring_concentration()`, cardinal-adjacent bonus in `tactical_move_bonus()`.
+
+---
+
+### Enhancement B-4 — Fork Mill Anticipation (Pre-emptive Mill Wrapping) ✅
+
+**Goal:** The AI should detect when the opponent is **2–3 placements away** from completing a fork mill (two intersecting or shared-pivot mills simultaneously threatening two different mill closures), and preemptively block the anticipated convergence point — even before the second 2-config is formed.
+
+**Background:** The existing `block_opponent_mill` (weight 400) only blocks mills the opponent can close **this turn** (1-step threat). The existing `stop_opponent_mills` (weight 450) penalises opponent 2-configs. Neither looks ahead far enough to block a fork before it materialises.
+
+**Example (user):**
+
+```
+1.d7 f4
+2.a4      ← White placed d7 and a4; both are part of the outer-ring square.
+           At Black's move 2, the AI can predict White may place at a7 or g7 next
+           to complete a fork: a7-d7 (top cross) AND a7-a4-a1 (left column).
+           The anticipatory block is d1 — this occupies the bottom of the left column
+           before White can set up the fork.
+```
+
+This is conceptually a form of **mill wrapping** applied prospectively: the AI wraps (blocks the approach squares of) mills that don't yet exist. Link the bonus weight to the `mill_wrapping` slider.
+
+**Recognition criteria:** A "fork in N moves" exists when:
+1. The opponent has 2 pieces in one mill line (2-config, needs 1 more).
+2. The opponent has 1 piece in a *different* mill line that shares a square or pivot with the first.
+3. There exists a single empty square that, once occupied by the opponent, would simultaneously: (a) complete the first mill OR (b) form a second 2-config in the shared line.
+
+This is a "1.5-move fork threat" — not yet two 2-configs, but 1 placement would create two.
+
+**Fix:**
+
+- `ai/heuristics.py` — Add `_fork_in_n(board, opp, n)` that returns the set of squares the opponent could place on within `n` moves to create a fork (two simultaneous mill threats). `n=1` is already covered by `stop_opponent_mills`; this function handles `n=2` and `n=3`.
+
+- `ai/heuristics.py` `tactical_move_bonus()` — Add placement and move-phase bonus for placements that block a `_fork_in_n(board, opp, 2)` square. Scale by `weights.mill_wrapping × 0.6` (default 150 × 0.6 = 90 bonus per blocked anticipatory fork square).
+
+- In the **move phase**, the same logic applies: moving to a square that blocks an anticipated fork earns the same bonus.
+
+- Cap the bonus at 1 per move (avoid double-counting when multiple fork threats are blocked).
+
+**Link to existing slider:** The `mill_wrapping` slider (default 150, range 0–500) in the AI Tuning panel scales this bonus. Increasing `mill_wrapping` makes the AI more proactively defensive; decreasing it makes the AI ignore anticipated forks and play purely tactically.
+
+**Deliverables:** `ai/heuristics.py` — `_fork_in_n()`, anticipatory bonus in `tactical_move_bonus()`.
+
+---
+
+### Enhancement B-5 — Free-Piece Assembly: Extended Range (Step 3–4) ✅
+
+**Goal:** Extend the free-piece assembly incentive from a 2-step range to a 4-step range, with appropriately diminishing weights, so that genuinely isolated pieces — several moves away from any formation — still receive a pull toward productive groupings.
+
+**Background:** The current implementation in `heuristics.py`:
+- `_free_piece_assembly()` (step-1, weight ×65): pieces directly adjacent to a 2-config piece.
+- `_assembly_reach_count()` (step-2, weight ×22): pieces 2 adjacency hops from a 2-config piece.
+
+Any piece 3 or more steps away earns nothing and may stay isolated indefinitely. In a 4-piece endgame or after heavy captures, a piece might need to travel all the way around a ring to meet its allies — 3 or even 4 adjacency hops. Without an incentive, it stays where it is and never contributes.
+
+**Benefits (as identified by user):**
+- Avoids herding: a distant piece converging on the group forces the opponent to keep removing it (no time to prepare multiple mills).
+- Reduces odds of losing to blockade: the opponent must spread attention to intercept the converging piece.
+- Increases fly-phase probability: gathering all 3 pieces into a coherent group before they drop below 3 is essential.
+
+**Fix:**
+
+- `ai/heuristics.py` — Add `_assembly_step3_count(board, color)` and `_assembly_step4_count(board, color)` using the same "free piece not in any 2-config or closed mill" definition as the existing helpers, but measuring 3 and 4 adjacency hops to the nearest 2-config piece.
+
+  Suggested weights: step-3: ×10, step-4: ×4. The gradient (65 / 22 / 10 / 4) creates a smooth pull: the closer a free piece gets to a formation, the more valuable its position becomes.
+
+- `ai/heuristics.py` `evaluate()` — Add both new terms to the move-phase positional sum (alongside the existing ×65 and ×22 terms). Do NOT apply in fly phase (pieces can jump anywhere).
+
+- Ensure adjacency-hop calculation uses the same path the engine already computes for mobility (no new BFS needed if the graph is already available).
+
+**Note on "assembly across the board":** A piece may travel from one side of the outer ring to the other via up to 6 hops, but the 4-step cap still rewards progress. Once the piece comes within 4 hops it is on the radar; within 2 it is strongly pulled. The cap is intentional — a piece 5+ steps away provides no positional benefit and the AI should not sacrifice other priorities to drag it across.
+
+**Deliverables:** `ai/heuristics.py` — `_assembly_step3_count()`, `_assembly_step4_count()`, new terms in `evaluate()` move-phase block.
+
+---
 
 ## Planned Stages
 

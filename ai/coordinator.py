@@ -350,6 +350,35 @@ class Coordinator:
             if notations:
                 trajectory_hints = self.trajectory_db.query(notations, board.turn) or None
 
+                # 2a. Merge opponent-loss trajectory hints (B-6).
+                # These score moves by how often the OPPONENT lost from this position,
+                # giving a second signal that is useful when the database has many draws.
+                opp_color = "B" if board.turn == "W" else "W"
+                loss_weight = (
+                    self.game_ai._weights.loss_exploit / 100.0
+                    if hasattr(self.game_ai, "_weights")
+                    else 1.5
+                )
+                if loss_weight > 0:
+                    exploit_hints = self.trajectory_db.query_opponent_loss(
+                        notations, opp_color
+                    )
+                    if exploit_hints:
+                        if trajectory_hints:
+                            for notation, delta in exploit_hints.items():
+                                if notation in trajectory_hints:
+                                    # Blend: win-rate signal weighted 1×, loss-exploit weighted by slider
+                                    trajectory_hints[notation] = (
+                                        trajectory_hints[notation] + loss_weight * delta
+                                    ) / (1 + loss_weight)
+                                else:
+                                    trajectory_hints[notation] = delta * loss_weight / (1 + loss_weight)
+                        else:
+                            trajectory_hints = {
+                                n: d * loss_weight / (1 + loss_weight)
+                                for n, d in exploit_hints.items()
+                            }
+
         # 2b. Query endgame DB for position-based hints (merged on top of trajectory hints)
         if self.endgame_db is not None and endgame_state.active:
             eg_hints = self.endgame_db.query(board, board.turn)
