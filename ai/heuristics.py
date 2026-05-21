@@ -60,6 +60,9 @@ class HeuristicWeights:
     block_cycling_priority: int = 120 # bonus for blocking the higher-cycling-freedom fork arm
     # ── Trajectory exploit (B-6, consumed by Coordinator) ────────────────────
     loss_exploit: int         = 150   # how strongly to exploit opponent losing-line trajectories
+    # ── Cross-feeding 2-config pairs (B-16) ──────────────────────────────────
+    own_convergence: int      = 250   # bonus per own pair sharing closing sq or pivot piece
+    cross_feed_mobility: int  = 180   # bonus per own pair where a piece is adjacent to other's closing sq
     # ── Behaviour (consumed by GameAI, not heuristics) ───────────────────
     make_mistakes: int        = 0     # blunder probability 0-100 %
     opening_adherence: int    = 50    # how strongly to follow the opening book (0-100)
@@ -287,6 +290,24 @@ def evaluate(
     w_conv = weights.convergence_penalty if weights else DEFAULT_WEIGHTS.convergence_penalty
     if phase == "move":
         base -= w_conv * _double_mill_convergence(board, opp)
+
+    # Cross-feeding 2-config pair bonus (B-16): reward own positions where two
+    # independent 2-config groups mutually sustain each other — whichever group
+    # the opponent attacks, the survivor can complete the other group's mill.
+    #
+    # Two sub-cases:
+    #   own_convergence    — pairs sharing a closing square or pivot piece
+    #                        (same computation as opp convergence, applied offensively)
+    #   cross_feed_mobility — pairs where the closing squares differ but a piece
+    #                         from one group is adjacent to the other's closing sq
+    #
+    # Applied in move and fly phases; the 4v3 independent_mill_pairs bonus already
+    # covers placement-phase insurance, so we skip double-counting there.
+    if phase in ("move", "fly"):
+        w_own_conv = weights.own_convergence if weights else DEFAULT_WEIGHTS.own_convergence
+        w_cfm      = weights.cross_feed_mobility if weights else DEFAULT_WEIGHTS.cross_feed_mobility
+        base += w_own_conv * (_double_mill_convergence(board, color) - _double_mill_convergence(board, opp))
+        base += w_cfm * (_cross_feed_mobility_pairs(board, color) - _cross_feed_mobility_pairs(board, opp))
 
     # Move-phase: reward non-contributing pieces assembling toward a 2-config.
     # Gradient: step-1 (×65), step-2 (×22), step-3 (×10), step-4 (×4).
@@ -1057,6 +1078,56 @@ def _double_mill_convergence(board: BoardState, opp: str) -> int:
                 pair = frozenset((mills_for_piece[a], mills_for_piece[b]))
                 if pair not in shared_pairs:
                     shared_pairs.add(pair)
+                    count += 1
+
+    return count
+
+
+def _cross_feed_mobility_pairs(board: BoardState, color: str) -> int:
+    """Count own 2-config pairs linked by cross-adjacency (B-16 general case).
+
+    Two independent 2-config groups form a cross-feeding pair when, after any
+    opponent capture from either group, the surviving piece has the mobility
+    to reach the OTHER group's closing square in one move (move phase) or any
+    move (fly phase).  This gives the position resilience: whichever group the
+    opponent attacks, the survivor migrates and closes the untouched mill.
+
+    Only counts pairs whose closing squares differ AND own pieces don't overlap
+    (shared-closing-square and shared-pivot cases are already handled by
+    _double_mill_convergence applied to `color`).
+    """
+    configs: list[tuple[tuple[str, ...], str, frozenset[str]]] = []
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 2 and vals.count("") == 1:
+            closing = next(p for p in mill if board.positions[p] == "")
+            pieces  = frozenset(p for p in mill if board.positions[p] == color)
+            configs.append((mill, closing, pieces))
+
+    if len(configs) < 2:
+        return 0
+
+    phase = get_game_phase(board, color)
+    count = 0
+
+    for i in range(len(configs)):
+        _, close_i, pieces_i = configs[i]
+        for j in range(i + 1, len(configs)):
+            _, close_j, pieces_j = configs[j]
+
+            # Skip pairs already covered by _double_mill_convergence:
+            # shared closing square or shared own piece (pivot).
+            if close_i == close_j or (pieces_i & pieces_j):
+                continue
+
+            if phase == "fly":
+                # Fly: every square reachable → all independent non-shared pairs qualify.
+                count += 1
+            else:
+                # Move: check if any piece in group_i is adjacent to close_j,
+                # or any piece in group_j is adjacent to close_i.
+                if (any(close_j in ADJACENCY[p] for p in pieces_i)
+                        or any(close_i in ADJACENCY[p] for p in pieces_j)):
                     count += 1
 
     return count
