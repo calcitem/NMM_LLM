@@ -446,6 +446,61 @@ Had Black placed at `e4` instead of `c4`, it would have threatened a mill on the
 
 ---
 
+### Bug B-16 — AI Does Not Recognise Cross-Feeding Dual-Mill Setup (Feeder Mill) ⬜
+
+**Symptom:** The AI passes up moves that create a "feeder mill" — a position with two separate 2-piece groups that mutually sustain each other's mill threats. If the opponent captures from either group, the surviving single piece has the mobility to migrate and complete the other group's mill. The AI cannot see this resilience because it evaluates each 2-config in isolation.
+
+**Example from a recorded game (move 19, Black to move):**
+
+```
+19. c4-c5×d3   d6-f6   ← AI played (poor)
+    better:    d7-a7   ← AI missed
+```
+
+After `d7→a7`, Black has:
+- **Group A:** `a7` + `d7`... wait, Black moved *from* `d7`, so `d7` is now empty. The outer-top line (`a7-d7-g7`) has Black at `a7` and `g7` with `d7` empty → 2-config.
+- **Group B:** `g1` + `g4` on the outer-right line (`g7-g4-g1`), missing `g7`.
+
+**The cross-feed:** Group A and Group B do *not* share a piece, but:
+- If White captures `a7` (Group A loses a piece), Black's remaining `g7` can slide to `g7→...` — or more concretely: `g7` is adjacent to `g4`, and the outer-right mill `g7-g4-g1` already has `g4` and `g1` (Group B). So `g7` moving nowhere is fine — it closes Group B immediately.
+- If White captures from Group B (e.g. takes `g4`), Black's `g1` remains. Black plays `g7→d7` closing the outer-top mill (`a7-d7-g7`).
+
+In both cases: **whichever group White attacks, the survivor from that group migrates (or the survivor of the other group completes the undefended mill) within 1–2 moves.** White cannot simultaneously block both lines.
+
+**The general pattern — Cross-Feeding 2-Config Pair:**
+
+Two 2-piece groups G1 and G2 form a cross-feeding pair when:
+1. G1 = {P1, P2} are both on a single mill line L1, one square short of completion (closing square X).
+2. G2 = {P3, P4} are both on a different mill line L2, one square short of completion (closing square Y).
+3. **Cross-feed condition:** at least one piece in G1 is adjacent to Y (and could slide there), OR at least one piece in G2 is adjacent to X. This means if the opponent captures one piece from either group, the surviving piece has the mobility to close the *other* group's mill.
+
+The two groups need **not** share any piece. The threat resilience comes entirely from the cross-mobility between the two closing squares.
+
+**Root cause:** The heuristic scores each 2-config independently and sums them. It does not evaluate the *combined* resilience of pairs of 2-configs where a capture in one enables completion of the other. The AI therefore undervalues positions that set up this cross-feeding structure, choosing tactically inert moves instead.
+
+**Distinction from existing items:**
+- **Bug UI-C** is *defensive* — disrupting the opponent's converging mills.
+- **SE-10** is about proactive fork planning in fly phase.
+- **B-16** is *offensive*, fires in move phase, and specifically captures the cross-mobility property between two otherwise independent 2-config groups.
+
+**Fix:**
+
+1. Add `_cross_feed_bonus(board, side)` in `ai/heuristics.py`:
+   - Find all pairs of 2-configs `(G1, G2)` for `side` where G1 and G2 are on different mill lines.
+   - For each pair, check the cross-feed condition: can any piece of G1 reach G2's closing square in one move (adjacency in move phase, any square in fly phase)? Can any piece of G2 reach G1's closing square?
+   - If the cross-feed condition holds, score the pair with a bonus: `cross_feed_weight × (1 + shared_closing_square_bonus)`, where `shared_closing_square_bonus` fires if G1 and G2 happen to share the same closing square (an even stronger threat — one move closes both mills simultaneously).
+   - Sum bonuses across all qualifying pairs.
+
+2. Add `cross_feed_mill` weight to `HeuristicWeights` (suggested initial value ~280 — above a lone 2-config, below an immediate mill closure).
+
+3. Evaluate at every search depth, not only at root, so the gradient pulls the AI toward cross-feeding configurations several moves before they become decisive.
+
+**Affected files:**
+- `ai/heuristics.py` — `_cross_feed_bonus()` helper; inject into `evaluate()`
+- `ai/heuristics.py` — `HeuristicWeights` — new `cross_feed_mill` field
+
+---
+
 ## Search & Evaluation Enhancements
 
 _Source: "Heuristic Search Improvements - Opponent-Anticipation Techniques.md" (2026-05-21). Items ranked by combined win-rate uplift + node-count reduction. Items 1–3 compound each other and should be implemented together as a single search-stack upgrade before benchmarking._
