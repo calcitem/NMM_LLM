@@ -1145,29 +1145,56 @@ def _closeable_mills(board: BoardState, color: str) -> int:
 
 
 def _cycling_mill_setup(board: BoardState, color: str) -> int:
-    """Count pairs of own 2-configs whose empty closing squares are adjacent.
+    """Count cycling opportunities — two types:
 
-    This measures the STRUCTURAL SETUP for cycling, not the act of moving back and
-    forth.  A cycling setup exists when two open mills (each needing only one more
-    piece) share adjacent empty closing squares E1 and E2: one piece can slide
-    E1→E2→E1 to force a capture every two turns.  The tactical bonus is only given
-    when this setup is GAINED (delta > 0 between before and after the move), so
-    simply moving a piece back and forth between already-existing positions scores
-    zero.  In fly phase every empty square is reachable so all pairs of 2-configs
-    qualify as potential cycling setups.
+    Type A: Two open 2-configs whose empty closing squares are adjacent.
+            A single pivot piece can shuttle E1→E2→E1 to force a capture
+            every two turns.
+
+    Type B: A cycle-ready closed mill (at least one piece has an adjacent
+            free exit square P) paired with an open 2-config whose closing
+            square equals P.  This captures the "one mill closed, one ready
+            to close" state — e.g. White has c5-d5-e5 closed with d5 free
+            to exit to d6, and d6 is the closing square of b6-d6-f6.
+
+    The tactical bonus is only given when this count INCREASES (delta > 0),
+    so already-established cycling positions do not score again.  In fly
+    phase every empty square is reachable so all 2-config pairs qualify.
     """
     phase = get_game_phase(board, color)
-    empties = []
+
+    # Collect empty closing squares of all own 2-configs
+    open_closings: list[str] = []
     for mill in MILLS:
         vals = [board.positions[p] for p in mill]
         if vals.count(color) == 2 and vals.count("") == 1:
-            empties.append(next(p for p in mill if board.positions[p] == ""))
+            open_closings.append(next(p for p in mill if board.positions[p] == ""))
+
     count = 0
-    n = len(empties)
+    n = len(open_closings)
+
+    # Type A: adjacent closing-square pairs
     for i in range(n):
         for j in range(i + 1, n):
-            if phase == "fly" or empties[j] in ADJACENCY[empties[i]]:
+            if phase == "fly" or open_closings[j] in ADJACENCY[open_closings[i]]:
                 count += 1
+
+    # Type B: cycle-ready closed mill whose free exit is a 2-config closing square
+    if phase != "fly":
+        open_closing_set = set(open_closings)
+        for mill in MILLS:
+            if not all(board.positions[p] == color for p in mill):
+                continue
+            mill_set = set(mill)
+            for p in mill:
+                for nb in ADJACENCY[p]:
+                    if nb not in mill_set and nb in open_closing_set:
+                        count += 1
+                        break  # count each closed mill at most once
+                else:
+                    continue
+                break
+
     return count
 
 
@@ -1861,6 +1888,33 @@ def tactical_move_bonus(
             if _creates_redirected_pin(before, color, _from_sq, _to_sq_mv):
                 redirected_pin_bonus = weights.redirected_pin
 
+    # Cycling close bonus: closing a mill that immediately sets up the next cycle.
+    # Fires in move phase when the newly closed mill has a free exit that is the
+    # closing square of another own 2-config — the pivot can slide straight back
+    # to force another capture next turn.  Uses cycling_mill weight so the slider
+    # controls both building the dual-mill structure and executing the cycle.
+    cycling_close_bonus = 0
+    if mills_delta > 0 and get_game_phase(before, color) == "move":
+        for mill in MILLS:
+            if all(after.positions[p] == color for p in mill) and not all(before.positions[p] == color for p in mill):
+                mill_set = set(mill)
+                for p in mill:
+                    for nb in ADJACENCY[p]:
+                        if nb in mill_set or after.positions[nb] != "":
+                            continue
+                        # nb is a free exit of the newly closed mill
+                        for m2 in MILLS:
+                            if nb in m2:
+                                vals = [after.positions[q] for q in m2]
+                                if vals.count(color) == 2 and vals.count("") == 1:
+                                    cycling_close_bonus = weights.cycling_mill
+                                    break
+                        if cycling_close_bonus:
+                            break
+                    if cycling_close_bonus:
+                        break
+                break
+
     # B-8 — Forked mill blocking: when opponent has 2+ fork arms, reward blocking the
     # arm with higher cycling freedom (not necessarily the cardinal arm).
     # Cardinal exception: if own piece already presses the closing square of a cardinal
@@ -1911,6 +1965,7 @@ def tactical_move_bonus(
     return (
         weights.close_mill            * mills_delta
         + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
+        + cycling_close_bonus
         + weights.block_opponent_mill * blocked
         + weights.stop_opponent_mills * two_cfg_broken
         + weights.feeder_diamond      * diamond_gain
