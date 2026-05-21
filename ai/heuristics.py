@@ -290,11 +290,14 @@ def evaluate(
 
     # Move-phase: reward non-contributing pieces assembling toward a 2-config.
     # Gradient: step-1 (×65), step-2 (×22), step-3 (×10), step-4 (×4).
+    # Also reward free pieces approaching empty squares of 1-config mills (×12 weighted
+    # score: step-1 from empty sq = 2 pts, step-2 = 1 pt in the helper).
     if phase == "move":
         base += 65 * (_free_piece_assembly(board, color) - _free_piece_assembly(board, opp))
         base += 22 * (_assembly_reach_count(board, color) - _assembly_reach_count(board, opp))
         base += 10 * (_assembly_step3_count(board, color) - _assembly_step3_count(board, opp))
         base +=  4 * (_assembly_step4_count(board, color) - _assembly_step4_count(board, opp))
+        base += 12 * (_one_config_approach(board, color) - _one_config_approach(board, opp))
 
     # Move-phase locked-mill penalty: penalise each own closed mill that has no
     # exit squares (every neighbour is opponent-occupied).  These mills contribute
@@ -748,6 +751,63 @@ def _assembly_step4_count(board: BoardState, color: str) -> int:
         if any(nb in step3   for nb in ADJACENCY[pos]):
             count += 1
     return count
+
+
+def _one_config_approach(board: BoardState, color: str) -> int:
+    """Weighted count of free pieces approaching empty squares in 1-config mills.
+
+    A 1-config mill has exactly one own piece and two empty squares.  Free own
+    pieces adjacent to those empty squares score 2 (step-1); pieces two hops
+    away score 1 (step-2).  Pieces already assigned to a closed mill, 2-config,
+    or the 1-config itself are excluded — they are already positioned.
+
+    This creates assembly pull toward nascent mills that the 2-config gradient
+    misses entirely (which requires an existing 2-config to start from).
+    Move phase only — fly phase ignores adjacency constraints.
+    """
+    in_mill: set[str] = set()
+    in_two:  set[str] = set()
+    in_one:  set[str] = set()
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if all(v == color for v in vals):
+            for p in mill: in_mill.add(p)
+        elif vals.count(color) == 2 and vals.count("") == 1:
+            for p in mill:
+                if board.positions[p] == color: in_two.add(p)
+        elif vals.count(color) == 1 and vals.count("") == 2:
+            for p in mill:
+                if board.positions[p] == color: in_one.add(p)
+
+    # Collect all empty squares that belong to a 1-config mill
+    target_empties: set[str] = set()
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 1 and vals.count("") == 2:
+            for p in mill:
+                if board.positions[p] == "":
+                    target_empties.add(p)
+
+    if not target_empties:
+        return 0
+
+    step1_halo: set[str] = set()
+    for sq in target_empties:
+        step1_halo.update(ADJACENCY[sq])
+
+    excluded = in_mill | in_two | in_one
+    score = 0
+    counted: set[str] = set()
+    for pos in POSITIONS:
+        if board.positions[pos] != color or pos in excluded or pos in counted:
+            continue
+        if any(nb in target_empties for nb in ADJACENCY[pos]):
+            score += 2   # step-1: adjacent to an empty 1-config square
+            counted.add(pos)
+        elif any(nb in step1_halo for nb in ADJACENCY[pos]):
+            score += 1   # step-2: two hops away
+            counted.add(pos)
+    return score
 
 
 def _opponent_ring_concentration(board: BoardState, opp: str) -> list[int]:

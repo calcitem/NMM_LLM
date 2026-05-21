@@ -872,10 +872,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         "to":          move.get("to"),
         "capture":     move.get("capture"),
         "was_blunder": bool(session.game_ai and session.game_ai.last_was_blunder),
-        # Only allow banning in movement/fly phase — placement bans can't persist
-        # across games (trajectory depth cutoff = 4 prior moves) and are too
-        # broad.  A placement move has from=None; movement/fly always has from.
-        "can_mark_bad": move.get("from") is not None,
+        "can_mark_bad": True,
     })
     await _commentary(ws, session)
     await _send(ws, _state(session))
