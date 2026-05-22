@@ -261,6 +261,36 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("btn-replay-opening").addEventListener("click", startReplayOpening);
   $("sel-opening").addEventListener("change", _showOpeningInfo);
+
+  // ── Opening rename / delete ───────────────────────────────────────────
+  $("btn-opening-rename").addEventListener("click", () => {
+    const id = $("sel-opening").value;
+    if (!id) return;
+    const op = _openingsData.find(o => o.id === id);
+    $("opening-rename-input").value = op ? op.name : "";
+    $("opening-rename-row").style.display = "flex";
+    $("opening-rename-input").focus();
+  });
+  $("btn-opening-rename-cancel").addEventListener("click", () => {
+    $("opening-rename-row").style.display = "none";
+  });
+  $("btn-opening-rename-save").addEventListener("click", _saveOpeningRename);
+  $("opening-rename-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") _saveOpeningRename();
+    if (e.key === "Escape") $("opening-rename-row").style.display = "none";
+  });
+  $("btn-opening-delete").addEventListener("click", () => {
+    const id = $("sel-opening").value;
+    if (!id) return;
+    const op = _openingsData.find(o => o.id === id);
+    const name = op ? op.name : id;
+    if (!window.confirm(`Delete opening "${name}"?\n\nThis cannot be easily undone.`)) return;
+    if (!ws) {
+      addCommentary("Error", "Connect first — start a new game.", "ai");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "prune_opening", opening_id: id }));
+  });
   $("btn-undo").addEventListener("click", () => {
     if (!ws || phase === "idle") return;
     ws.send(JSON.stringify({ type: "undo" }));
@@ -378,6 +408,28 @@ document.addEventListener("DOMContentLoaded", () => {
     $("tournament-intro").hidden = false;
     if (ws) ws.send(JSON.stringify({ type: "tournament_start" }));
   });
+
+  // ── AI vs AI ──────────────────────────────────────────────────────────
+  $("btn-ai-vs-ai").addEventListener("click", () => {
+    $("ava-modal").hidden = false;
+  });
+  $("ava-cancel-btn").addEventListener("click", () => {
+    $("ava-modal").hidden = true;
+  });
+  $("ava-modal").addEventListener("click", e => {
+    if (e.target === $("ava-modal")) $("ava-modal").hidden = true;
+  });
+  $("ava-start-btn").addEventListener("click", startAiVsAi);
+
+  // Live save-toggle: if game is running, notify the server immediately
+  $("ava-save-library").addEventListener("change", () => {
+    if (ws && ws.readyState === WebSocket.OPEN && isAiVsAi) {
+      ws.send(JSON.stringify({
+        type: "toggle_save_library",
+        save: $("ava-save-library").checked,
+      }));
+    }
+  });
 });
 
 function renderIdle() {
@@ -453,6 +505,71 @@ function startNewGame() {
   ws.onmessage = evt => handleMessage(JSON.parse(evt.data));
   ws.onerror   = () => setStatus("Connection error.");
   ws.onclose   = () => {
+    if (phase !== "game_over") setStatus("Disconnected.");
+  };
+}
+
+// ── AI vs AI ──────────────────────────────────────────────────────────────────
+
+let isAiVsAi = false;  // true during an AI-vs-AI game
+
+function startAiVsAi() {
+  const whiteP = $("ava-white-personality").value;
+  const blackP = $("ava-black-personality").value;
+  const diff   = parseInt($("ava-difficulty").value);
+  const save   = $("ava-save-library").checked;
+
+  $("ava-modal").hidden = true;
+
+  clearCommentary();
+  setStatus("Starting AI vs AI…");
+  phase = "idle";
+  isAiVsAi = true;
+  evalHistory = [];
+  hintsLeft = 0;
+  drawUnlocked = false;
+  forceAggressive = false;
+  replayMoves = [];
+  replayIdx   = -1;
+  _updateReplayLabel();
+  _setReplayButtonsDisabled(true);
+  $("btn-force-cap").disabled = true;
+  drawEvalGraph();
+  renderMoves([]);
+  $("btn-undo").disabled = true;
+  $("btn-force-move").hidden = false;
+  $("btn-bad-move").hidden = true;
+  canMarkBad = false;
+  $("btn-good-game").hidden = true;
+  canMarkGoodGame = false;
+  stopThinkingTimer();
+  updateHintButton(false);
+  updateDrawButton();
+  isVsHuman = false;
+  _updateHandoffButtons();
+
+  if (ws) { ws.close(); ws = null; }
+
+  const wsUrl = `ws://${location.host}/ws`;
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type:               "start_ai_vs_ai",
+      white_personality:  whiteP,
+      black_personality:  blackP,
+      difficulty_white:   diff,
+      difficulty_black:   diff,
+      save_to_library:    save,
+      use_llm:            $("chk-llm").checked,
+    }));
+    $("settings-panel").hidden = true;
+  };
+
+  ws.onmessage = evt => handleMessage(JSON.parse(evt.data));
+  ws.onerror   = () => setStatus("Connection error.");
+  ws.onclose   = () => {
+    isAiVsAi = false;
     if (phase !== "game_over") setStatus("Disconnected.");
   };
 }
@@ -697,7 +814,8 @@ function handleMessage(msg) {
           ws.send(JSON.stringify({ type: "force_aggressive", active: false }));
         }
       }
-      $("btn-bad-move").hidden = !canMarkBad;
+      // B: hide Bad Move button during opening replay
+      $("btn-bad-move").hidden = !canMarkBad || !!msg.opening_active;
       if (msg.is_human_turn && replayIdx === -1) {
         setStatus(
           msg.phase === "place"
@@ -730,6 +848,12 @@ function handleMessage(msg) {
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
       addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
+      if (msg.thinking) {
+        const showReasoning = $("showReasoning");
+        if (showReasoning && showReasoning.checked) {
+          addThinkingTrace(msg.thinking);
+        }
+      }
       if (msg.can_mark_bad) {
         canMarkBad = true;
         lastAiBadMoveDesc = msg.from + "→" + msg.to + (msg.capture ? "×" + msg.capture : "");
@@ -764,6 +888,14 @@ function handleMessage(msg) {
       }
       break;
 
+    case "save_library_ack":
+      addCommentary("Game",
+        msg.save
+          ? "Game will be saved to library on completion."
+          : "Game will NOT be saved to library.",
+        "ai");
+      break;
+
     case "game_over": {
       phase = "game_over";
       stopThinkingTimer();
@@ -771,9 +903,10 @@ function handleMessage(msg) {
       canMarkBad = false;
       $("btn-bad-move").hidden = true;
       // Show Good Game after a draw in AI vs human (reinforces strong AI play)
-      canMarkGoodGame = !msg.winner && !isVsHuman;
+      canMarkGoodGame = !msg.winner && !isVsHuman && !isAiVsAi;
       $("btn-good-game").hidden = !canMarkGoodGame;
       isVsHuman = false;
+      isAiVsAi = false;
       _updateHandoffButtons();
       const isResign = msg.result === "ai_resignation";
       const statusText = isResign
@@ -907,6 +1040,11 @@ function handleMessage(msg) {
     case "rename_opening_ack":
       _loadOpenings();
       addCommentary("[Opening]", `Saved as "${msg.name}".`, "ai");
+      break;
+
+    case "prune_opening_ack":
+      _loadOpenings();
+      addCommentary("[Opening]", `Opening deleted.`, "ai");
       break;
 
     case "error":
@@ -1456,6 +1594,18 @@ function clearCommentary() {
   if (a) a.innerHTML = "";
 }
 
+function addThinkingTrace(thinking) {
+  // Insert a small italic reasoning line after the most recent GameAI commentary entry.
+  // Targets the AI Discussion feed (commentary-ai).
+  const feed = $("commentary-ai");
+  if (!feed || !thinking) return;
+  const span = document.createElement("span");
+  span.className = "ai-thinking";
+  span.textContent = "↳ " + thinking;
+  // Prepend so it sits below the "Played …" line at the top of the feed.
+  feed.insertBefore(span, feed.firstChild);
+}
+
 // ── Openings panel ────────────────────────────────────────────────────────────
 
 function _loadOpenings() {
@@ -1522,6 +1672,19 @@ function startReplayOpening() {
     continue_mode: mode,
   }));
   setStatus("Replaying opening…");
+}
+
+// E: Save an inline rename for the currently selected opening
+function _saveOpeningRename() {
+  const id   = $("sel-opening").value;
+  const name = $("opening-rename-input").value.trim();
+  if (!id || !name) return;
+  if (!ws) {
+    addCommentary("Error", "Connect first — start a new game.", "ai");
+    return;
+  }
+  ws.send(JSON.stringify({ type: "rename_opening", opening_id: id, name }));
+  $("opening-rename-row").style.display = "none";
 }
 
 // ── AI weight sliders (Stage 5.13) ────────────────────────────────────────────

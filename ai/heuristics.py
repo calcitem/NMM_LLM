@@ -1741,7 +1741,8 @@ def tactical_move_bonus(
     color: str,
     weights: HeuristicWeights | None = None,
     opp_last_weak: bool = False,
-) -> int:
+    return_breakdown: bool = False,
+) -> "int | dict":
     """Delta-based tactical bonus added directly to the root-move score.
 
     Applied in _score_all / _root_search AFTER the negamax score is computed,
@@ -2335,44 +2336,55 @@ def tactical_move_bonus(
                     freedom_diff = best_f - worst_f
                     cycling_block_bonus = int(weights.block_cycling_priority * (1 + freedom_diff * 0.1))
 
-    return (
-        close_mill_contribution                   # PAT-1 suppressed when isolated mill in early placement
-        + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
-        + cycling_close_bonus
-        + weights.block_opponent_mill * blocked
-        + weights.stop_opponent_mills * two_cfg_broken
-        + weights.feeder_diamond      * diamond_gain
-        + weights.mill_wrapping       * wrap_gain
-        + weights.cardinal_block      * (our_cross_gained + opp_cross_lost)
-        + scatter
-        + setup_mill_bonus
-        + mill_open_bonus
-        + patience_forcing_bonus                  # PAT-3 companion when mill-open suppressed
-        + late_mill_bonus
-        + trap_build_bonus
-        + fly_fork_bonus
-        + mob_reduction_bonus
-        + capture_feeder_bonus
-        + capture_diamond_bonus
-        + capture_creates_diamond_bonus            # B-17 pattern A
-        + capture_activates_feeder_bonus           # B-17 pattern B
-        + capture_creates_convergence_bonus        # B-17 pattern C
-        + busy_chain_bonus
-        + pat2_bonus                               # PAT-2 dual-threat placement reward
-        + conv_bonus
-        + dmc_bonus
-        + cross_feed_delta_bonus
-        + safe_capture_bonus
-        + fly_free_close_bonus
-        + ring_cardinal_bonus
-        + fork_anticip_bonus
-        + locked_escape_bonus
-        + redirected_pin_bonus
-        + cycling_block_bonus
-        - outer_mill_penalty
-        - ring_crowd_penalty
-        - consolidation_penalty_val               # B-10 vacated-square threat
-    )
+    _contributions = [
+        ("Closed mill",                    close_mill_contribution),
+        ("Cycling mill setup",             weights.cycling_mill * (cycling_gain + opp_cycle_lost)),
+        ("Cycling close",                  cycling_close_bonus),
+        ("Blocked opponent mill",          weights.block_opponent_mill * blocked),
+        ("Stopped opponent 2-config",      weights.stop_opponent_mills * two_cfg_broken),
+        ("Gained diamond/fork",            weights.feeder_diamond * diamond_gain),
+        ("Mill wrap pressure",             weights.mill_wrapping * wrap_gain),
+        ("Cardinal/cross control",         weights.cardinal_block * (our_cross_gained + opp_cross_lost)),
+        ("Early scatter placement",        scatter),
+        ("Setup mill (2-config gained)",   setup_mill_bonus),
+        ("Mill opening bonus",             mill_open_bonus),
+        ("Patience forcing",               patience_forcing_bonus),
+        ("Late placement mill",            late_mill_bonus),
+        ("Mill trap builder",              trap_build_bonus),
+        ("Fly-phase fork creation",        fly_fork_bonus),
+        ("Mobility reduction",             mob_reduction_bonus),
+        ("Captured feeder piece",          capture_feeder_bonus),
+        ("Captured diamond piece",         capture_diamond_bonus),
+        ("Capture creates diamond (B-17A)", capture_creates_diamond_bonus),
+        ("Capture activates feeder (B-17B)", capture_activates_feeder_bonus),
+        ("Capture creates convergence (B-17C)", capture_creates_convergence_bonus),
+        ("Busy chain placement",           busy_chain_bonus),
+        ("Dual-threat placement (PAT-2)",  pat2_bonus),
+        ("Convergence cluster disruption", conv_bonus),
+        ("Disrupted opponent fork (DMC)",  dmc_bonus),
+        ("Cross-feed delta (B-16)",        cross_feed_delta_bonus),
+        ("Safe capture (all threats gone)", safe_capture_bonus),
+        ("Fly free-close bonus",           fly_free_close_bonus),
+        ("Ring cardinal placement",        ring_cardinal_bonus),
+        ("Fork anticipation (B-4)",        fork_anticip_bonus),
+        ("Locked mill escape (B-7)",       locked_escape_bonus),
+        ("Redirected pin (B-7)",           redirected_pin_bonus),
+        ("Forked-mill block (B-8)",        cycling_block_bonus),
+        ("Outer-ring mill penalty",        -outer_mill_penalty),
+        ("Ring crowding penalty",          -ring_crowd_penalty),
+        ("Consolidation penalty (B-10)",   -consolidation_penalty_val),
+    ]
+    _total = sum(v for _, v in _contributions)
+
+    if return_breakdown:
+        _top = sorted(
+            [(lbl, val) for lbl, val in _contributions if val != 0],
+            key=lambda x: abs(x[1]),
+            reverse=True,
+        )[:3]
+        return {"total": _total, "top_terms": _top}
+
+    return _total
 
 
 # ── Endgame supplement ────────────────────────────────────────────────────────

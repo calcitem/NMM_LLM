@@ -11,6 +11,106 @@ if TYPE_CHECKING:
 
 _MAX_HISTORY = 16
 
+# ── Mill names ─────────────────────────────────────────────────────────────────
+# Keys are the exact 3-tuples from game.board.MILLS, in the same order.
+
+MILL_NAMES: dict[tuple[str, str, str], str] = {
+    # Outer ring
+    ("a7", "d7", "g7"): "Outer top",
+    ("g7", "g4", "g1"): "Outer right",
+    ("g1", "d1", "a1"): "Outer bottom",
+    ("a1", "a4", "a7"): "Outer left",
+    # Middle ring
+    ("b6", "d6", "f6"): "Middle top",
+    ("f6", "f4", "f2"): "Middle right",
+    ("f2", "d2", "b2"): "Middle bottom",
+    ("b2", "b4", "b6"): "Middle left",
+    # Inner ring
+    ("c5", "d5", "e5"): "Inner top",
+    ("e5", "e4", "e3"): "Inner right",
+    ("e3", "d3", "c3"): "Inner bottom",
+    ("c3", "c4", "c5"): "Inner left",
+    # Cross-ring connecting lines
+    ("d7", "d6", "d5"): "d-column top",
+    ("g4", "f4", "e4"): "g-row",
+    ("d1", "d2", "d3"): "d-col bottom",
+    ("a4", "b4", "c4"): "a-row",
+}
+
+
+def _board_summary(board: "BoardState") -> str:
+    """Return a structured POSITION SUMMARY block for LLM prompts.
+
+    Includes: phase (per-side), piece counts (on board / in hand),
+    closed mills by name, two-piece threats with their closing squares,
+    and legal-move mobility counts for each side.
+    """
+    from game.board import MILLS
+    from game.rules import get_game_phase
+
+    lines: list[str] = ["POSITION SUMMARY:"]
+
+    # Phase — per side, shown as single label when equal, else "W <x>, B <y>"
+    phase_w = get_game_phase(board, "W")
+    phase_b = get_game_phase(board, "B")
+    if phase_w == phase_b:
+        lines.append(f"Phase: {phase_w}")
+    else:
+        lines.append(f"Phase: W {phase_w}, B {phase_b}")
+
+    # Piece counts: on board and in hand (pieces not yet placed)
+    in_hand_w = max(0, 9 - board.pieces_placed["W"])
+    in_hand_b = max(0, 9 - board.pieces_placed["B"])
+    on_board_w = board.pieces_on_board["W"]
+    on_board_b = board.pieces_on_board["B"]
+    lines.append(
+        f"White: {on_board_w} on board ({in_hand_w} in hand) | "
+        f"Black: {on_board_b} on board ({in_hand_b} in hand)"
+    )
+
+    # Closed mills (all 3 squares owned by the same player)
+    for color, label in (("W", "White"), ("B", "Black")):
+        closed = [
+            mill for mill in MILLS
+            if all(board.positions[p] == color for p in mill)
+        ]
+        if closed:
+            names = ", ".join(
+                f"{MILL_NAMES.get(mill, '-'.join(mill))} ({'-'.join(mill)})"
+                for mill in closed
+            )
+            lines.append(f"Closed mills — {label}: {names}")
+
+    # Two-piece threats (2-configs) with closing square
+    for color, label in (("W", "White"), ("B", "Black")):
+        threats: list[str] = []
+        for mill in MILLS:
+            vals = [board.positions[p] for p in mill]
+            if vals.count(color) == 2 and vals.count("") == 1:
+                closing = next(p for p in mill if board.positions[p] == "")
+                filled = [p for p in mill if board.positions[p] == color]
+                name = MILL_NAMES.get(mill, '-'.join(mill))
+                threats.append(
+                    f"{name} ({'-'.join(filled)} — closes at {closing})"
+                )
+        if threats:
+            lines.append(f"Threats — {label}: {'; '.join(threats)}")
+
+    # Mobility: count legal moves for each side
+    # For the side not to move we temporarily flip the turn.
+    def _mobility_count(b: "BoardState", color: str) -> int:
+        """Count distinct source→dest pairs, ignoring capture combinations."""
+        phase = get_game_phase(b, color)
+        if phase == "place":
+            return len(b.legal_placements(color))
+        return len(b.legal_moves(color))
+
+    mob_w = _mobility_count(board, "W")
+    mob_b = _mobility_count(board, "B")
+    lines.append(f"Mobility: White {mob_w} moves | Black {mob_b} moves")
+
+    return "\n".join(lines)
+
 _BOARD_RULES = """\
 You are MillsAI, an assistant for Nine Men's Morris.
 Also called: Mills, Mühle, Merels.
@@ -383,6 +483,8 @@ class MillsLLM:
             f"ENGINE TOP CHOICE: {ai_notation}",
             f"ENGINE SCORE: {score_hint}",
             "",
+            _board_summary(board),
+            "",
             "BOARD:",
             board.to_display_grid(),
         ]
@@ -478,6 +580,8 @@ No other text.
             f"{color_ctx}HUMAN MOVE: {move_notation}",
             f"SCORE CHANGE: {delta:+.2f}",
             "",
+            _board_summary(board_before),
+            "",
             "BOARD AFTER MOVE:",
             board_before.to_display_grid(),
         ]
@@ -520,7 +624,8 @@ No other text.
             f"{color_ctx}HUMAN MOVE: {move_notation}\n"
             f"MOVE QUALITY (0=worst, 1=best): {score:.2f}\n"
             f"{history_block}\n"
-            f"BOARD:\n{board.to_display_grid()}"
+            f"{_board_summary(board)}\n"
+            f"\nBOARD:\n{board.to_display_grid()}"
         )
         reply = self._chat(_POSITIVE_COMMENT_SYSTEM, user, keep_history=False)
         if not reply or reply.strip() == "NO_COMMENT":
@@ -534,7 +639,11 @@ No other text.
         move_notation = _move_to_notation(move)
         color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
         history_block = _move_history_block(move_history) if move_history else ""
-        user = f"{color_ctx}HUMAN MILL + CAPTURE: {move_notation}{history_block}\n\nBOARD:\n{board.to_display_grid()}"
+        user = (
+            f"{color_ctx}HUMAN MILL + CAPTURE: {move_notation}{history_block}\n"
+            f"\n{_board_summary(board)}\n"
+            f"\nBOARD:\n{board.to_display_grid()}"
+        )
         reply = self._chat(_MILL_COMMENT_SYSTEM, user, keep_history=False)
         return reply.strip() if reply else None
 
@@ -543,12 +652,16 @@ No other text.
     ) -> str | None:
         color_ctx = f"HUMAN PLAYS AS: {'White' if human_color == 'W' else 'Black'}\n" if human_color else ""
         history_block = _move_history_block(move_history) if move_history else ""
-        user = f"{color_ctx}{history_block}\nBOARD:\n{board.to_display_grid()}"
+        user = (
+            f"{color_ctx}{history_block}\n"
+            f"{_board_summary(board)}\n"
+            f"\nBOARD:\n{board.to_display_grid()}"
+        )
         reply = self._chat(_POSITION_QUESTION_SYSTEM, user, keep_history=False)
         return reply.strip() if reply.strip() else None
 
     def generate_question_for_human(self, board: "BoardState") -> str | None:
-        user = f"BOARD:\n{board.to_display_grid()}"
+        user = f"{_board_summary(board)}\n\nBOARD:\n{board.to_display_grid()}"
         reply = self._chat(_QUESTION_SYSTEM, user, keep_history=False)
         return reply.strip() if reply.strip() else None
 
@@ -557,11 +670,15 @@ No other text.
     ) -> str:
         """Respond to an in-game message from the human player."""
         history_block = _move_history_block(move_history) if move_history else ""
-        user = f"Player: {message}{history_block}\n\nCURRENT BOARD:\n{board.to_display_grid()}"
+        user = (
+            f"Player: {message}{history_block}\n"
+            f"\n{_board_summary(board)}\n"
+            f"\nCURRENT BOARD:\n{board.to_display_grid()}"
+        )
         reply = self._chat(_PLAYER_CHAT_SYSTEM, user, keep_history=True)
         return reply.strip() if reply else ""
 
-    def summarise_session(self, game_records: list[dict]) -> str:
+    def summarise_session(self, game_records: list[dict], facts_block: str = "") -> str:
         if not game_records:
             return ""
         lines = []
@@ -575,7 +692,10 @@ No other text.
                 f"total_moves={len(moves)} "
                 f"move_sequence: {move_seq}"
             )
-        return self._chat(_SESSION_SYSTEM, "\n".join(lines), keep_history=False)
+        user_content = "\n".join(lines)
+        if facts_block:
+            user_content = facts_block + "\n\n" + user_content
+        return self._chat(_SESSION_SYSTEM, user_content, keep_history=False)
 
     def name_novel_opening(self, move_sequence: list[str]) -> str:
         move_str = ", ".join(move_sequence)

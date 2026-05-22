@@ -68,6 +68,7 @@ class Coordinator:
         self._last_novel_id: str | None = None   # set when an unnamed opening is saved
         self._dominant_turn_streak: int = 0
         self.resignation_offered: bool = False
+        self.last_thinking: str = ""   # plain-English label for the most recent AI move
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ class Coordinator:
         self._session_id = str(uuid.uuid4())
         self._dominant_turn_streak = 0
         self.resignation_offered = False
+        self.last_thinking = ""
         self.dialogue_log.clear()
         self.mills_llm.conversation_history.clear()
         self.mills_llm.narrative_memory = ""
@@ -157,6 +159,61 @@ class Coordinator:
                 f"Last {len(recent)} games:\n" + "\n".join(game_summaries)
             )
 
+    @staticmethod
+    def _build_game_facts(game_record: dict) -> str:
+        """Build an authoritative GAME FACTS block to ground the session summary LLM prompt.
+
+        Derives piece counts and termination reason from the move list rather than
+        relying on the LLM to infer them from an ASCII board (which can hallucinate).
+        """
+        moves = game_record.get("moves", [])
+        total_half_moves = len(moves)
+        winner = game_record.get("winner")
+
+        # Compute final piece counts by replaying placement / capture events.
+        # Start with 0 pieces on board; each "place" type adds one, each capture removes one.
+        on_board = {"W": 0, "B": 0}
+        for m in moves:
+            color = m.get("color", "")
+            if m.get("type") == "place" and color in on_board:
+                on_board[color] += 1
+            cap = m.get("capture")
+            if cap:
+                # The captured piece belongs to the opponent of the mover
+                opp = "B" if color == "W" else "W"
+                on_board[opp] = max(0, on_board[opp] - 1)
+
+        w_pieces = on_board["W"]
+        b_pieces = on_board["B"]
+
+        # Derive termination reason.
+        # Check resignation flag first (set by coordinator before on_game_end).
+        # Then infer from final piece counts: if the losing side has ≤ 2 pieces, piece-loss.
+        # Otherwise assume no-legal-moves (blockade).
+        if winner and game_record.get("result") == "ai_resignation":
+            termination = "resignation"
+        elif winner == "W" and b_pieces <= 2:
+            termination = "piece-loss"
+        elif winner == "B" and w_pieces <= 2:
+            termination = "piece-loss"
+        elif winner in ("W", "B"):
+            termination = "no-legal-moves"
+        else:
+            termination = "draw-or-stalemate"
+
+        winner_label = (
+            "White" if winner == "W"
+            else ("Black" if winner == "B" else "Draw")
+        )
+
+        return (
+            "GAME FACTS (authoritative — do not contradict):\n"
+            f"  Total half-moves: {total_half_moves}\n"
+            f"  Termination: {termination}\n"
+            f"  Final piece counts: White {w_pieces}, Black {b_pieces}\n"
+            f"  Winner: {winner_label}"
+        )
+
     def on_game_end(self, game_record: dict) -> None:
         self.memory.save_game_record(game_record)
         if self.trajectory_db is not None:
@@ -180,7 +237,8 @@ class Coordinator:
                     human_color=human_color,
                 )
 
-        summary = self.mills_llm.summarise_session([game_record])
+        facts_block = self._build_game_facts(game_record)
+        summary = self.mills_llm.summarise_session([game_record], facts_block=facts_block)
         if summary:
             self.memory.save_session_narrative(summary)
             self.emit("MillsAI", summary)
@@ -220,34 +278,35 @@ class Coordinator:
             )
             if winner in ("W", "B", "D"):
                 canonical.outcome_stats[winner] = canonical.outcome_stats.get(winner, 0) + 1
-            # Name it now if it's still carrying an auto-generated placeholder
+            # F: Always prompt the player to confirm/edit the name.
+            # If LLM is available and the opening needs a name, ask LLM for a
+            # suggestion but keep needs_llm_name=True so the frontend prompt fires.
             if is_auto_named(canonical.name) or canonical.needs_llm_name:
-                name = self.mills_llm.name_novel_opening(canonical.line_moves)
-                if name and not is_auto_named(name):
-                    canonical.name = name
-                    canonical.needs_llm_name = False
-                    self.emit("MillsAI", f"Named this opening family \"{name}\"")
+                llm_name = self.mills_llm.name_novel_opening(canonical.line_moves)
+                if llm_name and not is_auto_named(llm_name):
+                    # Store the LLM suggestion as the current name but leave
+                    # needs_llm_name=True so the user is still prompted to confirm.
+                    canonical.name = llm_name
+                canonical.needs_llm_name = True
             book.save_opening(canonical)
-            if canonical.needs_llm_name or is_auto_named(canonical.name):
-                self._last_novel_id = canonical.opening_id
+            # Always surface the prompt so the player can confirm or rename.
+            self._last_novel_id = canonical.opening_id
             return
 
         # No similar opening — create a new one.
         llm_available = self.mills_llm._client is not None
         name = self.mills_llm.name_novel_opening(placement_moves)
         sigs = self._compute_fen_signatures(placement_moves)
-        needs_name = is_auto_named(name) or not llm_available
+        # F: Always mark needs_llm_name=True and set _last_novel_id so the
+        # frontend prompts the player to confirm/edit the name before it is saved.
         novel = book.save_novel_opening(
             placement_moves, sigs,
             outcome=winner,
-            needs_llm_name=needs_name,
+            needs_llm_name=True,
         )
-        novel.name = name
+        novel.name = name  # LLM suggestion (or auto-name if LLM unavailable)
         book.save_opening(novel)
-        if needs_name:
-            self._last_novel_id = novel.opening_id
-        else:
-            self.emit("MillsAI", f"I've recorded this opening as \"{name}\"")
+        self._last_novel_id = novel.opening_id
 
     # ── Tactical pre-screen ───────────────────────────────────────────────────
 
@@ -261,7 +320,7 @@ class Coordinator:
             detect_double_mills, detect_feeder_mills,
             detect_diamonds, opponent_mills_in_n_moves,
         )
-        from ai.heuristics import _closeable_mills
+        from ai.heuristics import _closeable_mills, _fly_sacrifice_quality
         ai_color  = board.turn
         opp_color = "B" if ai_color == "W" else "W"
 
@@ -272,14 +331,23 @@ class Coordinator:
         opp_diamonds   = detect_diamonds(board, opp_color)
         opp_threats_2  = opponent_mills_in_n_moves(board, opp_color, n=2)
 
+        ai_pieces  = board.pieces_on_board[ai_color]
+        opp_pieces = board.pieces_on_board[opp_color]
+        sacrifice_viable = (
+            ai_pieces == 6 and opp_pieces == 4
+            and get_game_phase(board, ai_color) == "move"
+            and _fly_sacrifice_quality(board, ai_color) > 0
+        )
+
         return {
-            "urgent":             can_close or opp_can_close or bool(opp_doubles),
-            "can_close_mill":     can_close,
-            "must_block_opponent": opp_can_close,
-            "opp_double_mills":   opp_doubles,
-            "ai_double_mills":    ai_doubles,
-            "opp_diamonds":       opp_diamonds,
-            "opp_threats_in_2":  opp_threats_2,
+            "urgent":               can_close or opp_can_close or bool(opp_doubles),
+            "can_close_mill":       can_close,
+            "must_block_opponent":  opp_can_close,
+            "opp_double_mills":     opp_doubles,
+            "ai_double_mills":      ai_doubles,
+            "opp_diamonds":         opp_diamonds,
+            "opp_threats_in_2":    opp_threats_2,
+            "6v4_sacrifice_viable": sacrifice_viable,
         }
 
     # ── AI deliberation ───────────────────────────────────────────────────────
@@ -400,6 +468,8 @@ class Coordinator:
         elif tac["opp_double_mills"]:
             pivots = ", ".join(tac["opp_double_mills"][:2])
             self.emit("GameAI", f"Disrupting opponent cycling mill pivot at {pivots}")
+        elif tac.get("6v4_sacrifice_viable"):
+            self.emit("GameAI", "6v4 position — own fly nucleus ready, evaluating sacrifice path to winning endgame")
 
         # 4. GameAI picks its best move (with opening bonus, trajectory hints, endgame depth)
         # Force the book move for the AI's first 2 placements so opening variety is
@@ -417,6 +487,7 @@ class Coordinator:
             trajectory_hints=trajectory_hints,
             force_book_early=force_book_early,
         )
+        self.last_thinking = self.game_ai.last_thinking
         ai_score = self.game_ai.score_move(board, ai_move)
 
         # 5. Expose score hint to MillsLLM for its prompt

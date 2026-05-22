@@ -416,6 +416,19 @@ class Session:
         self.is_tournament_game: bool = False
         self._last_game_record: Optional[dict] = None  # stored after game ends for good_game
         self.opening_recognizer: Optional["OpeningRecognizer"] = None  # no-LLM recognition
+        self.opening_active: bool = False  # True while an opening replay is streaming
+        # ── AI-vs-AI fields ──────────────────────────────────────────────────────
+        self.ai_vs_ai: bool = False
+        self.save_to_library: bool = False
+        # Per-side AI + coordinator for AI-vs-AI games
+        self.game_ai_white: Optional[GameAI] = None
+        self.game_ai_black: Optional[GameAI] = None
+        self.coordinator_white: Optional[Coordinator] = None
+        self.coordinator_black: Optional[Coordinator] = None
+        self.white_personality: str = ""
+        self.black_personality: str = ""
+        # Background task handle for AI-vs-AI loop
+        self._ava_task: Optional[asyncio.Task] = None
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -583,7 +596,7 @@ def _state(session: Session) -> dict:
         "board":            dict(board.positions),
         "turn":             color,
         "phase":            phase,
-        "is_human_turn":    session.vs_human or color == session.human_color,
+        "is_human_turn":    (not session.ai_vs_ai) and (session.vs_human or color == session.human_color),
         "human_color":      session.human_color,
         "pieces_placed":    dict(board.pieces_placed),
         "pieces_captured":  dict(board.pieces_captured),
@@ -610,6 +623,7 @@ def _state(session: Session) -> dict:
             if session.adaptive and not session.vs_human
             else None
         ),
+        "opening_active":   session.opening_active,
         "moves":            [
             {
                 "color":    m["color"],
@@ -680,6 +694,29 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
     if adaptive_action:
         payload["adaptive"] = adaptive_action
     await _send(ws, payload)
+
+    # ── AI-vs-AI persistence ─────────────────────────────────────────────────────
+    if session.ai_vs_ai:
+        if session.save_to_library:
+            record = dict(session.engine.game_record)
+            record["winner"]            = winner
+            record["ai_vs_ai"]          = True
+            record["white_personality"] = session.white_personality
+            record["black_personality"] = session.black_personality
+            if draw_reason:
+                record["draw_reason"] = draw_reason
+            session._last_game_record = record
+            await asyncio.to_thread(_persist_game_record, record)
+            if _trajectory_db is not None:
+                await asyncio.to_thread(_trajectory_db.add_game, record)
+            if _endgame_db is not None:
+                await asyncio.to_thread(_endgame_db.add_game, record)
+            asyncio.create_task(_maybe_consolidate(ws))
+            log.info("AI-vs-AI game saved  winner=%s white=%s black=%s",
+                     winner, session.white_personality, session.black_personality)
+        else:
+            log.info("AI-vs-AI game not saved (save_to_library=False)")
+        return
 
     if session.coordinator:
         record = session.coordinator.build_game_record(
@@ -782,6 +819,126 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
         asyncio.create_task(_maybe_consolidate(ws))
 
 
+def _make_game_ai_for_personality(color: str, personality: str, difficulty: int) -> GameAI:
+    """Build a GameAI instance using the server-canonical personality weights."""
+    _p_w = _PERSONALITY_WEIGHTS.get(personality, {})
+    _aw  = {**_evolved_weights, **_p_w}
+    def _w(key, default): return int(_aw.get(key, default))
+    hw = HeuristicWeights(
+        close_mill=_w("close_mill", 500),
+        cycling_mill=_w("cycling_mill", 300),
+        block_opponent_mill=_w("block_opponent_mill", 400),
+        stop_opponent_mills=_w("stop_opponent_mills", 450),
+        feeder_diamond=_w("feeder_diamond", 200),
+        mill_wrapping=_w("mill_wrapping", 150),
+        cardinal_block=_w("cardinal_block", 400),
+        scatter_placement=_w("scatter_placement", 100),
+        setup_mill=_w("setup_mill", 150),
+        mill_opening=_w("mill_opening", 200),
+        long_term_position=_w("long_term_position", 100),
+        mill_count_scale=_w("mill_count_scale", 100),
+        mobility_scale=_w("mobility_scale", 100),
+        blocked_scale=_w("blocked_scale", 100),
+        make_mistakes=_w("make_mistakes", 0),
+        opening_adherence=_w("opening_adherence", 50),
+    )
+    return GameAI(
+        color=color, difficulty=difficulty, weights=hw,
+        blunder_probability=hw.make_mistakes / 100.0,
+    )
+
+
+async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
+    """Drive an AI-vs-AI game: alternate moves for W and B until the game ends."""
+    import time as _time
+    log.info("AI-vs-AI loop started  white=%s black=%s save=%s",
+             session.white_personality, session.black_personality, session.save_to_library)
+    try:
+        while not session.engine.finished:
+            board = session.engine.board
+            color = board.turn
+            game_ai    = session.game_ai_white if color == "W" else session.game_ai_black
+            coord      = session.coordinator_white if color == "W" else session.coordinator_black
+            opp_coord  = session.coordinator_black if color == "W" else session.coordinator_white
+
+            if game_ai is None:
+                log.error("AI-vs-AI: no game_ai for color=%s — aborting", color)
+                break
+
+            total = sum(board.pieces_on_board.values())
+            diff  = game_ai.difficulty
+            exp   = _expected_think_seconds(diff, total)
+
+            await _send(ws, {
+                "type":             "thinking",
+                "color":            color,
+                "expected_seconds": exp,
+            })
+
+            t0 = _time.time()
+            try:
+                if coord:
+                    move = await asyncio.to_thread(coord.deliberate, board)
+                else:
+                    move = await asyncio.to_thread(game_ai.choose_move, board)
+            except Exception as exc:
+                log.error("AI-vs-AI deliberation failed: %s", exc, exc_info=True)
+                await _send(ws, {"type": "error", "message": f"AI error: {exc}"})
+                return
+
+            elapsed = _time.time() - t0
+            log.info("AI-vs-AI move  color=%s move=%s elapsed=%.2fs", color, move, elapsed)
+
+            # Check board identity (shouldn't change, but guard anyway)
+            if session.engine.board is not board:
+                log.warning("AI-vs-AI: stale move discarded")
+                break
+
+            session.engine.apply_move(move)
+
+            await _send(ws, {
+                "type":        "ai_move",
+                "from":        move.get("from"),
+                "to":          move.get("to"),
+                "capture":     move.get("capture"),
+                "was_blunder": bool(game_ai.last_was_blunder),
+                "can_mark_bad": False,
+            })
+
+            # Flush commentary from the active coordinator
+            if coord:
+                for line in coord.flush_dialogue():
+                    speaker, text, section = _classify_commentary(line)
+                    await _send(ws, {
+                        "type": "commentary",
+                        "speaker": speaker,
+                        "text": text,
+                        "section": section,
+                    })
+
+            await _send(ws, _state(session))
+
+            if session.engine.finished:
+                break
+
+            # Brief pause so the board animates move-by-move
+            await asyncio.sleep(1.0)
+
+        # Game ended — send game_over and handle persistence
+        await _game_over(ws, session)
+    except asyncio.CancelledError:
+        log.info("AI-vs-AI loop cancelled")
+    except Exception as exc:
+        log.error("AI-vs-AI loop error: %s", exc, exc_info=True)
+        try:
+            await _send(ws, {"type": "error", "message": str(exc)})
+        except Exception:
+            pass
+    finally:
+        session._ava_task = None
+        log.info("AI-vs-AI loop finished")
+
+
 def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
     if total_pieces < 10:
         return 4.0
@@ -866,14 +1023,17 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     if session.opening_recognizer and not session.coordinator and move.get("from") is None:
         session.opening_recognizer.update(move.get("to", ""), session.engine.board)
 
-    await _send(ws, {
+    _ai_move_msg: dict = {
         "type":        "ai_move",
         "from":        move.get("from"),
         "to":          move.get("to"),
         "capture":     move.get("capture"),
         "was_blunder": bool(session.game_ai and session.game_ai.last_was_blunder),
         "can_mark_bad": True,
-    })
+    }
+    if session.coordinator and session.coordinator.last_thinking:
+        _ai_move_msg["thinking"] = session.coordinator.last_thinking
+    await _send(ws, _ai_move_msg)
     await _commentary(ws, session)
     await _send(ws, _state(session))
 
@@ -905,7 +1065,7 @@ async def ws_endpoint(websocket: WebSocket):
         session_games += 1
 
         # Update player profile on every non-tournament human-vs-AI game
-        if player_name and session and not session.vs_human and not session.is_tournament_game:
+        if player_name and session and not session.vs_human and not session.is_tournament_game and not session.ai_vs_ai:
             human_won = (
                 None if not session.engine.winner
                 else session.engine.winner == session.human_color
@@ -985,7 +1145,13 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── force_move — interrupt AI; received while AI task runs ────────
             if kind == "force_move":
-                if session and session.game_ai:
+                if session and session.ai_vs_ai:
+                    # Stop whichever side is currently computing
+                    color = session.engine.board.turn if session.engine else "W"
+                    ai_to_stop = session.game_ai_white if color == "W" else session.game_ai_black
+                    if ai_to_stop:
+                        ai_to_stop.force_stop()
+                elif session and session.game_ai:
                     session.game_ai.force_stop()
                 continue
 
@@ -1199,6 +1365,10 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── bad_move — mark last AI move as bad, undo it, re-deliberate ───
             elif kind == "bad_move" and session and session.game_ai:
+                # B: Ignore bad-move reports during opening replay
+                if session.opening_active:
+                    log.warning("bad_move ignored — opening replay is active")
+                    continue
                 if not session._can_undo_ai or session._last_ai_move is None:
                     await _send(websocket, {"type": "error", "message": "Nothing to undo"})
                     continue
@@ -1591,6 +1761,8 @@ async def ws_endpoint(websocket: WebSocket):
                     human_color="B",
                     vs_human=(continue_mode == "practice"),
                 )
+                # B: mark opening replay active so bad_move reports are ignored
+                new_session.opening_active = True
                 session = new_session  # noqa: F841 — reassign nonlocal
 
                 # Send initial state to reset the client board
@@ -1642,7 +1814,10 @@ async def ws_endpoint(websocket: WebSocket):
                     if session.engine.finished:
                         break
 
-                # Post-replay message
+                # B: opening replay complete — clear flag
+                session.opening_active = False
+
+                # Post-replay: set up continuation
                 if continue_mode == "practice":
                     await _send(websocket, {
                         "type":    "commentary",
@@ -1651,12 +1826,35 @@ async def ws_endpoint(websocket: WebSocket):
                         "section": "ai",
                     })
                 else:
+                    # D/C: Watch mode — start AI vs AI from the current position.
+                    # Build a simple GameAI for each side (no coordinator needed);
+                    # _run_ai_vs_ai_loop safely handles None coordinators.
+                    _ava_diff = 3
+                    _ava_hw = HeuristicWeights()
+                    _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw)
+                    _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw)
+                    session.ai_vs_ai = True
+                    session.vs_human = False
+                    session.game_ai_white = _ai_w
+                    session.game_ai_black = _ai_b
+                    session.game_ai = _ai_w if session.engine.board.turn == "W" else _ai_b
+                    session.coordinator_white = None   # C: safe — loop checks before deliberate
+                    session.coordinator_black = None
+                    log.info(
+                        "Watch mode: starting AI-vs-AI from opening '%s'", opening_id
+                    )
                     await _send(websocket, {
                         "type":    "commentary",
                         "speaker": "Game",
                         "text":    "Opening complete — now playing AI vs AI.",
                         "section": "ai",
                     })
+                    # Cancel any stale AI-vs-AI task before starting a fresh one
+                    if session._ava_task and not session._ava_task.done():
+                        session._ava_task.cancel()
+                    session._ava_task = asyncio.create_task(
+                        _run_ai_vs_ai_loop(websocket, session)
+                    )
 
             # ── player_message ────────────────────────────────────────────────
             elif kind == "player_message" and session:
@@ -1762,6 +1960,97 @@ async def ws_endpoint(websocket: WebSocket):
                         "suggested":  suggested or _opening.name,
                         "llm_used":   bool(_llm and _llm._client and suggested),
                     })
+
+            # ── start_ai_vs_ai ────────────────────────────────────────────────
+            elif kind == "start_ai_vs_ai":
+                white_personality = str(msg.get("white_personality", "balanced"))
+                black_personality = str(msg.get("black_personality", "aggressive"))
+                save_flag         = bool(msg.get("save_to_library", False))
+                diff_w = max(1, min(10, int(msg.get("difficulty_white", 3))))
+                diff_b = max(1, min(10, int(msg.get("difficulty_black", 3))))
+
+                # Normalise personality names
+                if white_personality not in _PERSONALITY_WEIGHTS:
+                    white_personality = "balanced"
+                if black_personality not in _PERSONALITY_WEIGHTS:
+                    black_personality = "balanced"
+
+                # Cancel any running AI-vs-AI loop
+                if session and session._ava_task and not session._ava_task.done():
+                    session._ava_task.cancel()
+
+                engine = GameEngine(human_color="W")  # human_color irrelevant for AI-vs-AI
+                gai_w  = _make_game_ai_for_personality("W", white_personality, diff_w)
+                gai_b  = _make_game_ai_for_personality("B", black_personality, diff_b)
+
+                use_llm   = bool(msg.get("use_llm", True))
+                _s        = _load_settings()
+                coord_w: Optional[Coordinator] = None
+                coord_b: Optional[Coordinator] = None
+
+                if use_llm:
+                    url   = _s.get("ollama_url",   "http://localhost:11434")
+                    model = _s.get("ollama_model", "llama3.1:8b")
+                    for _ai_inst, _ai_color, _opp_color in [
+                        (gai_w, "W", "B"), (gai_b, "B", "W"),
+                    ]:
+                        _mem  = MemoryManager(ollama_url=url, ollama_model=model)
+                        _llm  = MillsLLM(memory=_mem, ollama_url=url, model=model)
+                        _book = OpeningBook()
+                        _rec  = OpeningRecognizer(_book)
+                        _egr  = EndgameRecognizer(
+                            active_threshold=_s.get("endgame_active_threshold", 11),
+                            deep_threshold=_s.get("endgame_deep_threshold", 8),
+                            zugzwang_threshold=_s.get("endgame_zugzwang_threshold", 0.4),
+                        )
+                        _coord = Coordinator(
+                            game_ai=_ai_inst, mills_llm=_llm, memory=_mem,
+                            poor_move_threshold=_s.get("poor_move_threshold", 0.3),
+                            max_poor_move_comments=_s.get("max_poor_move_comments_per_game", 5),
+                            opening_recognizer=_rec, endgame_recognizer=_egr,
+                            trajectory_db=_trajectory_db,
+                            endgame_db=_endgame_db,
+                            vs_human=False,
+                            human_color=_opp_color,  # each AI's "opponent" is the other color
+                        )
+                        await asyncio.to_thread(_coord.on_game_start)
+                        if _ai_color == "W":
+                            coord_w = _coord
+                        else:
+                            coord_b = _coord
+
+                new_session = Session(engine, gai_w, coord_w, "W", False)
+                new_session.ai_vs_ai          = True
+                new_session.save_to_library   = save_flag
+                new_session.game_ai_white     = gai_w
+                new_session.game_ai_black     = gai_b
+                new_session.coordinator_white = coord_w
+                new_session.coordinator_black = coord_b
+                new_session.white_personality = white_personality
+                new_session.black_personality = black_personality
+                session = new_session
+
+                log.info(
+                    "AI-vs-AI started  white=%s(diff=%d) black=%s(diff=%d) save=%s llm=%s",
+                    white_personality, diff_w, black_personality, diff_b, save_flag, use_llm,
+                )
+                await _send(websocket, _state(session))
+                await _send(websocket, {
+                    "type": "commentary", "speaker": "Game",
+                    "text": f"AI vs AI — {white_personality.capitalize()} (White) vs {black_personality.capitalize()} (Black)",
+                    "section": "ai",
+                })
+                session._ava_task = asyncio.create_task(
+                    _run_ai_vs_ai_loop(websocket, session)
+                )
+
+            # ── toggle_save_library — flip save flag mid AI-vs-AI game ────────
+            elif kind == "toggle_save_library" and session and session.ai_vs_ai:
+                session.save_to_library = bool(msg.get("save", False))
+                await _send(websocket, {
+                    "type": "save_library_ack",
+                    "save": session.save_to_library,
+                })
 
             # ── tournament_start ──────────────────────────────────────────────
             elif kind == "tournament_start":

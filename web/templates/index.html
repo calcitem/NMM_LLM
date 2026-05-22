@@ -14,6 +14,7 @@
     <button id="toggle-openings">Openings</button>
     <button id="toggle-setup">Setup</button>
     <button id="toggle-tournament" title="Open Tournament Mode">&#127942; Tournament</button>
+    <button id="btn-ai-vs-ai" title="Watch two AIs play each other">&#x1F916; AI vs AI</button>
     <button id="btn-new-game-header">&#9658; New Game</button>
     <select id="hdr-personality" title="AI Personality">
       <option value="random" selected>Random</option>
@@ -54,6 +55,9 @@
         <!-- AI ↔ AI discussion section (bottom) -->
         <div class="panel-box commentary-panel" id="commentary-ai-panel">
           <h3>AI Discussion</h3>
+          <div id="ai-reasoning-toggle" style="margin-bottom:6px;font-size:.8rem;color:var(--text-dim)">
+            <label><input type="checkbox" id="showReasoning"> Show AI reasoning</label>
+          </div>
           <div id="commentary-ai"></div>
         </div>
       </div>
@@ -143,6 +147,15 @@
           <select id="sel-opening" style="flex:1;min-width:0">
             <option value="">— loading… —</option>
           </select>
+          <button id="btn-opening-rename" class="btn-small" title="Rename this opening" style="padding:3px 7px;margin-left:4px">&#x270F;</button>
+          <button id="btn-opening-delete" class="btn-small" title="Delete this opening" style="padding:3px 7px;margin-left:2px;color:var(--red)">&#x1F5D1;</button>
+        </div>
+        <!-- Inline rename row — hidden until rename button is clicked -->
+        <div id="opening-rename-row" style="display:none;gap:4px;margin-bottom:6px;align-items:center">
+          <input type="text" id="opening-rename-input" placeholder="New name…" maxlength="80"
+            style="flex:1;background:#1e1a12;border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:4px;font-size:.82rem">
+          <button id="btn-opening-rename-save" class="btn-small" style="padding:3px 8px">Save</button>
+          <button id="btn-opening-rename-cancel" class="btn-small" style="padding:3px 8px">Cancel</button>
         </div>
         <div id="opening-info" style="font-size:.78rem;color:var(--text-dim);margin:4px 0 6px;line-height:1.4"></div>
         <div class="form-row">
@@ -329,6 +342,7 @@
             <thead>
               <tr>
                 <th style="text-align:left;padding:2px 4px;color:var(--text-dim)">Opponent</th>
+                <th style="text-align:center;padding:2px 4px;color:var(--text-dim)">Personalities</th>
                 <th style="text-align:center;padding:2px 4px;color:var(--text-dim)">Result</th>
                 <th style="text-align:center;padding:2px 4px;color:var(--text-dim)">Pts</th>
               </tr>
@@ -384,6 +398,54 @@
     <button id="btn-handoff-b" hidden title="Hand Black's pieces to the AI — AI continues playing Black from here">Black → AI</button>
   </div>
 
+</div>
+
+<!-- AI vs AI setup modal -->
+<div id="ava-modal" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;align-items:center;justify-content:center">
+  <div style="background:#1e1a12;border:1px solid var(--border);border-radius:8px;padding:20px;min-width:300px;max-width:420px;width:90%">
+    <h3 style="margin:0 0 12px;color:var(--tan)">&#x1F916; AI vs AI</h3>
+    <div class="form-row">
+      <label for="ava-white-personality">White AI</label>
+      <select id="ava-white-personality">
+        <option value="balanced">Balanced</option>
+        <option value="aggressive">Aggressive — The Crusher</option>
+        <option value="defensive">Defensive — The Blocker</option>
+        <option value="positional">Positional — The Strategist</option>
+        <option value="scholar">Scholar — The Bookworm</option>
+        <option value="chaos">Chaos — The Trickster</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="ava-black-personality">Black AI</label>
+      <select id="ava-black-personality">
+        <option value="aggressive" selected>Aggressive — The Crusher</option>
+        <option value="balanced">Balanced</option>
+        <option value="defensive">Defensive — The Blocker</option>
+        <option value="positional">Positional — The Strategist</option>
+        <option value="scholar">Scholar — The Bookworm</option>
+        <option value="chaos">Chaos — The Trickster</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="ava-difficulty">Difficulty</label>
+      <select id="ava-difficulty">
+        <option value="1">1 — Beginner</option>
+        <option value="2">2 — Easy</option>
+        <option value="3" selected>3 — Medium</option>
+        <option value="4">4 — Hard</option>
+        <option value="5">5 — Strong</option>
+        <option value="6">6 — Expert</option>
+      </select>
+    </div>
+    <div class="form-row" style="align-items:center;gap:8px">
+      <input type="checkbox" id="ava-save-library">
+      <label for="ava-save-library" style="color:var(--text);font-size:.9rem">Save this game to library</label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button id="ava-start-btn" style="flex:1">&#9654; Start</button>
+      <button id="ava-cancel-btn" class="btn-small" style="flex:none">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="/static/game.js"></script>

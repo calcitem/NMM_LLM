@@ -238,6 +238,15 @@ main {
   background: #221d14;
 }
 
+.ai-thinking {
+  display: block;
+  font-style: italic;
+  font-size: .8rem;
+  color: var(--text-dim);
+  padding: 2px 8px 4px;
+  margin-top: -2px;
+}
+
 /* ── Board column (centre) ───────────────────────────────────────────── */
 #board-col {
   display: flex;

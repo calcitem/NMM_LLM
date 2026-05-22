@@ -237,6 +237,7 @@ class GameAI:
             )
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
+        self.last_thinking: str = ""          # short plain-English label for the chosen move
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
         # Set True by Coordinator when opponent's last move scored below poor_move_threshold.
         # Amplifies the placement busy-chain bonus so the AI exploits passive opponent play.
@@ -281,6 +282,7 @@ class GameAI:
         """Return the best (or deliberately bad) legal move dict for self.color."""
         self._force_stop = False
         self._deadline   = math.inf  # reset any prior force_stop() effect
+        self.last_thinking = ""       # reset thinking trace
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -360,20 +362,24 @@ class GameAI:
             # preference for high-mobility cardinal/cross nodes.  Depth 6 gives 3 plies
             # per side — enough for tactical awareness without the distortion.
             early_max = 6 if total_on_board < 4 else 19
-            return self._iterative_deepen(
+            move = self._iterative_deepen(
                 board, _EARLY_GAME_TIME,
                 recognition=recognition, trajectory_hints=trajectory_hints,
                 top_n=top_n, moves=moves,
                 max_depth=early_max,
             )
+            self._populate_thinking(board, move)
+            return move
 
         if self.difficulty in _TIME_LIMIT:
             time_budget = 2.0 if fast_early_game else _TIME_LIMIT[self.difficulty]
-            return self._iterative_deepen(
+            move = self._iterative_deepen(
                 board, time_budget,
                 recognition=recognition, trajectory_hints=trajectory_hints,
                 top_n=top_n, moves=moves,
             )
+            self._populate_thinking(board, move)
+            return move
 
         depth = _DEPTH_TABLE[self.difficulty]
 
@@ -397,11 +403,45 @@ class GameAI:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
             if top_n > 1:
                 scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
-                return random.choice(scored_sorted[:top_n])[0]
-            return max(scored, key=lambda x: x[1])[0]
+                move = random.choice(scored_sorted[:top_n])[0]
+            else:
+                move = max(scored, key=lambda x: x[1])[0]
+            self._populate_thinking(board, move)
+            return move
 
         move, _ = self._root_search(board, depth, top_n=top_n, moves=moves)
+        self._populate_thinking(board, move)
         return move
+
+    def _populate_thinking(self, board: BoardState, move: dict) -> None:
+        """Compute and store a plain-English thinking label for the chosen move.
+
+        Calls tactical_move_bonus with return_breakdown=True to identify the top
+        1-2 highest-magnitude contributions.  Stored in self.last_thinking.
+        Failures are silently swallowed — thinking is decorative.
+        """
+        try:
+            after = board.apply_move(move)
+            bd = tactical_move_bonus(
+                board, after, self.color, self._weights,
+                self._opp_last_weak, return_breakdown=True,
+            )
+            if not isinstance(bd, dict):
+                return
+            top = bd.get("top_terms", [])
+            if not top:
+                return
+            if len(top) >= 2 and abs(top[1][1]) >= abs(top[0][1]) * 0.5:
+                # Second term is at least half the first — mention both
+                self.last_thinking = f"{top[0][0]} + {top[1][0].lower()}"
+            else:
+                self.last_thinking = top[0][0]
+            # Trim to ≤ 8 words
+            words = self.last_thinking.split()
+            if len(words) > 8:
+                self.last_thinking = " ".join(words[:8])
+        except Exception:
+            self.last_thinking = ""
 
     # Time budget for score_move() — kept short because it is only used for relative
     # ranking (is this move good or bad?), not for the actual played move.
