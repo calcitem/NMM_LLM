@@ -63,6 +63,18 @@ class HeuristicWeights:
     # ── Cross-feeding 2-config pairs (B-16) ──────────────────────────────────
     own_convergence: int      = 250   # bonus per own pair sharing closing sq or pivot piece
     cross_feed_mobility: int  = 180   # bonus per own pair where a piece is adjacent to other's closing sq
+    # ── Capture-unblocking bonuses (B-17) ────────────────────────────────────
+    capture_creates_diamond: int    = 320  # capture opens shared closing sq of two own 2-configs
+    capture_activates_feeder: int   = 280  # capture unblocks closing sq adjacent to own closed-mill piece
+    capture_creates_convergence: int = 250 # capture creates general cross-mobility or fork precursor
+    # ── Placement patience / timing (PAT-2, PAT-3) ───────────────────────────
+    dual_threat_placement: int = 160   # reward for ending placement with 2 independent 2-configs
+    patience_forcing: int      = 90    # companion bonus when mill-open is suppressed + move is forcing
+    # ── Structural threat detection (B-10, B-14, B-15) ───────────────────────
+    consolidation_penalty: int = 120   # penalty per new opp 2-config enabled by vacating a square
+    herding_coverage: int      = 40    # bonus per opp 2-config closing sq covered by own adjacent piece
+    trapped_mill: int          = 160   # penalty per own closed mill where opp can block all exits
+    potential_mill: int        = 25    # bonus per own 2-config whose future mill would have a free exit
     # ── Behaviour (consumed by GameAI, not heuristics) ───────────────────
     make_mistakes: int        = 0     # blunder probability 0-100 %
     opening_adherence: int    = 50    # how strongly to follow the opening book (0-100)
@@ -92,7 +104,7 @@ _MOB_WEIGHTS    = {"place": 3,  "move": 8,  "fly": 20}
 _THREAT_WEIGHTS = {"place": 15, "move": 18, "fly": 80}
 
 # tanh normalization scales per phase (used by position_eval display, not search)
-TANH_SCALE = {"place": 120, "move": 180, "fly": 280}
+TANH_SCALE = {"place": 120, "move": 180, "fly": 180}
 
 # Cardinal nodes: 4 connections each — highest mobility AND participate in 2 mills.
 # These are the middle-ring midpoints: b4, d2, d6, f4.
@@ -338,6 +350,21 @@ def evaluate(
         base += 100 * (_interpose_count(board, color) - _interpose_count(board, opp))
         base += 80 * (_perp_block_count(board, color) - _perp_block_count(board, opp))
 
+    # B-14 herding coverage: reward positions where own pieces are adjacent to opponent
+    # 2-config closing squares, making it harder for the opponent to complete those mills.
+    if phase in ("move", "fly"):
+        w_herd_cov = weights.herding_coverage if weights else DEFAULT_WEIGHTS.herding_coverage
+        base += w_herd_cov * (_herding_coverage(board, color) - _herding_coverage(board, opp))
+
+    # B-15 structural mill quality:
+    # — penalise own closed mills where the opponent can block all exit squares (trapped mills).
+    # — reward own 2-configs whose closing square is not adjacent to any opponent piece (free threats).
+    if phase == "move":
+        w_trap = weights.trapped_mill if weights else DEFAULT_WEIGHTS.trapped_mill
+        w_pot  = weights.potential_mill if weights else DEFAULT_WEIGHTS.potential_mill
+        base -= w_trap * _trapped_mill_count(board, color)
+        base += w_pot * (_free_two_config_count(board, color) - _free_two_config_count(board, opp))
+
     # Apply overall positional scale (long_term_position=100 means no change)
     if weights and weights.long_term_position != 100:
         base = int(base * weights.long_term_position / 100)
@@ -537,6 +564,74 @@ def _squeeze_count(board: BoardState, color: str) -> int:
         if board.positions[pos] == color:
             moves = sum(1 for n in ADJACENCY[pos] if board.positions[n] == "")
             if moves == 1:
+                count += 1
+    return count
+
+
+def _herding_coverage(board: BoardState, color: str) -> int:
+    """Count opponent 2-config closing squares that are adjacent to an own piece.
+
+    Higher = we have more pieces near opponent closing squares, improving our
+    ability to block them in one move (herding / coverage pressure).
+    """
+    opp = "B" if color == "W" else "W"
+    count = 0
+    seen_closing: set[str] = set()
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(opp) == 2 and vals.count("") == 1:
+            closing_sq = mill[vals.index("")]
+            if closing_sq in seen_closing:
+                continue
+            seen_closing.add(closing_sq)
+            count += sum(1 for nb in ADJACENCY[closing_sq] if board.positions[nb] == color)
+    return count
+
+
+def _trapped_mill_count(board: BoardState, color: str) -> int:
+    """Count own closed mills where the opponent can block all exit squares in one move.
+
+    A mill is "trapped" when every empty exit square has an opponent piece adjacent
+    to it (opponent can occupy and freeze the exit).  Mills with exits blocked only
+    by own pieces are NOT trapped — the own pieces can move away to free the exit.
+    """
+    opp = "B" if color == "W" else "W"
+    trapped = 0
+    for mill in MILLS:
+        if not all(board.positions[p] == color for p in mill):
+            continue
+        mill_set = set(mill)
+        # Only empty exits matter: own-occupied exits can be freed by moving the own piece.
+        empty_exits = [nb for sq in mill for nb in ADJACENCY[sq]
+                       if nb not in mill_set and board.positions[nb] == ""]
+        if not empty_exits:
+            # No empty exits — check if opponent pieces fill the non-mill squares
+            opp_filled = any(board.positions[nb] == opp
+                             for sq in mill for nb in ADJACENCY[sq]
+                             if nb not in mill_set)
+            if opp_filled:
+                trapped += 1
+            # If exits are entirely blocked by own pieces, not a trap.
+        elif all(any(board.positions[adj] == opp for adj in ADJACENCY[ex])
+                 for ex in empty_exits):
+            trapped += 1
+    return trapped
+
+
+def _free_two_config_count(board: BoardState, color: str) -> int:
+    """Count own 2-configs whose closing square is not adjacent to any opponent piece.
+
+    A "free" 2-config cannot be immediately contested by the opponent — the
+    closing square has no opponent piece one move away, so the opponent needs
+    two moves to both contest and occupy.  These are the most reliable mill threats.
+    """
+    opp = "B" if color == "W" else "W"
+    count = 0
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 2 and vals.count("") == 1:
+            closing_sq = mill[vals.index("")]
+            if not any(board.positions[nb] == opp for nb in ADJACENCY[closing_sq]):
                 count += 1
     return count
 
@@ -1154,6 +1249,14 @@ def _late_game_danger(board: BoardState, color: str) -> int:
         severity = opp_mills * 200 + max(0, opp_pieces - our_pieces) * 60
         penalty -= severity
 
+    # Stage 5.20: additional danger when outnumbered 4-vs-6+ and opponent already
+    # has multiple 2-configs (pre-mill threat not yet penalized by opp_mills above).
+    if our_pieces <= 4 and opp_pieces >= 6:
+        opp_open = _two_configs(board, opp)
+        if opp_open >= 2:
+            uncoverable = max(0, opp_open - our_pieces)
+            penalty -= opp_open * 100 + uncoverable * 200
+
     opp_cycle = _mill_cycle_ready(board, opp)
     if opp_cycle >= 2:
         penalty -= opp_cycle * 130
@@ -1704,10 +1807,30 @@ def tactical_move_bonus(
     # Mill-opening bonus: reward sliding out of a closed mill when the position
     # still has a cycling-ready mill (i.e. the move enables a future recapture).
     # This encourages deliberate opening/closing cycles rather than passivity.
+    # PAT-3 safe-cycling suppression: if the opponent has live 2-configs and we don't
+    # already have 2+ own threats, opening the mill gives the opponent a free turn to
+    # close their mill.  Suppress the bonus until the board is safer.
     mill_opened = max(0, _closed_mills(before, color) - _closed_mills(after, color))
     mill_open_bonus = 0
+    patience_forcing_bonus = 0
     if mill_opened > 0 and _mill_cycle_ready(after, color) > 0:
-        mill_open_bonus = weights.mill_opening * mill_opened
+        raw_open_bonus = weights.mill_opening * mill_opened
+        if get_game_phase(before, color) == "move":
+            opp_live = _two_configs(after, opp)
+            own_live  = _two_configs(after, color)
+            if opp_live >= 1 and own_live < 2:
+                # Suppression: opponent can close freely this turn
+                scale = 0.25 if opp_live == 1 else 0.0
+                mill_open_bonus = int(raw_open_bonus * scale)
+                # Patience-forcing companion: bonus when this suppressed move creates a new
+                # own 2-config OR blocks an opponent 2-config — it's a forcing move
+                if (own_two_after > own_two_before
+                        or _two_configs(after, opp) < _two_configs(before, opp)):
+                    patience_forcing_bonus = weights.patience_forcing
+            else:
+                mill_open_bonus = raw_open_bonus
+        else:
+            mill_open_bonus = raw_open_bonus
 
     capture_this_move = after.pieces_on_board[opp] < before.pieces_on_board[opp]
 
@@ -1753,6 +1876,73 @@ def tactical_move_bonus(
     safe_capture_bonus = 0
     if capture_this_move and _closeable_mills(before, opp) > 0 and _closeable_mills(after, opp) == 0:
         safe_capture_bonus = 180
+
+    # B-17: Capture-unblocking bonuses — reward captures that create own structural convergence.
+    # Three complementary patterns (can all fire on the same capture, applied additively):
+    #   A: capture opens the shared closing square of two own 2-configs (diamond creation)
+    #   B: capture unblocks a closing square adjacent to an own closed-mill piece (feeder activation)
+    #   C: general cross-mobility / fork-precursor creation
+    capture_creates_diamond_bonus    = 0
+    capture_activates_feeder_bonus   = 0
+    capture_creates_convergence_bonus = 0
+    if capture_this_move and captured_pos is not None:
+        # Pattern A: diamond (shared closing square)
+        if len(detect_diamonds(after, color)) > len(detect_diamonds(before, color)):
+            capture_creates_diamond_bonus = weights.capture_creates_diamond
+
+        # Pattern B: feeder activation — captured square was adjacent to a piece in one
+        # of our closed mills AND that closed-mill piece now has a 2-config on another line
+        if not capture_creates_diamond_bonus:
+            for mill in MILLS:
+                if not all(before.positions[p] == color for p in mill):
+                    continue
+                mill_set = set(mill)
+                for mp in mill:
+                    if captured_pos in ADJACENCY[mp]:
+                        # mp is adjacent to the captured square — check if mp has a 2-config on another line
+                        for other_mill in MILLS:
+                            if mp not in other_mill or other_mill == mill:
+                                continue
+                            other_vals = [after.positions[p] for p in other_mill]
+                            if other_vals.count(color) == 2 and other_vals.count("") == 1:
+                                capture_activates_feeder_bonus = weights.capture_activates_feeder
+                                break
+                        if capture_activates_feeder_bonus:
+                            break
+                if capture_activates_feeder_bonus:
+                    break
+
+        # Pattern C: general cross-mobility / fork-precursor increase
+        if not capture_creates_diamond_bonus and not capture_activates_feeder_bonus:
+            if (_double_mill_convergence(after, color) > _double_mill_convergence(before, color)
+                    or _cross_feed_mobility_pairs(after, color) > _cross_feed_mobility_pairs(before, color)):
+                capture_creates_convergence_bonus = weights.capture_creates_convergence
+
+    # PAT-1: Isolated Mill Suppressor — scale the close_mill contribution in early placement
+    # (pieces 1–5) when the closed mill leaves zero own 2-configs anywhere on the board.
+    # An isolated mill is easy to freeze (4 opponent pieces suffice); suppression ensures
+    # building a second 2-config elsewhere can outscore closing the isolated mill.
+    # Scale modulated by exit count: fewer exits → harder to un-freeze → steeper cut.
+    close_mill_contribution = weights.close_mill * mills_delta
+    if (mills_delta > 0
+            and get_game_phase(before, color) == "place"
+            and before.pieces_placed.get(color, 0) < 6
+            and not capture_this_move
+            and _two_configs(after, color) == 0):
+        newly_closed = next(
+            (mill for mill in MILLS
+             if all(after.positions[p] == color for p in mill)
+             and not all(before.positions[p] == color for p in mill)),
+            None,
+        )
+        exits = _mill_cycling_freedom(after, color, newly_closed) if newly_closed else 0
+        if exits == 0:
+            scale = 0.15
+        elif exits <= 2:
+            scale = 0.35
+        else:
+            scale = 0.60
+        close_mill_contribution = int(close_mill_contribution * scale)
 
     # Outer-ring mill penalty during early placement (pieces 1–6).
     # Each outer-ring side mill (a7-d7-g7, g7-g4-g1, g1-d1-a1, a1-a4-a7)
@@ -1884,6 +2074,38 @@ def tactical_move_bonus(
                 _base_chain += weights.defer_for_chain
             busy_chain_bonus = _base_chain
 
+    # PAT-2: Dual-Threat Placement Endgame Reward — bonus for ending placement with two or
+    # more independent 2-configs (different mill lines, different closing squares) when the
+    # busy-chain scan did not find a level-4 chain.  Two uncoverable threats at end of
+    # placement are as decisive as a deferred mill when the opponent's last piece can't
+    # block both lines simultaneously.
+    pat2_bonus = 0
+    if (_before_phase == "place"
+            and mills_delta == 0
+            and before.pieces_placed.get(color, 0) >= 4
+            and _two_configs(after, color) >= 2):
+        _scan_lv = _placement_chain_scan(after, color)
+        if _scan_lv < 4:
+            _cfg_closing: set[str] = set()
+            for _m in MILLS:
+                _mv = [after.positions[p] for p in _m]
+                if _mv.count(color) == 2 and _mv.count("") == 1:
+                    _cfg_closing.add(_m[_mv.index("")])
+            if len(_cfg_closing) >= 2:
+                _pat2 = weights.dual_threat_placement
+                if len(_cfg_closing) >= 3:
+                    _pat2 = int(_pat2 * 1.4)
+                _closing_list = list(_cfg_closing)
+                _any_adjacent = any(
+                    _closing_list[i] in ADJACENCY[_closing_list[j]]
+                    for i in range(len(_closing_list))
+                    for j in range(len(_closing_list))
+                    if i != j
+                )
+                if not _any_adjacent:
+                    _pat2 = int(_pat2 * 1.2)
+                pat2_bonus = _pat2
+
     # Convergence cluster disruption: bonus for placement that breaks an opponent
     # convergence cluster — 3 opponent pieces that can each reach a distinct square
     # in the same mill within 2 adjacency moves along unblocked paths.
@@ -1906,6 +2128,26 @@ def tactical_move_bonus(
             dmc_after = _double_mill_convergence(after, opp)
             disrupted = max(0, dmc_before - dmc_after)
             dmc_bonus = disrupted * weights.convergence_disrupt
+
+    # B-16 cross-feed mobility delta: bonus when move increases own cross-feeding 2-config pairs.
+    # Delta-based so the bonus fires at the specific move that creates the cross-feed structure.
+    # The evaluate() positional score handles ongoing presence; this drives move ordering at root.
+    cross_feed_delta_bonus = 0
+    if get_game_phase(before, color) in ("move", "fly"):
+        cf_before = _cross_feed_mobility_pairs(before, color)
+        cf_after  = _cross_feed_mobility_pairs(after,  color)
+        cf_delta  = max(0, cf_after - cf_before)
+        if cf_delta > 0:
+            cross_feed_delta_bonus = cf_delta * weights.cross_feed_mobility
+
+    # B-10 consolidation threat: penalise move-phase moves that vacate a square the
+    # opponent can use to form a new 2-config (opponent consolidates across the vacated sq).
+    # Only fires when no capture happened — captures already weaken opponent structure directly.
+    consolidation_penalty_val = 0
+    if get_game_phase(before, color) == "move" and not capture_this_move:
+        new_opp_configs = max(0, _two_configs(after, opp) - _two_configs(before, opp))
+        if new_opp_configs > 0:
+            consolidation_penalty_val = new_opp_configs * weights.consolidation_penalty
 
     # Mobility-reduction bonus: each opponent legal move removed by this move earns
     # a direct reward in move phase.  Herding the opponent into a corner (zero moves)
@@ -2094,7 +2336,7 @@ def tactical_move_bonus(
                     cycling_block_bonus = int(weights.block_cycling_priority * (1 + freedom_diff * 0.1))
 
     return (
-        weights.close_mill            * mills_delta
+        close_mill_contribution                   # PAT-1 suppressed when isolated mill in early placement
         + weights.cycling_mill        * (cycling_gain + opp_cycle_lost)
         + cycling_close_bonus
         + weights.block_opponent_mill * blocked
@@ -2105,15 +2347,21 @@ def tactical_move_bonus(
         + scatter
         + setup_mill_bonus
         + mill_open_bonus
+        + patience_forcing_bonus                  # PAT-3 companion when mill-open suppressed
         + late_mill_bonus
         + trap_build_bonus
         + fly_fork_bonus
         + mob_reduction_bonus
         + capture_feeder_bonus
         + capture_diamond_bonus
+        + capture_creates_diamond_bonus            # B-17 pattern A
+        + capture_activates_feeder_bonus           # B-17 pattern B
+        + capture_creates_convergence_bonus        # B-17 pattern C
         + busy_chain_bonus
+        + pat2_bonus                               # PAT-2 dual-threat placement reward
         + conv_bonus
         + dmc_bonus
+        + cross_feed_delta_bonus
         + safe_capture_bonus
         + fly_free_close_bonus
         + ring_cardinal_bonus
@@ -2123,6 +2371,7 @@ def tactical_move_bonus(
         + cycling_block_bonus
         - outer_mill_penalty
         - ring_crowd_penalty
+        - consolidation_penalty_val               # B-10 vacated-square threat
     )
 
 
