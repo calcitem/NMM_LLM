@@ -411,13 +411,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── AI vs AI ──────────────────────────────────────────────────────────
   $("btn-ai-vs-ai").addEventListener("click", () => {
-    $("ava-modal").hidden = false;
+    $("ava-modal").style.display = "flex";
   });
   $("ava-cancel-btn").addEventListener("click", () => {
-    $("ava-modal").hidden = true;
+    $("ava-modal").style.display = "none";
   });
   $("ava-modal").addEventListener("click", e => {
-    if (e.target === $("ava-modal")) $("ava-modal").hidden = true;
+    if (e.target === $("ava-modal")) $("ava-modal").style.display = "none";
   });
   $("ava-start-btn").addEventListener("click", startAiVsAi);
 
@@ -519,7 +519,7 @@ function startAiVsAi() {
   const diff   = parseInt($("ava-difficulty").value);
   const save   = $("ava-save-library").checked;
 
-  $("ava-modal").hidden = true;
+  $("ava-modal").style.display = "none";
 
   clearCommentary();
   setStatus("Starting AI vs AI…");
