@@ -152,6 +152,27 @@ Play a 6-game gauntlet against all AI personalities in order from weakest to str
   | **Scholar — The Bookworm** | Methodical opening placement, balanced diamond and wrapping awareness, solid all-round |
   | **Chaos — The Trickster** | Scatters randomly, ignores strategy, 45 % blunder rate |
 
+### Personality Profiles
+
+Each preset ships with a distinct weight configuration saved to `data/personalities/`. The table below shows how each personality differs from the defaults:
+
+| Personality | Style | Notable weights | Blunder rate |
+|-------------|-------|-----------------|--------------|
+| **Balanced** | All-round; follows the opening book closely | All weights near default | 0 % |
+| **Aggressive — The Crusher** | Mill hunter; closes mills at any cost and seizes cardinal squares | `close_mill` 900, `cardinal_block` 500, `mill_count_scale` 180 %; low `mill_wrapping` (50) | 0 % |
+| **Defensive — The Blocker** | Prioritises neutralising every opponent threat over building its own | `block_opponent_mill` 850, `stop_opponent_mills` 825, `mill_wrapping` 450, `blocked_scale` 355 % | 0 % |
+| **Positional — The Strategist** | Spreads across cross nodes, plans long cycling chains, anticipates forks | `cardinal_block` 475, `defer_for_chain` 475, `redirected_pin` 230, `mobility_scale` 250 % | 0 % |
+| **Scholar — The Bookworm** | Methodical opening adherence; balanced diamond and wrapping awareness | `close_mill` 775, `opening_adherence` 100, `long_term_position` 175 % | 0 % |
+| **Chaos — The Trickster** | Scatters randomly, ignores cardinal squares entirely, exploits losing lines opportunistically | `scatter_placement` 325, `cardinal_block` 0, `make_mistakes` 30 % | 30 % |
+
+Key differences to look for in play:
+
+- **Aggressive** closes mills early and often and clusters around the centre — effective against passive opponents but weak to wrapping.
+- **Defensive** rarely opens a cycling mill itself; instead it dismantles yours before it forms, making it frustrating to attack.
+- **Positional** is the strongest long-term planner: it defers immediate mill closures when a deeper chain is available and redirects pins to double-block the opponent.
+- **Scholar** follows the opening book most faithfully (`opening_adherence` 100) and transitions smoothly into the midgame.
+- **Chaos** plays almost randomly with a 30 % deliberate blunder rate — good for experimenting and debugging; starts every game without any opening book guidance (`opening_adherence` 0).
+
 ### Web interface
 - SVG board with coordinate labels (a–g, 1–7)
 - Dark wood theme; three-column layout: MillsAI Chat | Board | Side panel
@@ -206,7 +227,14 @@ Play a 6-game gauntlet against all AI personalities in order from weakest to str
 
 ### Position Setup editor
 
-Click any board node to cycle it through empty → White → Black → empty. Set the game phase, whose turn it is, then click **Start from Here** to begin a game from that position. Useful for practising specific endgames or problem positions.
+Click **Setup** in the header bar (or **Setup Position…** in the Settings panel) to open the position editor. The board becomes interactive in edit mode:
+
+- Click any node to cycle it through **empty → White → Black → empty**.
+- Use the phase selector to specify whether the game is in the placement, movement, or fly phase.
+- Use the turn selector to set whose move it is.
+- Click **Start from Here** to begin a game from the custom position.
+
+The position editor is useful for practising specific endgames, reproducing puzzle positions, or testing how the AI handles unusual configurations.
 
 ### Replay controls (post-game)
 
@@ -223,6 +251,8 @@ When the AI plays a placement sequence it hasn't seen before, the opening is sav
 - **During self-play** — pass `--name-openings` to `self_play.py` and MillsAI names each novel opening at the end of the run.
 - **On demand** — run `python tools/name_openings.py` to batch-name all un-named openings in one pass (requires Ollama).
 
+After a game where a novel opening was played, MillsAI proposes a name for it. You can confirm or edit that name directly in the GUI's naming prompt before it is written to `data/openings/learned_openings.json`.
+
 The opening book uses **UCB1 selection** to balance exploration and exploitation when choosing an opening at game start:
 
 ```
@@ -231,7 +261,26 @@ score = win_rate + C × √(ln(total_plays) / (plays_this_opening + 1))   C = 0.
 
 Openings are filtered to the AI's side: White-winning lines are only offered when the AI plays White, and vice versa.
 
-**Useful commands:**
+**Browsing openings in the GUI**
+
+Click **Openings** in the header to open the Opening Explorer panel. Each named opening is listed with its name, move count, and win/loss/draw record. Click any entry to step-replay that opening on the board. The **Replay Opening** button plays the moves at configurable speed; **Practice — I play on** lets you continue from the end of the opening as the human; **Watch — AI continues** starts an AI-vs-AI game from the final position of that opening line.
+
+**Importing openings from a strategy book**
+
+```bash
+# Validate and import opening lines from a JSON-formatted book file
+python tools/import_openings.py --input raw_openings.json --validate \
+    --output data/openings/book_openings.json
+
+# Dry-run (shows what would be imported, no changes written)
+python tools/import_openings.py --input raw_openings.json --dry-run
+
+# Merge new lines into an existing book file
+python tools/import_openings.py --input raw_openings.json --merge \
+    --output data/openings/book_openings.json
+```
+
+**Other useful commands:**
 
 ```bash
 # List all openings with win/loss/draw stats, sorted by win rate
@@ -242,6 +291,40 @@ python tools/import_book_games.py
 
 # Name all un-named openings via LLM
 python tools/name_openings.py
+```
+
+---
+
+## Training Tools
+
+The `tools/` directory contains scripts for building and improving the AI's knowledge bases. They work independently of the web server and can be run while the server is stopped.
+
+| Tool | Purpose |
+|------|---------|
+| `self_play.py` | Run AI-vs-AI full games to populate the trajectory DB, endgame DB, and opening book win rates |
+| `endgame_play.py` | Generate endgame-only positions and play them out — much faster than full games for building the EndgameDB |
+| `evolve_weights.py` | Evolutionary optimisation of `HeuristicWeights` via a (1+1) strategy |
+| `train_value_net.py` | Train a small MLP value estimator from saved game records |
+| `import_openings.py` | Validate and import curated opening lines from a JSON book file |
+| `import_book_games.py` | Seed opening win/loss statistics from annotated book game records |
+| `name_openings.py` | Batch-name all un-named openings via the local Ollama LLM |
+| `list_openings.py` | Print the opening book sorted by win rate |
+| `purge_ai_learning.py` | Remove AI self-play data while preserving book-imported content |
+
+**Recommended workflow for a fresh install:**
+
+```bash
+# 1. Import book openings to seed the opening book
+python tools/import_book_games.py
+
+# 2. Run self-play to build trajectory and endgame databases
+python tools/self_play.py --games 100 --no-llm --parallel 4
+
+# 3. (Optional) Evolve weights to find a stronger evaluation function
+python tools/evolve_weights.py --generations 20 --parallel 4
+
+# 4. (Optional) Train a value network once you have 200+ games
+python tools/train_value_net.py
 ```
 
 ---
@@ -440,6 +523,49 @@ Then update `data/settings.json`:
 ```
 
 The game uses the new model from the next game start.
+
+---
+
+## AI Slider Weights Reference
+
+The **AI Tuning** panel exposes the most user-visible weights. All fields correspond directly to `HeuristicWeights` in `ai/heuristics.py`. The complete dataclass has ~40 fields; the table below covers the ~13 shown in the UI plus the most impactful positional scalers.
+
+### Mill control
+
+| Field | Default | What it controls |
+|-------|---------|-----------------|
+| `close_mill` | 500 | Delta bonus per mill the AI closes this move |
+| `cycling_mill` | 300 | Bonus for building a cycling-mill setup (two 2-configs whose closing squares are adjacent; capped at 1 per move) |
+| `block_opponent_mill` | 400 | Bonus per opponent 2-config that is closeable next turn and gets neutralised |
+| `stop_opponent_mills` | 450 | Bonus per opponent two-piece setup (any 2-config) dismantled this move |
+| `mill_wrapping` | 150 | Bonus per own piece that surrounds an opponent closed mill, cutting off the pivot's useful slides |
+
+### Mobility and space
+
+| Field | Default | What it controls |
+|-------|---------|-----------------|
+| `cardinal_block` | 200 | Bonus for occupying or evicting pieces from cross-node (midpoint) squares that have 3 neighbours |
+| `feeder_diamond` | 200 | Bonus for creating a fork structure: four pieces adjacent to one key square, threatening two mills at once |
+| `scatter_placement` | 75 | Bonus for placing away from own existing pieces in the first 6 placements (prevents clustering) |
+| `mobility_scale` | 100 | % multiplier on the mobility component of the static evaluator (how much having more legal moves than the opponent is worth) |
+| `blocked_scale` | 100 | % multiplier on the blocked-pieces component (bonus for leaving opponent pieces with no legal moves) |
+
+### Placement and structure
+
+| Field | Default | What it controls |
+|-------|---------|-----------------|
+| `setup_mill` | 100 | Bonus per new two-config gained in a single placement move |
+| `mill_count_scale` | 100 | % multiplier on the mill-count component of the static evaluator |
+| `long_term_position` | 100 | Overall % multiplier on the entire positional base score (all non-tactical terms) |
+
+### Endgame and behaviour
+
+| Field | Default | What it controls |
+|-------|---------|-----------------|
+| `mill_opening` | 200 | Bonus for opening a cycling-ready mill (sliding out of a closed mill to enable the next capture cycle) |
+| `make_mistakes` | 0 | Probability (%) that the AI plays a deliberately bad move on any given turn |
+
+> **Tip:** Increasing `cycling_mill` and `mill_wrapping` together produces a slow, suffocating style. Maximising `close_mill` and `cardinal_block` produces an aggressive attacking style. Setting `make_mistakes` to 10–20 % creates a forgiving training partner.
 
 ---
 
