@@ -2037,3 +2037,100 @@ python tools/endgame\_play.py --seed-from-games --positions 200 --parallel 4
 
 **Note:** Requires significant compute (GPU recommended). Designed to run offline on self-play records from Stages 6–7.
 
+---
+
+### Stage 5.20 — Position Strength Late-Game Fix ✅ *(completed 2026-05-22)*
+
+- Reduced `TANH_SCALE["fly"]` from 280 → 180 (`ai/heuristics.py`) to stop fly-mobility inflating the losing side's display score near ±1.
+- Added Stage 5.20 penalty block in `_late_game_danger()`: when `our_pieces <= 4` and `opp_pieces >= 6` with `opp_two_configs >= 2`, subtract `opp_open * 100 + uncoverable * 200` to penalise asymmetric pre-mill danger before the opponent has closed any mills.
+
+---
+
+### Tactic 5.12-A — 6v4 Piece Sacrifice to Reach Winning Endgame ✅ *(completed 2026-05-22)*
+
+- `ai/heuristics.py` `evaluate()`: `_fly_sacrifice_quality(board, color)` detects own fly nucleus quality (closed mill → 2, 2-config → 1, scattered → 0); adds `sacrifice_viable * quality` bonus when `own_pieces == 6` and `opp_pieces == 4` in move phase.
+- `ai/coordinator.py` `_tactical_situation()`: added `"6v4_sacrifice_viable"` flag (imports `_fly_sacrifice_quality`); flag is True when AI has 6 pieces, opponent has 4, move phase, and fly nucleus is non-scattered.
+- `ai/coordinator.py` `deliberate()`: emits "6v4 position — own fly nucleus ready, evaluating sacrifice path to winning endgame" when flag is true.
+
+---
+
+### Bug UI-C — AI Double-Mill Prevention Weakness ✅ *(completed 2026-05-22)*
+
+- `ai/heuristics.py`: Added `_double_mill_convergence(board, opp)` — counts opponent 2-config pairs sharing a closing square or pivot piece (fork precursors).
+- `ai/heuristics.py` `evaluate()`: penalises `_double_mill_convergence` with weight `convergence_penalty` (180) in move phase.
+- `ai/heuristics.py` `tactical_move_bonus()`: `dmc_bonus` — rewards moves that reduce the opponent's convergence count (disruption weight `convergence_disrupt` 220) in move phase.
+
+---
+
+### Bug B-16 — Cross-Feeding Dual-Mill Setup (Feeder Mill) ✅ *(completed 2026-05-22)*
+
+- `ai/heuristics.py`: Added `_cross_feed_mobility_pairs(board, color)` — counts own 2-config pairs where a piece from one group is adjacent to the other group's closing square.
+- `HeuristicWeights`: Added `own_convergence` (250) and `cross_feed_mobility` (180) weights.
+- `ai/heuristics.py` `evaluate()`: applies both in move and fly phases (positional gradient).
+- `ai/heuristics.py` `tactical_move_bonus()`: added `cross_feed_delta_bonus` — delta-based bonus fires when a move increases own cross-feeding pair count; drives move ordering at root level.
+
+---
+
+### PAT-1 — Isolated Mill Suppressor ✅ *(completed 2026-05-22)*
+
+- `tactical_move_bonus()`: scales `close_mill * mills_delta` to 15/35/60% in early placement (pieces 1–5) when closing leaves zero own 2-configs, modulated by exit count from `_mill_cycling_freedom()`.
+
+### PAT-2 — Dual-Threat Placement Endgame Reward ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `dual_threat_placement` (160).
+- `tactical_move_bonus()`: bonus when placement ends with 2+ independent 2-configs on different mill lines and busy-chain scan found no level-4 chain. Scales ×1.4 for 3+ configs, ×1.2 if maximally independent.
+
+### PAT-3 — Safe Cycling Timing ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `patience_forcing` (90).
+- `tactical_move_bonus()`: suppresses `mill_opening` to 25%/0% when opponent has 1/2+ live 2-configs and own threats < 2. Companion `patience_forcing` bonus fires when the suppressed move is also forcing (creates own 2-config or blocks opponent).
+
+### Bug B-9 — Mills LLM Commentary: Wrong Line Names and Factual Errors ✅ *(completed 2026-05-22)*
+
+- `ai/mills_llm.py`: Added `MILL_NAMES` dict mapping all 16 mill tuples to canonical names. Added `_board_summary(board)` that generates a POSITION SUMMARY block (phase, piece counts, named closed mills, named 2-configs, mobility). Injected into all 7 MillsLLM prompt methods.
+
+### Bug B-10 — AI Allows Opponent to Consolidate Three Scattered Pieces into a Line ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `consolidation_penalty` (120).
+- `tactical_move_bonus()`: penalises move-phase non-capture moves that create new opponent 2-configs (opponent consolidates across the vacated square).
+
+### Bug B-11 — AI Session Summary Contains Fabricated Move Numbers and Piece Counts ✅ *(completed 2026-05-22)*
+
+- Part A: `ai/coordinator.py` `_build_game_facts()` derives authoritative GAME FACTS from move list; `ai/mills_llm.py` `summarise_session()` accepts `facts_block` prefix.
+- Part B: `tactical_move_bonus()` gains `return_breakdown=True` mode returning top terms by magnitude. `ai/game_ai.py` `_populate_thinking()` builds ≤8-word label from top 1–2 heuristic terms. Coordinator captures it in `deliberate()`; `web/app.py` includes in `ai_move` WS message; `game.js` renders italic "↳ {thinking}" in AI Discussion feed when "Show AI reasoning" checkbox enabled.
+
+### Bug B-12 — Opening Replay Fails with Illegal Move Error ✅ *(completed 2026-05-22)*
+
+- `tools/fix_openings.py`: replays each opening, truncates illegal sequences, removes entries with <3 surviving moves (65 of 66 retained).
+- `web/app.py` + `game.js`: Bad Move button hidden during active opening replay; NoneType crash fixed by initialising both coordinators before Watch hand-off; Watch button correctly calls `_run_ai_vs_ai_loop`.
+- `web/templates/index.html` + `game.js`: Opening rename/delete buttons in Openings panel. LLM name suggestion surfaced as editable prompt.
+
+### Bug B-13 — AI-vs-AI Game Not Available on GUI ✅ *(completed 2026-05-22)*
+
+- `web/app.py`: `start_ai_vs_ai` WS handler, `_run_ai_vs_ai_loop` coroutine, `toggle_save_library` handler. Session `ai_vs_ai` flag gates persistence.
+- `web/templates/index.html`: AI vs AI header button + setup modal (personality selectors, difficulty, save-to-library checkbox).
+- `web/static/game.js`: modal show/hide wired; `startAiVsAi()` function; `ai_move` handler supports both-color AI moves.
+
+### Bug B-14 — AI Herding ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `herding_coverage` (40).
+- `ai/heuristics.py`: added `_herding_coverage(board, color)` — counts opponent 2-config closing squares adjacent to own pieces. Applied in `evaluate()` for move and fly phases.
+
+### Bug B-15 — AI Does Not Anticipate Opponent Moves That Will Trap a Mill ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `trapped_mill` (160), `potential_mill` (25).
+- `ai/heuristics.py`: added `_trapped_mill_count()` (penalises own mills with all exits opponent-reachable) and `_free_two_config_count()` (rewards 2-configs with uncontested closing squares). Applied in `evaluate()` for move phase.
+
+### Bug B-17 — Capture Selection: Cross-Feeding Pairs ✅ *(completed 2026-05-22)*
+
+- `HeuristicWeights`: added `capture_creates_diamond` (320), `capture_activates_feeder` (280), `capture_creates_convergence` (250).
+- `tactical_move_bonus()`: three additive capture-unblocking patterns — diamond creation, feeder activation, general cross-mobility increase.
+
+### Bug UI-D — Tournament Mode: Show AI Personality Per Game ✅ *(completed 2026-05-22)*
+
+- `web/templates/index.html`: Added Personalities column header to tournament scoreboard `<thead>` to align with cells already generated by JS.
+
+### Bug UI-E — User Guide: Missing Sections ✅ *(completed 2026-05-22)*
+
+- `README.md`: Added Personality Profiles table, Position Setup editor walkthrough, Named Openings expanded section, Training Tools section with tool index and workflow, AI Slider Weights Reference section with grouped weight tables.
+
