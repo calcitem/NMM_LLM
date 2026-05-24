@@ -22,10 +22,23 @@ Outcomes follow Wikipedia's convention for solved game-trees:
 Run inside the project venv:
     .venv/bin/python tools/build_fullgame_db.py --help
     .venv/bin/python tools/build_fullgame_db.py --dry-run
-    .venv/bin/python tools/build_fullgame_db.py \
-        --output data/fullgame.sqlite --max-positions 500000
 
-Generated files are intentionally placed under data/ — see .gitignore.
+    # Default location (project data/ directory)
+    .venv/bin/python tools/build_fullgame_db.py --max-positions 500000
+
+    # Another drive — use --db-dir (auto-names the file fullgame.sqlite)
+    .venv/bin/python tools/build_fullgame_db.py --db-dir D:\databases --max-positions 500000
+    .venv/bin/python tools/build_fullgame_db.py --db-dir /mnt/external  --max-positions 500000
+
+    # Or give the full path explicitly with --output
+    .venv/bin/python tools/build_fullgame_db.py --output E:\NMM\fullgame.sqlite
+
+The script prints the resolved absolute path before starting so you always
+know where it's writing.  It also checks the target directory is writable
+before beginning the build, to avoid discovering a permissions error after
+hours of work.
+
+Generated files are intentionally placed under data/ by default — see .gitignore.
 """
 
 from __future__ import annotations
@@ -488,8 +501,21 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--output", "-o", type=Path, default=Path("data/fullgame.sqlite"),
-        help="Output SQLite path (default: data/fullgame.sqlite)",
+        "--output", "-o", type=Path, default=None,
+        help=(
+            "Output SQLite file path.  Accepts any absolute path including "
+            "other drives (e.g. D:\\\\databases\\\\fullgame.sqlite or "
+            "/mnt/external/fullgame.sqlite).  "
+            "Default: <project>/data/fullgame.sqlite"
+        ),
+    )
+    parser.add_argument(
+        "--db-dir", type=Path, default=None,
+        help=(
+            "Directory to write fullgame.sqlite into.  Shorthand for "
+            "--output <dir>/fullgame.sqlite.  Useful for pointing at another "
+            "drive without typing the filename.  Ignored if --output is set."
+        ),
     )
     parser.add_argument(
         "--max-positions", type=int, default=None,
@@ -530,6 +556,34 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    # ── Resolve output path ───────────────────────────────────────────────────
+    if args.output is not None:
+        output_path = args.output.resolve()
+    elif args.db_dir is not None:
+        output_path = args.db_dir.resolve() / "fullgame.sqlite"
+    else:
+        output_path = (_ROOT / "data" / "fullgame.sqlite").resolve()
+
+    # Pre-flight: make sure the target directory can actually be created/written.
+    if not args.dry_run:
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"ERROR: Cannot create output directory {output_path.parent}: {exc}",
+                  file=sys.stderr)
+            return 1
+        # Quick write test so we fail fast rather than after hours of work.
+        _probe = output_path.parent / ".nmm_write_probe"
+        try:
+            _probe.write_bytes(b"")
+            _probe.unlink()
+        except OSError as exc:
+            print(f"ERROR: Output directory is not writable ({output_path.parent}): {exc}",
+                  file=sys.stderr)
+            return 1
+
+    print(f"Output: {output_path}")
+
     _verify_deps()
     if args.install_deps:
         _maybe_pip_install_requirements()
@@ -568,7 +622,7 @@ def main() -> int:
         max_pos = args.sample
 
     builder = FullGameDBBuilder(
-        db_path=args.output,
+        db_path=output_path,
         max_positions=max_pos,
         max_depth=args.max_depth,
     )
@@ -590,7 +644,7 @@ def main() -> int:
         resolved = builder.conn.execute(
             "SELECT COUNT(*) FROM positions WHERE outcome IS NOT NULL"
         ).fetchone()[0]
-        size_mb = os.path.getsize(args.output) / (1024 * 1024)
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
         print(
             f"Build complete: {count} positions ({resolved} resolved) "
             f"in {elapsed:.1f}s, {size_mb:.1f} MB on disk."
