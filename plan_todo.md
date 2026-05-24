@@ -36,85 +36,138 @@ Additionally, if the DB was built to a non-default location (e.g. another drive 
 - `data/settings.json` — add `fullgame_db_path` (optional, defaults to `data/fullgame.sqlite`)
 - `README.md` — add `fullgame_db_path` to the Configuration table
 
-### Enhancement B-23 — Endgame position database builder ⬜
+### Enhancement B-23 — Endgame position database builder (direct-index format) ⬜
 
-**Goal:** A new script `tools/build_endgame_db.py` that builds a focused, high-coverage SQLite position database for the movement and fly phases (≤ 12 pieces on the board). It reuses the existing `ai/fullgame_db.py` query interface so `GameAI` can consult it without any additional wiring.
+**Goal:** A new script `tools/build_endgame_db.py` that builds a complete, solved endgame database for movement and fly phase positions (≤ 12 pieces on the board) using a **Syzygy-style direct-index array** — not SQLite. A new read interface `ai/endgame_solved_db.py` queries it.
 
-**Rationale:** The full-game DB (`build_fullgame_db.py`) targets the entire game tree (~10¹⁰ positions) and must be heavily bounded. The endgame space is far smaller and can be solved completely for the most critical piece counts:
+**Rationale:** The full-game DB (`build_fullgame_db.py`) must be bounded because the full game tree is ~10¹⁰ positions. The endgame space is small enough to solve *completely* for the most useful piece counts, and a direct-index format is dramatically better than SQLite for this case:
 
-| Total pieces | Positions (with D4 reduction) | Feasibility |
-|---|---|---|
-| ≤ 6 | ~330 K | trivially complete |
-| ≤ 8 | ~13 M | completely solvable in minutes |
-| ≤ 10 | ~124 M | solvable with patience (hours) |
-| ≤ 12 | ~575 M | feasible bounded, near-complete |
+| Total pieces | Positions (with D4 reduction) | WDL file size | Feasibility |
+|---|---|---|---|
+| ≤ 6 | ~330 K | ~83 KB | trivially complete |
+| ≤ 8 | ~13 M | ~3 MB | completely solvable in minutes |
+| ≤ 10 | ~124 M | ~31 MB | solvable in hours |
+| ≤ 12 | ~575 M | ~144 MB | feasible, near-complete |
 
-Only movement and fly phase positions are stored (no placement); this makes the database immediately useful for the endgame recogniser and the AI's deepened endgame search.
+Only movement and fly phase positions are stored (no placement phase).
+
+**Storage format — Syzygy-style direct-index array:**
+
+Rather than a key-value store, every possible piece configuration is assigned a sequential integer ID derived from combinatorial indexing:
+
+```
+position_id = combinatorial_index(white_squares, black_squares, turn)
+```
+
+Outcomes are stored as two compact flat arrays:
+- **WDL file** (`endgame_wdl.bin`): 2 bits per position — Win/Draw/Loss for the side to move. ≤8 pieces = ~3 MB; fits entirely in RAM.
+- **DTZ file** (`endgame_dtz.bin`): 1 byte per position — depth to terminal (distance-to-zero). Same size as WDL × 4.
+
+Query is O(1): compute the ID (arithmetic only, no search), read one array element. No B-tree, no binary search, no I/O once loaded into RAM.
+
+This is the same principle used by Syzygy and Nalimov chess tablebases.
 
 **Key differences from `build_fullgame_db.py`:**
 
-- Constrained to positions where `pieces_on_board["W"] + pieces_on_board["B"] <= max_pieces` (default 12; flag `--max-pieces N`)
-- Retrograde analysis from terminal positions outward (works backwards from wins/losses) rather than forward BFS — produces complete, exact solutions for the covered range
-- Separate output file: `data/endgame_solved.sqlite` by default (distinct from `data/fullgame.sqlite`)
-- `ai/fullgame_db.py` extended (or a thin `ai/endgame_solved_db.py` wrapper added) so `GameAI` can query both DBs; endgame DB takes priority when piece count is in its solved range
+- Constrained to `pieces_on_board["W"] + pieces_on_board["B"] <= max_pieces` (default 10; flag `--max-pieces N`)
+- Retrograde analysis from terminal positions outward — produces complete, exact, optimal solutions
+- Output: two compact binary files (`endgame_wdl.bin`, `endgame_dtz.bin`) — not SQLite
+- New `ai/endgame_solved_db.py` query module; `GameAI` consults it before the fullgame DB and before negamax when piece count is in range
 
-**Output path — any drive supported (mirror of `build_fullgame_db.py`):**
+**Output location — any drive supported:**
 
-- Default resolves to an absolute path (`<project>/data/endgame_solved.sqlite`) regardless of working directory
-- `--db-dir <path>` shorthand: point at any directory (including another drive); file is auto-named `endgame_solved.sqlite`
-- `--output <path>` for a fully custom filename anywhere on the system
-- Pre-flight write check before enumeration starts — fails fast with a clear error rather than after hours of work
-- Resolved absolute path printed at startup so the location is always visible
+- Default: `<project>/data/endgame_wdl.bin` + `<project>/data/endgame_dtz.bin` (absolute, not relative to cwd)
+- `--db-dir <path>`: write both files into any directory, including another drive
+- `--output-dir <path>`: alias for `--db-dir`
+- Pre-flight write check before build starts
+- Resolved paths printed at startup
 
 ```bash
 # Default location
 python tools/build_endgame_db.py --max-pieces 10
 
-# Another drive — directory shorthand
+# Another drive
 python tools/build_endgame_db.py --db-dir /mnt/external --max-pieces 10
 python tools/build_endgame_db.py --db-dir D:/databases  --max-pieces 10
-
-# Fully custom path
-python tools/build_endgame_db.py --output E:/NMM/endgame_solved.sqlite
 ```
 
 **Flags:**
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output PATH` | `<project>/data/endgame_solved.sqlite` | Full output file path — accepts any drive |
-| `--db-dir PATH` | — | Directory shorthand; auto-names file `endgame_solved.sqlite` |
-| `--max-pieces N` | 12 | Only store positions with ≤ N total pieces |
+| `--db-dir PATH` | `<project>/data/` | Directory to write `endgame_wdl.bin` and `endgame_dtz.bin` into |
+| `--max-pieces N` | 10 | Only solve positions with ≤ N total pieces |
 | `--dry-run` | — | Validate pipeline without writing |
-| `--resume` | — | Continue an interrupted build |
+| `--wdl-only` | — | Build WDL table only, skip DTZ (faster, smaller) |
 
 **Server wiring (same pattern as B-26 for fullgame DB):**
 
-The script builds the file; the server must also be told where to find it. This requires:
-
-1. **`web/app.py`** — load `EndgameDB` (or `FullGameDB` pointed at `endgame_solved.sqlite`) at startup:
+1. **`web/app.py`** — load at startup from configurable path:
    ```python
-   _endgame_solved_path = settings.get("endgame_solved_db_path") or (_ROOT / "data" / "endgame_solved.sqlite")
-   _endgame_solved_db = FullGameDB(_endgame_solved_path)
+   _eg_dir = Path(settings.get("endgame_solved_dir") or (_ROOT / "data"))
+   _endgame_solved_db = EndgameSolvedDB(_eg_dir)
    ```
 
-2. **`data/settings.json`** — add optional `endgame_solved_db_path` key for non-default locations:
+2. **`data/settings.json`** — add optional `endgame_solved_dir` key for non-default locations:
    ```json
-   { "endgame_solved_db_path": "/mnt/external/endgame_solved.sqlite" }
+   { "endgame_solved_dir": "/mnt/external" }
    ```
 
-3. **`web/app.py`** — pass `_endgame_solved_db` to `GameAI` alongside the fullgame DB; endgame DB takes priority for positions within its solved piece-count range.
+3. **`web/app.py`** — pass to `GameAI`; endgame DB consulted before negamax and before the fullgame DB when piece count is within its solved range.
 
-4. **`README.md`** — add `endgame_solved_db_path` to the Configuration table.
+4. **`README.md`** — add `endgame_solved_dir` to the Configuration table.
 
 **Files:**
 
 - `tools/build_endgame_db.py` (new)
-- `ai/fullgame_db.py` or new `ai/endgame_solved_db.py` (query interface extension)
+- `ai/endgame_solved_db.py` (new — O(1) query interface for the binary format)
 - `ai/game_ai.py` (consult endgame DB when piece count ≤ threshold)
 - `web/app.py` (startup loading + pass to GameAI — same pattern as B-26)
-- `data/settings.json` (add `endgame_solved_db_path`)
+- `data/settings.json` (add `endgame_solved_dir`)
 - `README.md` (Configuration table)
+
+---
+
+### Enhancement B-27 — Replace fullgame DB SQLite format with memory-mapped sorted binary ⬜
+
+**Goal:** Replace the SQLite storage in `build_fullgame_db.py` and `ai/fullgame_db.py` with a memory-mapped sorted binary file. This gives 2–5× faster queries and ~40% smaller files, which matters once the DB grows beyond available RAM.
+
+**Why SQLite degrades at scale:**
+
+SQLite uses a B-tree index on the 9-byte key. For a DB that fits in RAM, it is fine. Once the file exceeds available RAM (easily reached at 500M+ positions, which is 10–30 GB), every query causes random page faults — typically 3–4 B-tree node reads, each potentially a disk seek. At game speed (multiple queries per move decision) this becomes noticeable.
+
+**New format — memory-mapped sorted binary:**
+
+All records are written sorted by key and stored as fixed-size structs:
+
+```
+Record (32 bytes):
+  [9 bytes]  canonical position key
+  [1 byte]   outcome  (0=unknown, 1=W win, 2=draw, 3=B win)
+  [2 bytes]  depth to terminal (0–65535)
+  [4 bytes]  best move (from/to/capture packed as 3× 5-bit position indices + flags)
+  [16 bytes] top-4 child moves with outcome flags (4 bytes each)
+```
+
+Query = binary search on the key field: ~23 comparisons for 10M records, ~27 for 100M. The file is memory-mapped so the OS pages in only the needed portions; sequential access during build is highly cache-friendly.
+
+**Build pipeline change:**
+
+1. Enumerate positions as now, writing records to a temp file (unsorted)
+2. External sort the temp file by key (can be done in chunks, resumable)
+3. Write final sorted binary — this is the queryable DB
+4. Optional: write a sparse index (~1 entry per 1000 records, ~few MB) that loads into RAM to narrow binary searches to a 1000-record window in one step
+
+**Migration:**
+
+- `tools/build_fullgame_db.py` gains `--format [sqlite|binary]` flag; default remains `sqlite` until the binary format is validated, then switches
+- `ai/fullgame_db.py` gains a format-detection branch: opens binary if `.bin` extension or magic bytes match, otherwise falls back to SQLite
+- Existing SQLite DBs remain readable; no forced rebuild
+
+**Files:**
+
+- `tools/build_fullgame_db.py` — add binary output path + external sort step
+- `ai/fullgame_db.py` — add binary query path (mmap + binary search)
 
 ---
 
