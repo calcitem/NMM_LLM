@@ -27,11 +27,11 @@ Run inside the project venv:
     .venv/bin/python tools/build_fullgame_db.py --max-positions 500000
 
     # Another drive — use --db-dir (auto-names the file fullgame.sqlite)
-    .venv/bin/python tools/build_fullgame_db.py --db-dir D:\databases --max-positions 500000
+    .venv/bin/python tools/build_fullgame_db.py --db-dir D:/databases --max-positions 500000
     .venv/bin/python tools/build_fullgame_db.py --db-dir /mnt/external  --max-positions 500000
 
     # Or give the full path explicitly with --output
-    .venv/bin/python tools/build_fullgame_db.py --output E:\NMM\fullgame.sqlite
+    .venv/bin/python tools/build_fullgame_db.py --output E:/NMM/fullgame.sqlite
 
 The script prints the resolved absolute path before starting so you always
 know where it's writing.  It also checks the target directory is writable
@@ -504,7 +504,7 @@ def main() -> int:
         "--output", "-o", type=Path, default=None,
         help=(
             "Output SQLite file path.  Accepts any absolute path including "
-            "other drives (e.g. D:\\\\databases\\\\fullgame.sqlite or "
+            "other drives (e.g. D:/databases/fullgame.sqlite or "
             "/mnt/external/fullgame.sqlite).  "
             "Default: <project>/data/fullgame.sqlite"
         ),
