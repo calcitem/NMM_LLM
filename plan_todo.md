@@ -4,6 +4,38 @@
 
 ## New Bug & Enhancement Items
 
+### Bug B-26 — FullGameDB is never loaded by the server ⬜
+
+**Symptom:** Even if `data/fullgame.sqlite` exists (built via `tools/build_fullgame_db.py`), the web server ignores it entirely. The game plays as if the DB were absent regardless of its size or content.
+
+**Root cause:** `web/app.py` never constructs a `FullGameDB` instance. `GameAI` supports an optional `fullgame_db=` parameter and will query it when provided, but nothing in the server startup passes one in. Compare with `TrajectoryDB` and `EndgameDB`, which are loaded at startup and threaded through to every `GameAI` instance.
+
+Additionally, if the DB was built to a non-default location (e.g. another drive via `--db-dir`), there is no setting in `data/settings.json` to tell the server where to find it.
+
+**Fix:**
+
+1. **`web/app.py`** — load `FullGameDB` at startup alongside the other databases:
+   ```python
+   _fullgame_db_path = _ROOT / "data" / "fullgame.sqlite"
+   # override from settings if present
+   _fullgame_db = FullGameDB(_fullgame_db_path) if _fullgame_db_path.exists() else None
+   ```
+
+2. **`data/settings.json`** — add optional `fullgame_db_path` key. If set, the server uses that path instead of the default. Example:
+   ```json
+   { "fullgame_db_path": "/mnt/windows/NMM_DB/fullgame.sqlite" }
+   ```
+
+3. **`web/app.py`** — pass `_fullgame_db` through to every `GameAI` constructor call (same pattern as `trajectory_db` and `endgame_db` are passed today).
+
+4. **`web/app.py`** — add `fullgame_db_path` to the `/api/settings` GET response so the UI can display the configured path and whether the DB loaded successfully.
+
+**Files:**
+
+- `web/app.py` — startup loading, settings read, GameAI construction sites
+- `data/settings.json` — add `fullgame_db_path` (optional, defaults to `data/fullgame.sqlite`)
+- `README.md` — add `fullgame_db_path` to the Configuration table
+
 ### Enhancement B-23 — Endgame position database builder ⬜
 
 **Goal:** A new script `tools/build_endgame_db.py` that builds a focused, high-coverage SQLite position database for the movement and fly phases (≤ 12 pieces on the board). It reuses the existing `ai/fullgame_db.py` query interface so `GameAI` can consult it without any additional wiring.
