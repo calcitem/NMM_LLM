@@ -55,23 +55,66 @@ Only movement and fly phase positions are stored (no placement); this makes the 
 
 - Constrained to positions where `pieces_on_board["W"] + pieces_on_board["B"] <= max_pieces` (default 12; flag `--max-pieces N`)
 - Retrograde analysis from terminal positions outward (works backwards from wins/losses) rather than forward BFS — produces complete, exact solutions for the covered range
-- Separate output file: `data/endgame_solved.sqlite` (distinct from `data/fullgame.sqlite`)
+- Separate output file: `data/endgame_solved.sqlite` by default (distinct from `data/fullgame.sqlite`)
 - `ai/fullgame_db.py` extended (or a thin `ai/endgame_solved_db.py` wrapper added) so `GameAI` can query both DBs; endgame DB takes priority when piece count is in its solved range
+
+**Output path — any drive supported (mirror of `build_fullgame_db.py`):**
+
+- Default resolves to an absolute path (`<project>/data/endgame_solved.sqlite`) regardless of working directory
+- `--db-dir <path>` shorthand: point at any directory (including another drive); file is auto-named `endgame_solved.sqlite`
+- `--output <path>` for a fully custom filename anywhere on the system
+- Pre-flight write check before enumeration starts — fails fast with a clear error rather than after hours of work
+- Resolved absolute path printed at startup so the location is always visible
+
+```bash
+# Default location
+python tools/build_endgame_db.py --max-pieces 10
+
+# Another drive — directory shorthand
+python tools/build_endgame_db.py --db-dir /mnt/external --max-pieces 10
+python tools/build_endgame_db.py --db-dir D:/databases  --max-pieces 10
+
+# Fully custom path
+python tools/build_endgame_db.py --output E:/NMM/endgame_solved.sqlite
+```
 
 **Flags:**
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output PATH` | `data/endgame_solved.sqlite` | Output database path |
-| `--max-pieces N` | 12 | Only store positions with ≤ N pieces total |
+| `--output PATH` | `<project>/data/endgame_solved.sqlite` | Full output file path — accepts any drive |
+| `--db-dir PATH` | — | Directory shorthand; auto-names file `endgame_solved.sqlite` |
+| `--max-pieces N` | 12 | Only store positions with ≤ N total pieces |
 | `--dry-run` | — | Validate pipeline without writing |
 | `--resume` | — | Continue an interrupted build |
+
+**Server wiring (same pattern as B-26 for fullgame DB):**
+
+The script builds the file; the server must also be told where to find it. This requires:
+
+1. **`web/app.py`** — load `EndgameDB` (or `FullGameDB` pointed at `endgame_solved.sqlite`) at startup:
+   ```python
+   _endgame_solved_path = settings.get("endgame_solved_db_path") or (_ROOT / "data" / "endgame_solved.sqlite")
+   _endgame_solved_db = FullGameDB(_endgame_solved_path)
+   ```
+
+2. **`data/settings.json`** — add optional `endgame_solved_db_path` key for non-default locations:
+   ```json
+   { "endgame_solved_db_path": "/mnt/external/endgame_solved.sqlite" }
+   ```
+
+3. **`web/app.py`** — pass `_endgame_solved_db` to `GameAI` alongside the fullgame DB; endgame DB takes priority for positions within its solved piece-count range.
+
+4. **`README.md`** — add `endgame_solved_db_path` to the Configuration table.
 
 **Files:**
 
 - `tools/build_endgame_db.py` (new)
 - `ai/fullgame_db.py` or new `ai/endgame_solved_db.py` (query interface extension)
 - `ai/game_ai.py` (consult endgame DB when piece count ≤ threshold)
+- `web/app.py` (startup loading + pass to GameAI — same pattern as B-26)
+- `data/settings.json` (add `endgame_solved_db_path`)
+- `README.md` (Configuration table)
 
 ---
 
