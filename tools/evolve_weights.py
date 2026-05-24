@@ -22,6 +22,10 @@ Examples:
 
   # Slower but stronger evaluation (difficulty 6, 30 games)
   python tools/evolve_weights.py --difficulty 6 --games-per-gen 30 --parallel 6
+
+# Deep evolution
+eg python tools/evolve_weights.py --generations 100 --from-best --parallel 8 --games-per-gen 32 --difficulty 7
+
 """
 from __future__ import annotations
 

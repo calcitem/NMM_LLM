@@ -278,8 +278,16 @@ class GameAI:
         top_n: int = 1,             # if >1, pick randomly from top-N moves (self-play noise)
         fast_early_game: bool = False,  # skip the 4s early-game budget (self-play mode)
         force_book_early: bool = False, # force book move for first 2 AI placements
+        fullgame_db=None,           # ai.fullgame_db.FullGameDB | None — optional DB lookup
     ) -> dict:
-        """Return the best (or deliberately bad) legal move dict for self.color."""
+        """Return the best (or deliberately bad) legal move dict for self.color.
+
+        When ``fullgame_db`` is provided and the current position is present in
+        the database, the AI may return the DB's best move directly (resolved
+        outcomes) or blend the DB's per-move score delta into the existing
+        ``trajectory_hints`` pipeline (unresolved / neutral edges).  Misses
+        fall back transparently to the normal negamax search.
+        """
         self._force_stop = False
         self._deadline   = math.inf  # reset any prior force_stop() effect
         self.last_thinking = ""       # reset thinking trace
@@ -289,6 +297,43 @@ class GameAI:
         if len(moves) == 1:
             self.last_was_blunder = False
             return moves[0]
+
+        # ── Optional full-game DB consultation ────────────────────────────
+        # Only consulted when the caller passes a live DB.  A DB hit with a
+        # resolved best_move shortcuts the whole search; otherwise the DB's
+        # per-move score delta merges into trajectory_hints and the regular
+        # search runs.
+        if fullgame_db is not None and fullgame_db.is_available():
+            try:
+                result = fullgame_db.query(board)
+            except Exception as exc:    # never let DB errors kill the AI
+                logger_msg = f"fullgame_db query failed: {exc}"
+                try:
+                    import logging
+                    logging.getLogger(__name__).warning(logger_msg)
+                except Exception:
+                    pass
+                result = None
+            if result is not None:
+                # Resolved exact hit — return DB best move when legal.
+                if result.outcome is not None and result.best_move_canonical:
+                    best_notation = fullgame_db.best_move(board)
+                    if best_notation:
+                        match = next(
+                            (m for m in moves if self._move_notation(m) == best_notation),
+                            None,
+                        )
+                        if match is not None:
+                            self.last_was_blunder = False
+                            self.last_thinking = "fullgame DB"
+                            return match
+                # Unresolved row — merge DB deltas into trajectory hints.
+                db_hints = fullgame_db.score_delta(board, self.color)
+                if db_hints:
+                    merged = dict(trajectory_hints or {})
+                    for k, v in db_hints.items():
+                        merged[k] = merged.get(k, 0.0) + v
+                    trajectory_hints = merged
 
         # Mandatory block: if the opponent has an immediate mill threat (closeable
         # in exactly one move), restrict candidates to blocking moves only.
