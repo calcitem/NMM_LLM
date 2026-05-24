@@ -3,12 +3,12 @@ setlocal EnableDelayedExpansion
 title Nine Men's Morris
 
 set "NMM_DIR=%~dp0"
-set "VENV_UV=%NMM_DIR%.venv\Scripts\uvicorn.exe"
+set "VENV_PY=%NMM_DIR%.venv\Scripts\python.exe"
 set "HOST=127.0.0.1"
 set "PORT=8000"
 
-if not exist "%VENV_UV%" (
-    echo [NMM] ERROR: .venv not found. Run install.ps1 first.
+if not exist "%VENV_PY%" (
+    echo [NMM] ERROR: .venv not found. Run install.bat first.
     pause & exit /b 1
 )
 
@@ -35,8 +35,9 @@ if %errorlevel%==0 (
 echo [NMM] Starting Nine Men's Morris at http://%HOST%:%PORT% ...
 cd /d "%NMM_DIR%"
 
-rem -- Launch uvicorn in this console window --
-start /B "" "%VENV_UV%" web.app:app --host %HOST% --port %PORT%
+rem -- Launch uvicorn via 'python -m uvicorn' so we don't depend on the
+rem -- .exe shim location (more robust when install paths contain spaces) --
+start /B "" "%VENV_PY%" -m uvicorn web.app:app --host %HOST% --port %PORT%
 
 rem -- Wait for server then open browser --
 timeout /t 2 /nobreak >nul
