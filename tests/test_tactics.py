@@ -16,6 +16,7 @@ from ai.heuristics import (
     _piece_separation,
     _contested_mills,
     _open_mill_domination,
+    _unguarded_cardinal_mill_alert,
     evaluate,
 )
 
@@ -509,6 +510,69 @@ class TestCaptureDisruptDiamond(unittest.TestCase):
             tactical_move_bonus(before, after, "W", w0),
             tactical_move_bonus(before, after, "W", w1),
         )
+
+
+# ── B-22 regression: emergency block must outrank speculative improvement ──────
+
+class TestB22EmergencyBlock(unittest.TestCase):
+    """Regression for game at move 32: White (fly phase, 3 pieces) must block
+    Black's immediate b2-b4-b6 mill threat rather than playing a speculative move.
+
+    Position before White's move 32:
+      White (fly): a7, d7, e5
+      Black (move): b2, b4, d5, d6
+    Black can close mill b2-b4-b6 by sliding d6→b6 (adjacent).
+    White should fly to b6 to block.
+    """
+
+    @staticmethod
+    def _b22_board():
+        pos = {p: "" for p in POSITIONS}
+        for p in ["a7", "d7", "e5"]:
+            pos[p] = "W"
+        for p in ["b2", "b4", "d5", "d6"]:
+            pos[p] = "B"
+        return BoardState(
+            positions=pos,
+            turn="W",
+            pieces_on_board={"W": 3, "B": 4},
+            pieces_placed={"W": 9, "B": 9},
+            pieces_captured={"W": 0, "B": 0},
+        )
+
+    def test_unguarded_cardinal_mill_alert_detects_b6(self):
+        b = self._b22_board()
+        alert = _unguarded_cardinal_mill_alert(b, "B", "W")
+        self.assertIn("b6", alert,
+            "b6 must be detected as the closing square of unguarded cardinal mill b2-b4-b6")
+
+    def test_evaluate_penalises_unguarded_cardinal_mill(self):
+        b = self._b22_board()
+        score = evaluate(b, "W")
+        # Introduce a guarding piece at a4 (adjacent to b4) and compare
+        guarded_pos = dict(b.positions)
+        guarded_pos["a4"] = "W"
+        guarded_pos["e5"] = ""          # swap e5 out to keep piece count equal
+        b_guarded = BoardState(
+            positions=guarded_pos,
+            turn="W",
+            pieces_on_board={"W": 3, "B": 4},
+            pieces_placed={"W": 9, "B": 9},
+            pieces_captured={"W": 0, "B": 0},
+        )
+        alert_guarded = _unguarded_cardinal_mill_alert(b_guarded, "B", "W")
+        self.assertEqual([], alert_guarded,
+            "a4 adjacent to b4 should guard the b2-b4-b6 mill")
+        self.assertGreater(evaluate(b_guarded, "W"), score,
+            "guarded position must score higher than unguarded position")
+
+    def test_ai_blocks_b6_not_speculative_move(self):
+        from ai.game_ai import GameAI
+        b = self._b22_board()
+        ai = GameAI(difficulty=5, color="W")
+        move = ai.choose_move(b)
+        self.assertEqual(move.get("to"), "b6",
+            f"AI should fly to b6 to block Black's mill; chose {move} instead")
 
 
 if __name__ == "__main__":
