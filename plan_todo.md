@@ -2,6 +2,45 @@
 
 *New items go here. When an item is completed, move it to `plan\\\_done.md`.*
 
+---
+
+## Implementation Roadmap
+
+Active implementation order agreed 2026-05-25. Two parallel tracks:
+
+### Track 1 — Heuristic / Phase-Control ✅ COMPLETE (2026-05-25)
+
+| # | Item | Key outcome | Status |
+|---|------|-------------|--------|
+| 1 | **B-46** | Add `placement_index` parameter — prerequisite for B-28/B-47 | ✅ |
+| 2 | **B-28** | Late-placement capitalisation scaling (validates B-34/B-35 game examples) | ✅ |
+| 3 | **B-29** | Busy-chain priority: suppress `close_mill` bonus when level-4 chain confirmed | ✅ |
+| 4 | **B-37** | Opponent chain detection (mirror `_placement_chain_scan` for opponent) | ✅ |
+| 5 | **B-36** | Unguarded cardinal mill alert | ✅ |
+| 6 | **B-22** | Regression test + emergency block fix (investigate FEN at move 32 first) | ✅ |
+| 7 | **B-47** | White / Black asymmetric placement weights | ✅ |
+| 8 | **B-33** | Dead-block quality / forcing response value | ✅ |
+| 9 | **B-30** | Dual-mill oscillation preservation | ✅ |
+
+### Track 2 — DB / Infrastructure (independent; can run in parallel)
+
+| # | Item | Key outcome |
+|---|------|-------------|
+| A | **B-26** (DB) | Wire FullGameDB into server startup |
+| B | **B-23** (DB) | Syzygy-style endgame DB builder |
+| C | **B-27** (DB) | Binary format for fullgame DB |
+
+### Track 3 — Search Stack (independent; implement after Track 1 is stable)
+
+SE-1 → SE-2 → SE-3 (transposition table, killer heuristic, history heuristic)
+
+### Phase strategy guide
+
+`data/phase_strategy.md` — compact phased playing guide for LLM context injection.
+Feed the relevant phase section(s) to MillsLLM at each game stage.
+
+---
+
 ## New Bug & Enhancement Items
 
 ### Bug B-26 — FullGameDB is never loaded by the server ⬜
@@ -407,7 +446,7 @@ A summary card per database showing:
 
 - `tests/` — regression test from FEN at move 32
 
-### Tactic B-23 — Reward forcing placements that compel opponent onto low-utility squares ⬜
+### Tactic B-33 — Reward forcing placements that compel opponent onto low-utility squares ⬜
 
 **Goal:** The AI should prefer placements that force an opponent defensive response onto squares of low strategic value — locking the opponent's piece to a passive role while the AI retains high-value positions.
 
@@ -448,7 +487,7 @@ At turn 8, White places at `d5`. This forces Black to block at `d7`, which has n
 
 - `ai/heuristics.py` — `\\\_placement\\\_chain\\\_scan()`, `tactical\\\_move\\\_bonus()`
 
-### Bug B-24 — Placement 9 should avoid sterile forks with no nearby feeder support ⬜
+### Bug B-34 — Placement 9 should avoid sterile forks with no nearby feeder support ⬜ *(game test case; implementation covered by B-28)*
 
 **Symptom:** On the last placement, the AI sometimes creates a nominal fork or 2-config that has no nearby feeder pieces and confers no forcing continuation. This reduces the AI's mobility and immediately gives the opponent initiative.
 
@@ -482,7 +521,7 @@ White's last placement at `g1` on turn 9 reduces the mobility of adjacent pieces
 
 - `ai/heuristics.py` — `tactical\\\_move\\\_bonus()`, late-placement window checks
 
-### Bug B-25 — Final placements: prefer dual-purpose block-and-build over passive 2-config ⬜
+### Bug B-35 — Final placements: prefer dual-purpose block-and-build over passive 2-config ⬜ *(game test case; implementation covered by B-28)*
 
 **Symptom:** On the last placement the AI creates a 2-piece setup that ignores an opponent mobile mill, when a dual-purpose square would both block and create own pressure.
 
@@ -515,7 +554,7 @@ At turn 9, Black places at `e5` creating a 2-piece. This ignores White's mill st
 
 - `ai/heuristics.py`
 
-### Bug B-26 — Increase imperative to block unguarded cardinal mill lines during placement ⬜
+### Bug B-36 — Increase imperative to block unguarded cardinal mill lines during placement ⬜
 
 **Symptom:** The AI fails to block opponent cardinal mill lines (e.g. `a4-b4-c4`) when they are completely unguarded by any own piece and about to become a permanent structural threat.
 
@@ -563,7 +602,7 @@ Black builds a forcing chain from turn 4 onwards partly using cardinal squares, 
 
 - `tests/` — test for the `1.f4 b4 2.d2 d6 3.d5 d3 4.d7 c4 5.g4 a4xg4 6.e5` failure
 
-### Enhancement B-27 — Opponent placement\_busy\_scan: detect and disrupt opponent forcing chains ⬜
+### Enhancement B-37 — Opponent placement\_busy\_scan: detect and disrupt opponent forcing chains ⬜
 
 **Goal:** Mirror `\\\_placement\\\_chain\\\_scan()` to also detect when the **opponent** is building a forcing-chain capability, and disrupt it before it becomes unavoidable.
 
@@ -642,11 +681,11 @@ Black creates a dual 2-config setup in turn 8. White cannot block both. Black cl
 
 **Pattern across supplied game examples:**
 
-- Turn 9 sterile fork instead of actionable 2-config (B-24 game above).
+- Turn 9 sterile fork instead of actionable 2-config (B-34 game above).
 
-- Turn 9 passive 2-config instead of dual-purpose block (B-25 game above).
+- Turn 9 passive 2-config instead of dual-purpose block (B-35 game above).
 
-- Turn 6 speculative setup instead of forcing play or opponent disruption (B-27 games above).
+- Turn 6 speculative setup instead of forcing play or opponent disruption (B-37 games above).
 
 **Fix — phase-sensitive placement weighting:**
 
@@ -703,9 +742,13 @@ Black creates a dual 2-config setup in turn 8. White cannot block both. Black cl
 
 **Requested behaviour:** when `search\\\_ahead\\\_busy` finds a forced chain / winning busy-sequence, it should take priority over a merely good local mill closure.
 
-**Suggested implementation:**
+**Agreed implementation:**
 
-- `ai/heuristics.py` — increase `defer\\\_for\\\_chain` further and add a dedicated override when the busy-chain evaluator reaches a “forced win” confidence state.
+- `ai/heuristics.py` — when `_placement_chain_scan()` returns level 4 (forced chain that closes a mill on the final piece), **suppress the `close_mill_contribution` from `tactical_move_bonus()`** for moves that are NOT the chain continuation. A hard override, not merely a bonus boost: the chain result replaces the local mill score rather than adding to it.
+
+- `ai/heuristics.py` — increase `defer\\\_for\\\_chain` further so that level-4 chains are reliably preferred over level-2/3 chains when no suppress applies.
+
+- Add a `busy_chain_priority` weight (default ~400): the flat bonus added to any move that enters or continues a confirmed level-4 chain. Tunable separately from `defer_for_chain`.
 
 - `ai/heuristics.py` — extend `placement\\\_busy\\\_scan` / `search\\\_ahead\\\_busy` depth to **5 plies ahead** in placement phase when the chain remains forcing.
 
@@ -831,27 +874,24 @@ A coherent implementation order would be:
 
 5. improve reasoning transparency so future misses are easier to diagnose.
 
-## Thematic note for Claude context
+## Thematic note — placement-phase root causes (updated 2026-05-25)
 
-Several bugs above (B-22 through B-28) cluster around two core weaknesses:
+The B-22 through B-37 cluster around three confirmed core weaknesses:
 
-**Weakness 1 — Late placement overvalues speculative structure.** The evaluator rewards mill setups, fork creation, and 2-config building at roughly equal weight across all 9 placements. It needs to switch to preferring forcing, blocking, and converting in the last 2–3 placements.
+**Weakness 1 — Late placement overvalues speculative structure.**
+The fix is `placement_index` scaling (B-46 / B-28): setup-building bonuses taper from
+1.0× at placement 1 to 0.25× at placement 9, while blocking and converting bonuses rise.
 
-**Weakness 2 — Opponent forcing potential is not mirrored.** `\\\_placement\\\_chain\\\_scan` is one-sided (AI initiative only). The same logic needs to evaluate the opponent's chain capability so the AI can decide between "build my own chain" and "break the opponent's chain before it becomes unstoppable."
+**Weakness 2 — Opponent forcing potential is not mirrored.**
+`_placement_chain_scan` is one-sided (AI initiative only). B-37 mirrors it for the
+opponent so the AI can choose between "build my chain" and "break their chain first."
 
-**Recommended implementation order:**
+**Weakness 3 — Tactical priority ladder exists in ordering but not in scoring.**
+`_order_moves()` has a clean P0/P1/P2 hierarchy but `tactical_move_bonus()` is
+fully additive — speculative bonuses can still outscore an emergency block or a
+confirmed winning chain. B-29 fixes the chain case; B-22 investigates the block case.
 
-1. **B-27** (opponent chain disruption) — highest leverage, addresses all three forcing-chain game examples
-
-2. **B-28** (late-placement capitalisation scaling) — directly fixes the broad pattern seen in B-24 and B-25 games
-
-3. **B-26** (unguarded cardinal mill alert) — targeted, testable, addresses the `a4-b4-c4` failure
-
-4. **B-22** (regression test at move 32 FEN) — confirm mill-blocking detection is working correctly
-
-5. **B-24** and **B-25** (sterile fork / dual-purpose) — tune after B-27 and B-28 are stable
-
-6. **B-23** (dead-block quality / forcing response value) — refinement once core fixes are in place
+**Implementation order:** see the Roadmap section at the top of this file.
 
 ## Note for Claude — hidden heuristic weights are being evolved but are not visible in the GUI sliders
 
@@ -1046,6 +1086,86 @@ If `d2-b2` is being generated and evaluated but still loses narrowly to `b4-b2`,
   
 
 
+### Enhancement B-46 — Add `placement_index` parameter to `tactical_move_bonus()` ⬜
+
+**Goal:** Replace the 8+ scattered `pieces_placed < 6`, `pieces_placed >= 6`,
+`pieces_placed < 9` checks in `tactical_move_bonus()` with a single
+`placement_index = before.pieces_placed.get(color, 0)` value (0–8) and a
+`late_placement_multiplier` curve. Prerequisite for B-28 and B-47.
+
+**Multiplier curve (for setup-building bonuses):**
+
+| placement_index | multiplier |
+|---|---|
+| 0–5 | 1.0 |
+| 6 | 0.8 |
+| 7 | 0.5 |
+| 8 | 0.25 |
+
+The multiplier applies to: `setup_mill`, `scatter_placement`, `feeder_diamond`,
+`fork_anticipation`, and any other speculative structure bonus.
+It does NOT apply to: `close_mill`, `block_opponent_mill`, `stop_opponent_mills`,
+`convergence_block`, or emergency-block contributions — those are not setup bonuses.
+
+**Files:**
+
+- `ai/heuristics.py` — `tactical_move_bonus()`: add `placement_index` variable;
+  apply `late_placement_multiplier` to the relevant bonus terms; remove the
+  existing scattered threshold checks and replace with the single variable.
+
+---
+
+### Enhancement B-47 — White / Black asymmetric placement weights ⬜
+
+**Goal:** Add side-specific weight fields to `HeuristicWeights` so White and Black
+can have different strategic emphasis during the placement phase. Both sides share
+the same HeuristicWeights instance today; this adds parallel fields for the asymmetric
+bonuses, leaving the symmetric fields unchanged.
+
+**New weight fields (add to `HeuristicWeights`):**
+
+```python
+# White early-placement cardinal emphasis (placements 1–4)
+white_cardinal_early: int = 260    # replaces cardinal_block for White in placement_index 0–4
+                                   # (base cardinal_block 200 + 30% boost)
+
+# Black early-placement reactive blocking emphasis (placements 1–4)
+black_convergence_early: int = 325  # replaces convergence_block for Black in index 0–4
+black_fork_anticipation_early: int = 117  # replaces fork_anticipation for Black in index 0–4
+
+# Black late-placement last-move advantage (placements 7–8)
+black_dual_threat_late: int = 240   # replaces dual_threat_placement for Black in index 6–7
+
+# White late-placement two-independent requirement (placements 7–8)
+white_independent_mills: int = 280  # bonus for White having 2 independent 2-configs
+                                    # at placement_index 7–8
+```
+
+**Application logic in `tactical_move_bonus()`:**
+```python
+# Early cardinal bonus (placement_index < 5)
+cardinal_w = (weights.white_cardinal_early if color == "W"
+              else weights.cardinal_block)
+
+# Early convergence/fork blocking (placement_index < 5)
+conv_w = (weights.black_convergence_early if color == "B"
+          else weights.convergence_block)
+```
+
+**Why separate rather than scale:** White and Black have genuinely different strategic
+goals in the same phase (White: proactive cardinal claim; Black: reactive disruption).
+A shared weight tuned for one side is wrong for the other.
+
+**Files:**
+
+- `ai/heuristics.py` — `HeuristicWeights` dataclass: add 5 new fields above.
+- `ai/heuristics.py` — `tactical_move_bonus()`: use the asymmetric fields when
+  `placement_index` is in the relevant window.
+- `tools/evolve_weights.py` — new fields are automatically included via
+  `tunable_fields()`; no change needed unless `_FIXED_FIELDS` override is wanted.
+
+---
+
 ## Search & Evaluation Enhancements
 
 ### TIER 1 — Core Search Stack (implement together)
@@ -1199,4 +1319,196 @@ Gains compound with SE-1: the TT provides a hash-move to try first at each node,
 - **Tactical before positional** — The AI urgency hierarchy (close mill → block mill → disrupt structures → position) is a first-class design constraint, not an afterthought.
 
 - **Staged opening memory** — Starting play is recognised in phases (early, 12-piece mid-placement, final placement), with move-sequence ancestry and searchable tags preserved so both the engine and the study tools can reason over opening families rather than only isolated final lines.
+
+
+
+### Tactic B-39 — Avoid creating disrupted 2-configs next to an opponent blocker ⬜
+
+**Symptom:** the AI sometimes places a piece beside its own piece when that adjacent pair is already pinned or spoiled by an opponent piece on the far side, creating a disrupted 2-config that looks like structure but is usually strategically bad.
+
+**Example:** opponent at `d7`, own piece at `d6`, placing at `d5` creates a disrupted vertical 2-config unless it is serving another tactical purpose. In general this should be treated as a bad move, not as ordinary 2-config progress.
+
+**Requested behaviour:** in placement and early movement phases, penalise creating own adjacent pairs where the third square relationship is already spoiled by an opponent blocker, unless the move also serves a stronger tactical purpose such as an emergency block, immediate mill, dual-purpose tactic, or a verified busy-chain continuation.
+
+**Suggested implementation:**
+
+- `ai/heuristics.py` — add `disrupted_two_config_penalty` for patterns where `(own, own, opp)` or the equivalent blocked adjacency makes the 2-config non-convertible or strategically cramped.
+
+- `ai/heuristics.py` — add helper such as `\_is_disrupted_two_config(board, move, side) -> bool`.
+
+- `ai/game_ai.py` — ensure B-38 tactical ladder exceptions can override this penalty only when a stronger tactical reason is present.
+
+- `AI_INTERNALS.md` — document the disrupted-2-config rule and the example `d7` / `d6` / `d5`.
+
+**Files:**
+
+- `ai/heuristics.py`
+
+- `ai/game_ai.py`
+
+- `AI_INTERNALS.md`
+
+### Tactic B-40 — Preserve and cycle shared-piece dual mills until endgame ⬜
+
+**Goal:** when the AI has a true dual-mill configuration (two 2-configs or mill closures sharing a pivot piece), it should preserve and use that structure repeatedly instead of abandoning it for random reshuffling, at least until the endgame transition or until a clearly superior tactical conversion exists.
+
+**Requested behaviour:** if the AI has a shared-piece dual mill config it can legally cycle, it should keep cycling the two mills to extract captures and maintain pressure until at least endgame is reached, unless doing so walks into a stronger refutation or exact endgame DB guidance says otherwise.
+
+**Suggested implementation:**
+
+- `ai/heuristics.py` — increase `shared_pivot_detection` and `mobile_mill_value` when the oscillation is legal and repeatable.
+
+- `ai/game_ai.py` — add a persistence bonus for preserving a working dual-mill cycle instead of breaking it voluntarily.
+
+- `AI_INTERNALS.md` — document the rule that shared-piece dual mills are a maintain-and-harvest structure, not just a one-turn tactic.
+
+> **Tie-in (B-30, B-37):** this generalises the dual-mill oscillation requirement from the specific busy-chain example in B-30 into a standing policy for mid/late movement phases.
+
+**Files:**
+
+- `ai/heuristics.py`
+
+- `ai/game_ai.py`
+
+- `AI_INTERNALS.md`
+
+### Tactic B-41 — When opening a mill, move the safest re-closing piece ⬜
+
+**Symptom:** when the AI opens one of its own mills to keep mobility, it may move the wrong piece and leave itself unable to close the mill again next turn because the re-closing route is blocked or immediately contestable.
+
+**Requested behaviour:** if the AI opens a mill, it should prefer moving the mill piece whose departure still leaves a clean, re-closeable mill on the next turn — specifically, the moved piece should be the one with no adjacent blocker or opposing stopper that can prevent re-closure on the next move.
+
+**Suggested implementation:**
+
+- `ai/heuristics.py` — add `safe_mill_open_bonus` and `unsafe_mill_open_penalty`.
+
+- `ai/game_ai.py` — when candidate moves open an existing mill, evaluate which moved square preserves the highest probability of immediate legal re-closure.
+
+- `AI_INTERNALS.md` — document that opening a mill is not neutral; the preferred departure square is the one least vulnerable to immediate interruption.
+
+**Files:**
+
+- `ai/heuristics.py`
+
+- `ai/game_ai.py`
+
+- `AI_INTERNALS.md`
+
+### Bug B-42 — Endgame move choice is drifting instead of closing available mills ⬜
+
+**Symptom:** in endgame positions the AI is sometimes moving pieces around the board seemingly at random instead of closing an available mill.
+
+**Why this matters:** late movement and fly phases are the least tolerant of wasted tempi. If a legal mill closure exists and is not tactically refuted, failing to take it can throw away a won or drawable endgame.
+
+**Requested behaviour:** diagnose why the AI is drifting in endgame instead of converting available mills. Exact endgame DB hits should dominate. On DB miss, heuristic fallback should strongly prefer immediate mill closure over random relocation.
+
+**Suggested checks:**
+
+- verify exact endgame DB lookup is firing when the position is within solved range
+
+- verify `\_move_closes_mill()` is still recognised in late movement and fly phases
+
+- verify phase-specific fallback is not underweighting `mill_closure_rate` or `immediate_mill_bonus` in endgame
+
+- verify move ordering and pruning are not hiding immediate conversions
+
+> **Tie-in (B-23, B-37, B-38):** exact endgame DB should have first priority, and on miss the late-movement/fly phase plus tactical ladder should make immediate mill closure the default conversion choice.
+
+**Files:**
+
+- `ai/game_ai.py`
+
+- `ai/heuristics.py`
+
+- `ai/endgame_solved_db.py`
+
+- `AI_INTERNALS.md`
+
+### Tactic B-43 — If both sides threaten immediate mills, prefer the mill closure that removes the opponent threat ⬜
+
+**Scenario:** the opponent has a ready-to-close mill (an open 2-config plus an adjacent feeder piece that can close next move), and the AI also has a ready-to-close mill.
+
+**Requested behaviour:** if the AI can close its own mill in a way that also removes the opponent's immediate mill threat, it should do that. In other words, when both sides have immediate conversions available, prefer the AI mill closure that simultaneously neutralises the opponent threat by capture or by structural disruption.
+
+**Suggested implementation:**
+
+- `ai/game_ai.py` — extend tactical ladder Priority 5 dual-purpose logic so it explicitly recognises "close own mill and remove opponent immediate mill threat" as a premium tactical class.
+
+- `ai/heuristics.py` — add or raise `dual_purpose_bonus` where the removal target is the opponent's feeder or blocking piece needed for next-turn mill closure.
+
+- add regression tests where both sides have open 2-config plus feeder-piece threats and assert the AI chooses the converting-and-neutralising line.
+
+**Files:**
+
+- `ai/game_ai.py`
+
+- `ai/heuristics.py`
+
+- `AI_INTERNALS.md`
+
+### Tactic B-44 — Mill captures should preferentially remove the piece the opponent most needs to replace ⬜
+
+**Goal:** when making a mill, the AI should not capture randomly or merely by static value. It should preferentially remove the opponent piece whose loss forces the opponent to spend a move or placement replacing a critical blocker, feeder, or anti-mill piece.
+
+**Requested behaviour:** mill captures should strongly prefer pieces that:
+
+- are currently stopping one of the AI's 2-configs from becoming a mill on the next move or next placement
+
+- are the feeder piece the opponent needs to complete its own 2-config
+
+- are the only practical blocker preventing the AI from re-closing a mobile mill
+
+- force the opponent to spend its next action repairing structure rather than progressing its own plan
+
+**Suggested implementation:**
+
+- `ai/heuristics.py` — add `capture_replacement_pressure_bonus` and `capture_feeder_removal_bonus`.
+
+- `ai/game_ai.py` — in capture selection, rank removable opponent pieces by replacement burden and threat interruption, not only by local mobility or raw piece centrality.
+
+- `AI_INTERNALS.md` — document that best capture is often the piece the opponent most urgently needs back, not merely the most central one.
+
+**Files:**
+
+- `ai/heuristics.py`
+
+- `ai/game_ai.py`
+
+- `AI_INTERNALS.md`
+
+### Enhancement B-45 — Replace automatic AI resignation with an offer of defeat ⬜
+
+**Goal:** change the current automatic AI resignation into an offer of defeat that the human player can accept or decline, allowing lost positions to be played out when desired.
+
+**Requested behaviour:** when the AI reaches the current resignation threshold, it should present an offer of defeat instead of ending the game immediately. The human can grant the defeat or continue playing the position out.
+
+**Why this matters:**
+
+- some users want to verify the win on the board
+
+- some positions are useful for debugging endgame behaviour even if the AI believes it is lost
+
+- resignation offers are less disruptive to training-data capture and post-game analysis than forced auto-termination
+
+**Suggested implementation:**
+
+- `web/app.py` — replace the immediate resignation branch with an offer state stored in the game/session model
+
+- `web/static/game.js` — show a UI prompt with accept-decline controls
+
+- if declined, continue the game normally and log that the AI offered defeat but play continued
+
+- ensure opening and game records are still persisted regardless of whether the offer is accepted or declined
+
+> **Tie-in (B-31):** resignation-related game records and opening sequences must still be saved when an offer of defeat is made, accepted, or declined.
+
+**Files:**
+
+- `web/app.py`
+
+- `web/static/game.js`
+
+- `web/templates/index.html`
+
+- `AI_INTERNALS.md`
 
