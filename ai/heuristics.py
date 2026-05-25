@@ -75,6 +75,9 @@ class HeuristicWeights:
     herding_coverage: int      = 40    # bonus per opp 2-config closing sq covered by own adjacent piece
     trapped_mill: int          = 160   # penalty per own closed mill where opp can block all exits
     potential_mill: int        = 25    # bonus per own 2-config whose future mill would have a free exit
+    # ── B-33: Forcing placement quality ──────────────────────────────────────
+    dead_block_bonus: int = 60   # bonus per new own 2-config whose closing sq is a corner
+                                 # node (2 connections) — opponent is forced to a passive sq
     # ── B-47: Side-specific placement emphasis ───────────────────────────────
     # White and Black have different strategic goals in placement (White: proactive
     # cardinal claim; Black: reactive disruption + last-move advantage).
@@ -1632,6 +1635,24 @@ def _placement_chain_scan(board: BoardState, color: str) -> int:
                 return True
         return False
 
+    def _has_shared_pivot(b: BoardState, c: str) -> bool:
+        """True if color has two 2-configs where the same own piece is adjacent to both
+        closing squares — a dual-mill oscillation seed that forces captures every 2 turns."""
+        closings = [
+            next(p for p in mill if b.positions[p] == "")
+            for mill in MILLS
+            if [b.positions[p] for p in mill].count(c) == 2
+            and [b.positions[p] for p in mill].count("") == 1
+        ]
+        if len(closings) < 2:
+            return False
+        for pos in POSITIONS:
+            if b.positions[pos] != c:
+                continue
+            if sum(1 for cl in closings if cl in ADJACENCY[pos]) >= 2:
+                return True
+        return False
+
     def _productive(b: BoardState, c: str) -> list[str]:
         """Placements that close a mill, create a 2-config, or block+create (two-for-one)."""
         o = "B" if c == "W" else "W"
@@ -1714,9 +1735,12 @@ def _placement_chain_scan(board: BoardState, color: str) -> int:
 
     best = 1
 
-    # Opponent cannot respond (finished placing) — threats are permanent
+    # Opponent cannot respond (finished placing) — threats are permanent.
+    # Shared-pivot dual threat upgrades to level 4: oscillation forces captures every 2 turns.
     if opp_rem <= 0:
-        return 3 if len(my_threats) >= 2 else 2
+        if len(my_threats) >= 2:
+            return 4 if _has_shared_pivot(board, color) else 3
+        return 2
 
     for threat in my_threats[:3]:
         if board.positions.get(threat, "") != "":
@@ -1727,7 +1751,8 @@ def _placement_chain_scan(board: BoardState, color: str) -> int:
         t1 = _threats(b1, color)
 
         if len(t1) >= 2:
-            best = max(best, 3)
+            # B-30: shared-pivot dual threat → oscillation structure → upgrade to level 4
+            best = max(best, 4 if _has_shared_pivot(b1, color) else 3)
         elif t1:
             best = max(best, 2)
 
@@ -1748,7 +1773,8 @@ def _placement_chain_scan(board: BoardState, color: str) -> int:
             t2 = _threats(b2, color)
 
             if len(t2) >= 2:
-                best = max(best, 3)
+                # B-30: shared-pivot dual threat at b2 → oscillation → level 4
+                best = max(best, 4 if _has_shared_pivot(b2, color) else 3)
             elif t2 and opp_rem >= 2 and our_rem >= 2:
                 # Continue one more round: opp blocks again
                 for block2 in t2[:2]:
@@ -2438,6 +2464,22 @@ def tactical_move_bonus(
         if placement_index < 8:
             dual_purpose_final_bonus = int(dual_purpose_final_bonus * 0.65)
 
+    # B-33: Forcing placement quality — reward new 2-configs whose closing square is
+    # a corner node (2 connections). A threat at a corner forces the opponent to block
+    # there, locking their piece to the most passive square type on the board.
+    # Opponent blocked at a cross/cardinal node (3-4 connections) is NOT penalised here
+    # since those blocks retain positional value for the opponent.
+    dead_block_quality_bonus = 0
+    if _is_placement and placement_index < 7:
+        for _db_mill in MILLS:
+            _db_vals_b = [before.positions[p] for p in _db_mill]
+            _db_vals_a = [after.positions[p] for p in _db_mill]
+            if (not (_db_vals_b.count(color) == 2 and _db_vals_b.count("") == 1)
+                    and _db_vals_a.count(color) == 2 and _db_vals_a.count("") == 1):
+                _db_closing = next(p for p in _db_mill if after.positions[p] == "")
+                if _db_closing not in _CROSS_NODES:
+                    dead_block_quality_bonus += weights.dead_block_bonus
+
     # B-36: Reward blocking the closing square of an unguarded cardinal mill.
     # Higher priority than speculative setup on any placement turn.
     cardinal_alert_bonus = 0
@@ -2506,6 +2548,7 @@ def tactical_move_bonus(
         ("Fly free-close bonus",           fly_free_close_bonus),
         ("Ring cardinal placement",        ring_cardinal_bonus),
         ("Cardinal mill alert block (B-36)", cardinal_alert_bonus),
+        ("Dead-block forcing quality (B-33)", dead_block_quality_bonus),
         ("Fork anticipation (B-4)",        fork_anticip_bonus),
         ("Locked mill escape (B-7)",       locked_escape_bonus),
         ("Redirected pin (B-7)",           redirected_pin_bonus),
