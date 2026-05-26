@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
+from game.zobrist import PIECE_KEYS, PLACED_DONE_KEYS, SIDE_KEY, SQ_INDEX, hash_board
+
 # ── Positions ─────────────────────────────────────────────────────────────────
 
 POSITIONS: List[str] = [
@@ -141,17 +143,21 @@ class BoardState:
     pieces_on_board: Dict[str, int] # {"W": n, "B": n}
     pieces_placed: Dict[str, int]   # {"W": n, "B": n}  (cumulative placements)
     pieces_captured: Dict[str, int] # {"W": n, "B": n}  (pieces captured *by* color)
+    hash_key: int = 0               # Zobrist hash; maintained incrementally by apply_move()
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @classmethod
     def new_game(cls) -> "BoardState":
+        # New game: all squares empty, W to move, neither side done placing.
+        # hash_board() on this state returns 0 (no keys XOR'd), so we skip the call.
         return cls(
             positions={pos: "" for pos in POSITIONS},
             turn="W",
             pieces_on_board={"W": 0, "B": 0},
             pieces_placed={"W": 0, "B": 0},
             pieces_captured={"W": 0, "B": 0},
+            hash_key=0,
         )
 
     @classmethod
@@ -176,13 +182,16 @@ class BoardState:
             placed = {"W": 9, "B": 9}
         else:
             placed = {"W": w_on, "B": b_on}
-        return cls(
+        b = cls(
             positions=pos,
             turn=turn,
             pieces_on_board={"W": w_on, "B": b_on},
             pieces_placed=placed,
             pieces_captured={"W": 0, "B": 0},
+            hash_key=0,
         )
+        b.hash_key = hash_board(b)
+        return b
 
     # ── Phase ─────────────────────────────────────────────────────────────────
 
@@ -258,21 +267,37 @@ class BoardState:
 
         color = self.turn
         opponent = "B" if color == "W" else "W"
+        color_idx = 0 if color == "W" else 1
+        opp_idx = 1 - color_idx
+
+        # Incremental Zobrist hash update
+        new_hash = self.hash_key
 
         if move["from"] is None:
-            # Placement
+            # Placement: add color piece at to-square
             new_pos[move["to"]] = color
             new_on[color] += 1
             new_placed[color] += 1
+            new_hash ^= PIECE_KEYS[color_idx][SQ_INDEX[move["to"]]]
+            # If this placement completes the 9th piece, toggle the done-placing bit
+            if new_placed[color] >= 9 and self.pieces_placed[color] < 9:
+                new_hash ^= PLACED_DONE_KEYS[color_idx]
         else:
-            # Movement (or fly)
+            # Movement (or fly): relocate color piece from→to
             new_pos[move["from"]] = ""
             new_pos[move["to"]] = color
+            new_hash ^= PIECE_KEYS[color_idx][SQ_INDEX[move["from"]]]
+            new_hash ^= PIECE_KEYS[color_idx][SQ_INDEX[move["to"]]]
 
         if move.get("capture"):
+            # Remove captured opponent piece
             new_pos[move["capture"]] = ""
             new_on[opponent] -= 1
             new_captured[color] += 1
+            new_hash ^= PIECE_KEYS[opp_idx][SQ_INDEX[move["capture"]]]
+
+        # Flip side-to-move
+        new_hash ^= SIDE_KEY
 
         return BoardState(
             positions=new_pos,
@@ -280,6 +305,7 @@ class BoardState:
             pieces_on_board=new_on,
             pieces_placed=new_placed,
             pieces_captured=new_captured,
+            hash_key=new_hash,
         )
 
     # ── Serialisation ─────────────────────────────────────────────────────────

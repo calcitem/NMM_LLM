@@ -22,6 +22,7 @@ class _SearchAbort(Exception):
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_all_legal_moves, is_terminal
 from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus
+from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 
 
 def _immediate_mill_threats(board: BoardState) -> set[str]:
@@ -239,6 +240,7 @@ class GameAI:
                 weights=self._weights,
                 value_net=value_net,
             )
+        self._tt = TranspositionTable()
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.last_thinking: str = ""          # short plain-English label for the chosen move
@@ -294,6 +296,7 @@ class GameAI:
         self._force_stop = False
         self._deadline   = math.inf  # reset any prior force_stop() effect
         self.last_thinking = ""       # reset thinking trace
+        self._tt.clear()
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -692,7 +695,7 @@ class GameAI:
         endgame_state=None,
     ) -> int:
         """
-        Negamax with alpha-beta pruning.
+        Negamax with alpha-beta pruning and transposition table.
         Returns score from board.turn's perspective (higher = better for board.turn).
         Raises _SearchAbort when the search deadline is exceeded.
         """
@@ -708,6 +711,20 @@ class GameAI:
         if depth == 0:
             return evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
 
+        # ── Transposition table probe ─────────────────────────────────────────
+        alpha_orig = alpha
+        tt_move_from = tt_move_to = None
+        tt_entry = self._tt.lookup(board.hash_key)
+        if tt_entry is not None:
+            tt_depth, tt_score, tt_flag, tt_move_from, tt_move_to = tt_entry
+            if tt_depth >= depth:
+                if tt_flag == EXACT:
+                    return tt_score
+                if tt_flag == LOWER_BOUND and tt_score >= beta:
+                    return tt_score
+                if tt_flag == UPPER_BOUND and tt_score <= alpha:
+                    return tt_score
+
         moves = get_all_legal_moves(board)
         if not moves:
             return -(INF - depth)
@@ -716,16 +733,39 @@ class GameAI:
         if depth >= 2:
             moves = _order_moves(board, moves)
 
+        # Promote the TT best-move to the front of the list regardless of its
+        # priority bucket — it was the best move last time we searched this position.
+        if tt_move_to is not None:
+            for i, m in enumerate(moves):
+                if m.get("from") == tt_move_from and m["to"] == tt_move_to:
+                    if i > 0:
+                        moves.insert(0, moves.pop(i))
+                    break
+
         value = -INF
+        best_from = best_to = None
         for move in moves:
             nb = board.apply_move(move)
             score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
             if score > value:
                 value = score
+                best_from = move.get("from")
+                best_to   = move["to"]
             if value > alpha:
                 alpha = value
             if alpha >= beta:
                 break
+
+        # ── Transposition table store ─────────────────────────────────────────
+        if best_to is not None:
+            if value <= alpha_orig:
+                flag = UPPER_BOUND
+            elif value >= beta:
+                flag = LOWER_BOUND
+            else:
+                flag = EXACT
+            self._tt.store(board.hash_key, depth, value, flag, best_from, best_to)
+
         return value
 
     def _score_all(
