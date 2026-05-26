@@ -90,13 +90,15 @@ def _squeeze_targets(board: BoardState) -> set[str]:
     return targets
 
 
-def _order_moves(board: BoardState, moves: list) -> list:
+def _order_moves(board: BoardState, moves: list, killers=None) -> list:
     """Sort moves so the most urgent are tried first (better alpha-beta pruning).
 
     Priority 0 — close own mill (immediate win/capture) OR create a fork
                  (land on a diamond square — closing 2+ own 2-configs simultaneously).
     Priority 1 — block opponent mill (prevent their immediate threat)
                  OR occupy the last escape square of an opponent piece (herding).
+    Priority K — killer moves: quiet moves that caused beta cutoffs at this depth
+                 in sibling branches (SE-2).
     Priority 2 — all other moves.
 
     In fly phase with ~54 legal moves per side, this ensures blocking/closing
@@ -106,6 +108,13 @@ def _order_moves(board: BoardState, moves: list) -> list:
     from game.rules import get_game_phase
     color = board.turn
     opp = "B" if color == "W" else "W"
+
+    # Build killer set for O(1) lookup.
+    killer_set: set = set()
+    if killers:
+        for k in killers:
+            if k is not None:
+                killer_set.add(k)
 
     close: set[str] = set()
     block: set[str] = set()
@@ -134,19 +143,21 @@ def _order_moves(board: BoardState, moves: list) -> list:
     squeeze = _squeeze_targets(board)
     block |= squeeze
 
-    if not close and not block:
+    if not close and not block and not killer_set:
         return moves  # nothing to prioritize — skip the pass
 
-    p0, p1, p2 = [], [], []
+    p0, p1, pk, p2 = [], [], [], []
     for m in moves:
         t = m["to"]
         if t in close:
             p0.append(m)
         elif t in block:
             p1.append(m)
+        elif (m.get("from"), t) in killer_set:
+            pk.append(m)
         else:
             p2.append(m)
-    return p0 + p1 + p2
+    return p0 + p1 + pk + p2
 
 # Fixed-depth table for quick levels (1–4): search completes fast so no time cap needed.
 _DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5}
@@ -241,6 +252,9 @@ class GameAI:
                 value_net=value_net,
             )
         self._tt = TranspositionTable()
+        # SE-2: 2 killer moves per remaining-depth level (up to depth 32).
+        # Each slot is (from_sq, to_sq) or None.
+        self._killers: list[list] = [[None, None] for _ in range(32)]
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.last_thinking: str = ""          # short plain-English label for the chosen move
@@ -297,6 +311,7 @@ class GameAI:
         self._deadline   = math.inf  # reset any prior force_stop() effect
         self.last_thinking = ""       # reset thinking trace
         self._tt.clear()
+        self._killers = [[None, None] for _ in range(32)]
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -643,6 +658,20 @@ class GameAI:
             adjusted.append((move, raw + delta))
         return adjusted
 
+    def _store_killer(self, depth: int, from_sq: str | None, to_sq: str) -> None:
+        """Record a quiet move that caused a beta cutoff at this remaining depth.
+
+        Killers are stored in a 2-slot FIFO per depth.  Duplicates in slot 0
+        are skipped so a repeat cutoff move does not discard the other killer.
+        """
+        if depth >= 32:
+            return
+        new_killer = (from_sq, to_sq)
+        slot = self._killers[depth]
+        if slot[0] != new_killer:
+            slot[1] = slot[0]
+            slot[0] = new_killer
+
     # ── Internals ─────────────────────────────────────────────────────────────
 
     def _root_search(self, board: BoardState, depth: int,
@@ -655,7 +684,8 @@ class GameAI:
         all legal moves are used."""
         if moves is None:
             moves = get_all_legal_moves(board)
-        moves = _order_moves(board, moves)
+        killers = self._killers[depth] if depth < 32 else None
+        moves = _order_moves(board, moves, killers)
         self._nodes = 0
         best_move = moves[0]
         best_score = -INF
@@ -731,7 +761,8 @@ class GameAI:
 
         # Sort at upper levels only — biggest benefit to alpha-beta, negligible overhead
         if depth >= 2:
-            moves = _order_moves(board, moves)
+            killers = self._killers[depth] if depth < 32 else None
+            moves = _order_moves(board, moves, killers)
 
         # Promote the TT best-move to the front of the list regardless of its
         # priority bucket — it was the best move last time we searched this position.
@@ -754,6 +785,10 @@ class GameAI:
             if value > alpha:
                 alpha = value
             if alpha >= beta:
+                # Beta cutoff: store as killer if it's a quiet move (no capture).
+                # Captures are already in priority-0 and don't benefit from killer ordering.
+                if not move.get("capture"):
+                    self._store_killer(depth, move.get("from"), move["to"])
                 break
 
         # ── Transposition table store ─────────────────────────────────────────
