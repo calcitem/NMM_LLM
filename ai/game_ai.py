@@ -819,11 +819,24 @@ class GameAI:
                         moves.insert(0, moves.pop(i))
                     break
 
+        # SE-5: Principal Variation Search (PVS).
+        # First move is searched at full window; siblings use a zero-window scout.
+        # If the scout fails high (score > alpha), a full re-search is triggered.
+        # With good move ordering (SE-1/2/3) most siblings fail the scout cheaply.
         value = -INF
         best_from = best_to = None
+        is_first = True
         for move in moves:
             nb = board.apply_move(move)
-            score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
+            if is_first:
+                score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
+                is_first = False
+            else:
+                # Zero-window scout
+                score = -self._negamax(nb, depth - 1, -alpha - 1, -alpha, endgame_state)
+                if alpha < score < beta:
+                    # Scout failed high — re-search at full window for true score
+                    score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
             if score > value:
                 value = score
                 best_from = move.get("from")

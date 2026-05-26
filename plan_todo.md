@@ -1214,7 +1214,7 @@ Gains compound with SE-1: the TT provides a hash-move to try first at each node,
 
 - `ai/game\\\_ai.py` — add `EndgameDB` lookup at top of `\\\_negamax` when `total\\\_pieces \\\<= 8`; return `outcome \\\* (INF - depth)` so fastest wins are scored first
 
-### SE-5 — Principal Variation Search (PVS / NegaScout) ⬜ ★ Medium–High Impact
+### SE-5 — Principal Variation Search (PVS / NegaScout) ✅ 2026-05-26
 
 **Why:** PVS assumes the first move explored is best (valid after good ordering from SE-1–3). All subsequent siblings are searched with a cheap zero-window `(alpha, alpha+1)` scout; only if the scout fails high is a full re-search triggered. With good ordering, the majority of siblings never need re-searching. ~10% additional node reduction on top of Tier-1 gains.
 
