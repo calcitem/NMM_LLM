@@ -1566,7 +1566,7 @@ Apply the same pattern to `fullgame_db_path` for consistency.
 
 - `data/settings.json` — update default/example to absolute path or document that relative paths are relative to project root
 
-### Bug B-50 — AI does not block opponent double 2-config (fork) during placement phase ⬜
+### Bug B-50 — AI does not block opponent double 2-config (fork) during placement phase ✅ 2026-05-26
 
 **Symptom:** In AI-vs-AI play (and against human) both players keep building 2-configs during the placement phase but neither issues mandatory blocking moves when the opponent has formed two simultaneous 2-configs (a fork). The result is that the opponent reaches turn 9 with a pre-formed fork and closes a mill unopposed.
 
