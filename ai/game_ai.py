@@ -819,24 +819,53 @@ class GameAI:
                         moves.insert(0, moves.pop(i))
                     break
 
-        # SE-5: Principal Variation Search (PVS).
-        # First move is searched at full window; siblings use a zero-window scout.
-        # If the scout fails high (score > alpha), a full re-search is triggered.
-        # With good move ordering (SE-1/2/3) most siblings fail the scout cheaply.
+        # SE-6: LMR — pre-compute opponent blocking squares so they are never reduced.
+        _opp_color = "B" if board.turn == "W" else "W"
+        _block_squares: set = set()
+        for _bm in MILLS:
+            _bv = [board.positions[p] for p in _bm]
+            if _bv.count(_opp_color) == 2 and _bv.count("") == 1:
+                _block_squares.add(next(p for p in _bm if board.positions[p] == ""))
+
+        # SE-5 + SE-6: PVS with Late Move Reductions.
+        # First move: full window.  Non-late siblings: PVS zero-window scout.
+        # Late quiet non-blocking moves (last 60% at depth ≥ 4): reduced by 1 ply
+        # with a zero-window scout; re-searched at full depth on fail-high, then at
+        # full window if PVS also fails high.
+        n_moves = len(moves)
+        lmr_start = n_moves - int(n_moves * 0.6)  # first index of the late-move tier
         value = -INF
         best_from = best_to = None
         is_first = True
-        for move in moves:
+        for move_idx, move in enumerate(moves):
             nb = board.apply_move(move)
+
+            use_lmr = (
+                depth >= 4
+                and not is_first
+                and move_idx >= lmr_start
+                and not move.get("capture")
+                and move["to"] not in _block_squares
+            )
+
             if is_first:
                 score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
                 is_first = False
+            elif use_lmr:
+                # LMR: reduced-depth zero-window scout
+                score = -self._negamax(nb, depth - 2, -alpha - 1, -alpha, endgame_state)
+                if score > alpha:
+                    # Failed high — re-search at full depth with PVS zero-window
+                    score = -self._negamax(nb, depth - 1, -alpha - 1, -alpha, endgame_state)
+                    if alpha < score < beta:
+                        # PVS also failed high — full window re-search
+                        score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
             else:
-                # Zero-window scout
+                # Standard PVS zero-window scout
                 score = -self._negamax(nb, depth - 1, -alpha - 1, -alpha, endgame_state)
                 if alpha < score < beta:
-                    # Scout failed high — re-search at full window for true score
                     score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state)
+
             if score > value:
                 value = score
                 best_from = move.get("from")

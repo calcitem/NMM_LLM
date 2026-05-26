@@ -312,5 +312,65 @@ class TestPVS(unittest.TestCase):
         self.assertIn((move.get("from"), move["to"]), legal_keys)
 
 
+class TestLMR(unittest.TestCase):
+    """SE-6: Late Move Reductions correctness checks."""
+
+    # Fly-phase board: 3 W vs 3 B, ~58 legal moves — high branching factor
+    # where LMR fires most often. Used for node-count and validity tests.
+    _FLY_POSITIONS = {
+        "a7": "W", "g7": "W", "a1": "W",
+        "g1": "B", "d3": "B", "c5": "B",
+    }
+
+    def _fly_board(self) -> BoardState:
+        return BoardState.from_setup(self._FLY_POSITIONS, turn="W", phase="move")
+
+    def test_lmr_fly_phase_returns_legal_move(self):
+        """LMR must return a valid legal move in fly phase at difficulty 4."""
+        from game.rules import get_all_legal_moves
+        b = self._fly_board()
+        ai = GameAI(color="W", difficulty=4)
+        move = ai.choose_move(b)
+        legal_keys = [(m.get("from"), m["to"]) for m in get_all_legal_moves(b)]
+        self.assertIn((move.get("from"), move["to"]), legal_keys,
+                      f"LMR returned an illegal move: {move}")
+
+    def test_lmr_node_counter_populated(self):
+        """After a fly-phase search, _nodes must be > 0 (LMR path exercised)."""
+        ai = GameAI(color="W", difficulty=4)
+        ai.choose_move(self._fly_board())
+        self.assertGreater(ai._nodes, 0)
+
+    def test_lmr_block_guard_not_reduced(self):
+        """A blocking move must still be played correctly even in fly phase.
+
+        W: a7, a4, c5 (3 pieces, fly phase).
+        B: f6, f4 — 2-config closing f2.  W must block f2 or B closes the mill
+        next turn for free.  In fly phase all W pieces can reach f2, so f2 lands
+        in p1 (block) of _order_moves and is guarded from LMR reduction.
+        """
+        positions = {
+            "a7": "W", "a4": "W", "c5": "W",
+            "f6": "B", "f4": "B", "d2": "B",
+        }
+        b = BoardState.from_setup(positions, turn="W", phase="move")
+        ai = GameAI(color="W", difficulty=4)
+        move = ai.choose_move(b)
+        self.assertEqual(move["to"], "f2",
+                         f"Expected block at f2, got {move}")
+
+    def test_lmr_deterministic(self):
+        """Two fresh AI instances must pick the same move (LMR is deterministic)."""
+        b = self._fly_board()
+        ai1 = GameAI(color="W", difficulty=4)
+        ai2 = GameAI(color="W", difficulty=4)
+        m1 = ai1.choose_move(b)
+        m2 = ai2.choose_move(b)
+        self.assertEqual(
+            (m1.get("from"), m1["to"]),
+            (m2.get("from"), m2["to"]),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

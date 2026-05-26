@@ -1222,7 +1222,7 @@ Gains compound with SE-1: the TT provides a hash-move to try first at each node,
 
 - `ai/game\\\_ai.py` — replace inner loop in `\\\_negamax` with PVS scheme: first move at full window, siblings at zero-window with re-search on fail-high
 
-### SE-6 — Late Move Reductions (LMR) ⬜ ★ Medium Impact
+### SE-6 — Late Move Reductions (LMR) ✅ 2026-05-26
 
 **Why:** Reduces search depth by 1 ply for moves sorted toward the end of the move list (assumed inferior after good ordering). **Largest proportional gain in fly phase** where branching factor reaches ~54 and the existing sort leaves most moves unordered.
 
