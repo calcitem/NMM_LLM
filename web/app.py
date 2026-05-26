@@ -121,8 +121,10 @@ def _load_settings() -> dict:
 
 
 # Load fullgame DB at startup — path configurable via settings.json "fullgame_db_path".
-_fgdb_path = Path(
-    _load_settings().get("fullgame_db_path") or (_ROOT / "data" / "fullgame.sqlite")
+_raw_fgdb = _load_settings().get("fullgame_db_path") or ""
+_fgdb_path = (
+    Path(_raw_fgdb) if (_raw_fgdb and Path(_raw_fgdb).is_absolute())
+    else (_ROOT / (_raw_fgdb or "data/fullgame.sqlite"))
 )
 _fullgame_db: "FullGameDB | None" = None
 if _fgdb_path.exists():
@@ -140,8 +142,10 @@ else:
     log.info("FullGameDB: not found at %s", _fgdb_path)
 
 # Load endgame solved DB at startup — dir configurable via settings.json "endgame_solved_dir".
-_esdb_dir = Path(
-    _load_settings().get("endgame_solved_dir") or (_ROOT / "data" / "endgame")
+_raw_esdb = _load_settings().get("endgame_solved_dir") or ""
+_esdb_dir = (
+    Path(_raw_esdb) if (_raw_esdb and Path(_raw_esdb).is_absolute())
+    else (_ROOT / (_raw_esdb or "data/endgame"))
 )
 _endgame_solved_db: "EndgameSolvedDB | None" = None
 _esdb = EndgameSolvedDB(_esdb_dir)

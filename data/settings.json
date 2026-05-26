@@ -20,7 +20,7 @@
   "endgame_deep_threshold": 8,
   "endgame_zugzwang_threshold": 0.4,
   "endgame_pattern_bonus": 0.3,
-  "endgame_solved_dir": "data/endgame",
+  "endgame_solved_dir": "/mnt/windows/NMM_DB",
   "annotate_deviations_on_export": true,
   "auto_open_debrief": false,
   "debrief_analysis_depth": 4,

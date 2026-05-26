@@ -743,6 +743,22 @@ class GameAI:
         if terminal:
             return -(INF - depth)
 
+        # SE-4: endgame tablebase probe — exact WDL for 3v3 fly-phase positions.
+        if (self._endgame_solved_db is not None
+                and board.pieces_placed.get("W", 0) >= 9
+                and board.pieces_placed.get("B", 0) >= 9
+                and board.pieces_on_board.get("W", 0) <= 3
+                and board.pieces_on_board.get("B", 0) <= 3):
+            try:
+                _wdl = self._endgame_solved_db.query(board)
+            except Exception:
+                _wdl = None
+            if _wdl == "W":
+                return INF - depth
+            elif _wdl == "L":
+                return -(INF - depth)
+            # "D" or None → fall through to normal search
+
         if depth == 0:
             return evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
 

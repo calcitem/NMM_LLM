@@ -32,7 +32,7 @@ Active implementation order agreed 2026-05-25. Two parallel tracks:
 
 ### Track 3 — Search Stack (independent; implement after Track 1 is stable)
 
-~~SE-1~~ ✅ → SE-2 → SE-3 (transposition table, killer heuristic, history heuristic)
+~~SE-1~~ ✅ → ~~SE-2~~ ✅ → ~~SE-3~~ ✅ (transposition table, killer heuristic, history heuristic)
 
 ### Phase strategy guide
 
@@ -1194,7 +1194,7 @@ Gains compound with SE-1: the TT provides a hash-move to try first at each node,
 
 - `ai/game\\\_ai.py` — `self.\\\_killers` list (2 per depth up to depth 32); `\\\_store\\\_killer()`; insert killer-match tier between priority-1 and priority-2 in `\\\_order\\\_moves`; reset killers at start of each `choose\\\_move`
 
-### SE-3 — History Heuristic ⬜ ★ High Impact
+### SE-3 — History Heuristic ✅ 2026-05-26
 
 **Why:** Maintains a global `hist\\\[(from\\\_sq, to\\\_sq)\\\]` table incremented by `depth²` whenever a move causes a beta cutoff. Used as a sort key within the priority-2 bucket of `\\\_order\\\_moves`. Unlike killers (depth-local), history is global across all positions, making the two techniques complementary.
 
@@ -1206,7 +1206,7 @@ Gains compound with SE-1: the TT provides a hash-move to try first at each node,
 
 ### TIER 2 — High Value, after Tier 1
 
-### SE-4 — Endgame Tablebase Query Inside Search ⬜ ★ High Impact (underrated)
+### SE-4 — Endgame Tablebase Query Inside Search ✅ 2026-05-26
 
 **Why:** Currently `EndgameDB` is consulted only at root level in `choose\\\_move`. Querying it inside `\\\_negamax` at every node where `total\\\_pieces ≤ 8` returns `±INF` for known positions without any further search. This converts the lower search tree from estimated heuristic values to **exact outcomes** — a qualitative improvement, not just a speedup. The infrastructure already exists; this is approximately 10 lines of change.
 
@@ -1543,7 +1543,7 @@ Note: `EndgameSolvedDB.query()` already reads the `turn` field from `board.curre
 
 - `AI_INTERNALS.md`
 
-### Bug B-49 — `endgame_solved_dir` relative path not resolved from project root ⬜
+### Bug B-49 — `endgame_solved_dir` relative path not resolved from project root ✅ 2026-05-26
 
 **Symptom:** Server logs `EndgameSolvedDB: not found at data/endgame` even though the setting `"endgame_solved_dir": "data/endgame"` is present in `data/settings.json`. The DB file lives at `/mnt/windows/NMM_DB/endgame_3_3.wdl` (external drive).
 
@@ -1565,4 +1565,57 @@ Apply the same pattern to `fullgame_db_path` for consistency.
 - `web/app.py` — path resolution for `endgame_solved_dir` and `fullgame_db_path`
 
 - `data/settings.json` — update default/example to absolute path or document that relative paths are relative to project root
+
+### Bug B-50 — AI does not block opponent double 2-config (fork) during placement phase ⬜
+
+**Symptom:** In AI-vs-AI play (and against human) both players keep building 2-configs during the placement phase but neither issues mandatory blocking moves when the opponent has formed two simultaneous 2-configs (a fork). The result is that the opponent reaches turn 9 with a pre-formed fork and closes a mill unopposed.
+
+**Root cause:** `_immediate_mill_threats()` in `ai/game_ai.py` only fires for move-phase and fly-phase positions:
+
+```python
+opp_in_fly = opp_placed >= 9 and board.pieces_on_board[opp] <= 3
+...
+if opp_in_fly:
+    threats.add(empty)
+elif opp_placed >= 9:   # move phase: adjacent piece needed
+    ...
+# placement phase (opp_placed < 9): returns empty set always
+```
+
+Because it always returns `{}` during placement, the mandatory-block filter at lines 394–398 (`if threats: moves = blocking`) never restricts candidates. `_order_moves` does promote 2-config-closing squares into the P1 bucket during placement (no phase guard there), so *ordering* works, but it only affects which move is tried first — it doesn't prevent the AI from choosing a development move over a block if the search prefers it.
+
+The heuristic weights (`stop_opponent_mills=400 > setup_mill=100`) should in theory prefer blocking, but this only holds when the eval can see the fork being exploited within the current search depth. In the early placement phase at depth 5–7, the converging fork often resolves outside the horizon.
+
+**Proposed fix (no new functions):**
+
+Extend `_immediate_mill_threats()` to also fire during the **placement phase** when the opponent holds **≥2 simultaneous 2-configs** (a fork — cannot be blocked by a single piece):
+
+```python
+# Placement phase: flag any 2-config closing square when opp has ≥2 simultaneous 2-configs.
+if opp_placed < 9:
+    two_config_empties = [
+        next(p for p in mill if board.positions[p] == "")
+        for mill in MILLS
+        if [board.positions[p] for p in mill].count(opp) == 2
+        and [board.positions[p] for p in mill].count("") == 1
+    ]
+    if len(two_config_empties) >= 2:
+        threats.update(two_config_empties)
+```
+
+**Why ≥2:** a single 2-config does not need mandatory blocking — the AI should weigh it against development via normal search. Only when the opponent holds two (possibly sharing a pivot piece), blocking becomes obligatory since one response cannot neutralise both threats.
+
+**Why not a new function:** this is a targeted extension of existing `_immediate_mill_threats()` logic; the mandatory-block filter already uses its output correctly.
+
+**Edge case:** shared-pivot forks (opponent has three pieces forming two incomplete mills) count as two 2-configs and are correctly caught because both empty closing squares appear in `two_config_empties`.
+
+**Files:**
+
+- `ai/game_ai.py` — extend `_immediate_mill_threats()` placement-phase branch (~8 lines)
+
+**Tests needed:**
+
+- Board with opponent having exactly two 2-configs during placement → `_immediate_mill_threats()` returns both closing squares
+- Board with opponent having one 2-config during placement → returns empty set
+- Board with opponent having two 2-configs but one closing square is occupied → only unoccupied closing square returned (or empty, depending on actual count)
 
