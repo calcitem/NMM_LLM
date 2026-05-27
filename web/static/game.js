@@ -21,6 +21,7 @@ let thinkingExpected  = 0;    // expected seconds from server
 let _hintCountdown    = null; // setInterval handle for hint countdown
 let canOverride       = false; // true only between ai_move and the next human move commit
 let inGuidanceMode    = false; // true while human is directing the AI's move after override
+let resignationPending = false; // true while the AI's resignation offer is showing
 let canMarkGoodGame   = false; // true after a draw ends (AI vs human)
 let isVsHuman         = false; // true when current game is human vs human (handoff buttons visible)
 let replayMoves       = [];   // moves with FEN data, populated when game ends
@@ -329,6 +330,18 @@ document.addEventListener("DOMContentLoaded", () => {
     $("btn-override").hidden = true;
     ws.send(JSON.stringify({ type: "override_ai" }));
   });
+  $("btn-accept-resign").addEventListener("click", () => {
+    if (!ws || !resignationPending) return;
+    resignationPending = false;
+    $("resignation-offer").hidden = true;
+    ws.send(JSON.stringify({ type: "accept_resignation" }));
+  });
+  $("btn-decline-resign").addEventListener("click", () => {
+    if (!ws) return;
+    resignationPending = false;
+    $("resignation-offer").hidden = true;
+    ws.send(JSON.stringify({ type: "decline_resignation" }));
+  });
   $("btn-good-game").addEventListener("click", () => {
     if (!ws || !canMarkGoodGame) return;
     canMarkGoodGame = false;
@@ -469,6 +482,8 @@ function startNewGame() {
   $("btn-override").hidden = true;
   canOverride = false;
   inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -535,6 +550,8 @@ function startAiVsAi() {
   $("btn-override").hidden = true;
   canOverride = false;
   inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -724,6 +741,8 @@ function startSetupGame() {
   $("btn-override").hidden = true;
   canOverride = false;
   inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -842,6 +861,8 @@ function handleMessage(msg) {
       canOverride = false;
       $("btn-override").hidden = true;
       inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
       break;
 
     case "ai_move": {
@@ -870,6 +891,11 @@ function handleMessage(msg) {
           ? "Override: click an empty node to place the AI's piece."
           : "Override: select an AI piece, then its destination."
       );
+      break;
+
+    case "resignation_offer":
+      resignationPending = true;
+      $("resignation-offer").hidden = false;
       break;
 
     case "good_game_ack":
@@ -907,6 +933,8 @@ function handleMessage(msg) {
       canOverride = false;
       $("btn-override").hidden = true;
       inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
       // Show Good Game after a draw in AI vs human (reinforces strong AI play)
       canMarkGoodGame = !msg.winner && !isVsHuman && !isAiVsAi;
       $("btn-good-game").hidden = !canMarkGoodGame;
@@ -1082,6 +1110,8 @@ function onNodeClick(name) {
       // Any empty square the AI could legally place on
       if (gameState.legal_dests.includes(name) && !gameState.board[name]) {
         inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
         board.isHuman = false;
         board.legalDests = new Set();
         board.legalSrcs  = new Set();
@@ -1108,6 +1138,8 @@ function onNodeClick(name) {
         const valid = pairs.some(([f, t]) => f === src && t === name);
         if (valid) {
           inGuidanceMode = false;
+  resignationPending = false;
+  $("resignation-offer").hidden = true;
           board.isHuman = false;
           board.selected = null;
           board.legalDests = new Set();

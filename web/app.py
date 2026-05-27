@@ -458,6 +458,7 @@ class Session:
         self._last_ai_move: Optional[dict] = None
         self._can_undo_ai: bool = False        # True only right after an AI move
         self._awaiting_guided_move: bool = False  # True while human is directing AI's move
+        self._resignation_pending: bool = False   # True while waiting for player to accept/decline
         self.adaptive: Optional[AdaptiveTracker] = None
         self.is_tournament_game: bool = False
         self._last_game_record: Optional[dict] = None  # stored after game ends for good_game
@@ -1185,27 +1186,12 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     elapsed = _time.time() - t0
     log.info("AI turn end    move=%s elapsed=%.2fs", move, elapsed)
 
-    # Resignation: human dominated for 3 consecutive AI turns
-    if session.coordinator and session.coordinator.resignation_offered:
+    # Latch whether the coordinator wants to resign (cleared so it only fires once).
+    resignation_offered = bool(
+        session.coordinator and session.coordinator.resignation_offered
+    )
+    if resignation_offered and session.coordinator:
         session.coordinator.resignation_offered = False
-        session.engine.finished = True
-        session.engine.winner   = session.human_color
-        human_name = "White" if session.human_color == "W" else "Black"
-        await _send(ws, {
-            "type":        "game_over",
-            "winner":      session.human_color,
-            "draw_reason": None,
-            "result":      "ai_resignation",
-            "message":     f"{human_name} wins — AI resigns!",
-        })
-        if session.coordinator:
-            record = session.coordinator.build_game_record(
-                winner=session.human_color, human_color=session.human_color
-            )
-            await asyncio.to_thread(session.coordinator.on_game_end, record)
-            await _commentary(ws, session)
-            asyncio.create_task(_maybe_consolidate(ws))
-        return
 
     # Discard stale result if the board changed while we were computing
     # (e.g. the human pressed Undo mid-think).  GameEngine.apply_move always
@@ -1246,6 +1232,12 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
 
     if session.engine.finished:
         await _game_over(ws, session)
+        return
+
+    # Offer resignation after move + commentary — player decides whether to accept.
+    if resignation_offered and not session.engine.finished:
+        session._resignation_pending = True
+        await _send(ws, {"type": "resignation_offer"})
 
 
 def _is_ai_turn(session: Session) -> bool:
@@ -1657,6 +1649,35 @@ async def ws_endpoint(websocket: WebSocket):
                 if session.engine.finished:
                     await _game_over(websocket, session)
                     await _after_game_end()
+
+            # ── accept_resignation — player accepts the AI's offer to resign ────
+            elif kind == "accept_resignation" and session and session._resignation_pending:
+                session._resignation_pending = False
+                session.engine.finished = True
+                session.engine.winner   = session.human_color
+                human_name = "White" if session.human_color == "W" else "Black"
+                await _send(websocket, {
+                    "type":        "game_over",
+                    "winner":      session.human_color,
+                    "draw_reason": None,
+                    "result":      "ai_resignation",
+                    "message":     f"{human_name} wins — AI resigns!",
+                })
+                if session.coordinator:
+                    record = session.coordinator.build_game_record(
+                        winner=session.human_color, human_color=session.human_color
+                    )
+                    await asyncio.to_thread(session.coordinator.on_game_end, record)
+                    await _commentary(websocket, session)
+                    asyncio.create_task(_maybe_consolidate(websocket))
+                await _after_game_end()
+
+            # ── decline_resignation — player forces the AI to keep playing ──────
+            elif kind == "decline_resignation" and session:
+                session._resignation_pending = False
+                if session.coordinator:
+                    session.coordinator._dominant_turn_streak = 0
+                log.info("Resignation declined — game continues.")
 
             # ── good_game — elevate a draw to win-like status in trajectory ────
             elif kind == "good_game" and session:
