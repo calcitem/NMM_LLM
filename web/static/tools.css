@@ -1,0 +1,270 @@
+/* tools.css — Tools management page styles */
+
+#tools-app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+  font-family: var(--font, monospace);
+}
+
+#tools-app header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+#tools-app header h1 {
+  font-size: 1.2rem;
+  margin: 0;
+  color: var(--tan);
+  flex: 1;
+}
+
+.btn-back {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.btn-back:hover { color: var(--text); border-color: var(--tan); }
+
+.badge-busy {
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.tools-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.tools-section h2 {
+  font-size: 1rem;
+  color: var(--tan);
+  margin: 0 0 0.5rem;
+}
+
+.tools-section-danger {
+  border-color: var(--red);
+}
+
+.tool-desc {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 0 0 0.75rem;
+  line-height: 1.4;
+}
+
+.tool-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  align-items: center;
+}
+
+.tool-form label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.tool-form input[type="number"],
+.tool-form input[type="text"],
+.tool-form select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.82rem;
+}
+
+.tool-form select { padding: 2px 4px; }
+
+.btn-run {
+  font-size: 0.85rem;
+  padding: 5px 16px;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+}
+
+.btn-run:hover:not(:disabled) { filter: brightness(1.15); }
+.btn-run:disabled { opacity: 0.45; cursor: default; }
+
+.btn-danger {
+  background: var(--red);
+}
+
+.btn-refresh {
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 0.5rem;
+}
+
+.btn-refresh:hover { color: var(--text); border-color: var(--tan); }
+
+/* Status grid */
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.status-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.6rem 0.75rem;
+}
+
+.card-title {
+  font-size: 0.78rem;
+  color: var(--tan);
+  font-weight: bold;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 1px 0;
+}
+
+.stat-row span:last-child {
+  color: var(--text);
+  text-align: right;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-ok { color: var(--green) !important; }
+.status-missing { color: var(--text-dim) !important; }
+
+/* Log output */
+
+#log-output {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  font-family: monospace;
+  height: 320px;
+  overflow-y: auto;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-cmd  { color: var(--tan); }
+.log-done { color: var(--green); }
+.log-error { color: var(--red); }
+
+.log-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+}
+
+#btn-clear-log, #btn-stop {
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+#btn-stop {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+
+#btn-clear-log:hover { color: var(--text); border-color: var(--tan); }
+
+#log-tool-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: normal;
+}
+
+/* Modal */
+
+#modal-confirm {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+  max-width: 420px;
+  color: var(--text);
+}
+
+.modal-box h3 { color: var(--red); margin: 0 0 0.75rem; }
+.modal-box p  { font-size: 0.88rem; margin: 0.4rem 0; color: var(--text-dim); }
+
+.modal-btns {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  justify-content: flex-end;
+}
+
+.modal-btns button {
+  padding: 6px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.modal-btns button:hover { border-color: var(--tan); }
+.modal-btns .btn-danger   { background: var(--red); color: #fff; border-color: var(--red); }

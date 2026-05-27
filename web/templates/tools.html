@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NMM Tools</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/tools.css">
+</head>
+<body>
+<div id="tools-app">
+  <header>
+    <h1>&#x1F6E0; Nine Men's Morris — Tools</h1>
+    <a href="/" class="btn-back">&#8592; Back to Game</a>
+    <span id="busy-badge" class="badge-busy" style="display:none">&#x23F3; Running…</span>
+  </header>
+
+  <main>
+
+    <!-- ── Status Cards ───────────────────────────────────────────────── -->
+    <section class="tools-section" id="section-status">
+      <h2>Database Status</h2>
+      <div class="status-grid">
+
+        <div class="status-card" id="card-fullgame">
+          <div class="card-title">FullGame DB</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Status</span><span id="fg-status">—</span></div>
+            <div class="stat-row"><span>Positions</span><span id="fg-positions">—</span></div>
+            <div class="stat-row"><span>Resolved</span><span id="fg-resolved">—</span></div>
+            <div class="stat-row"><span>Size</span><span id="fg-size">—</span></div>
+            <div class="stat-row"><span>Modified</span><span id="fg-mtime">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-endgame">
+          <div class="card-title">Endgame Solved DB</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Status</span><span id="es-status">—</span></div>
+            <div class="stat-row"><span>Positions</span><span id="es-positions">—</span></div>
+            <div class="stat-row"><span>Size</span><span id="es-size">—</span></div>
+            <div class="stat-row"><span>Modified</span><span id="es-mtime">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-trajectory">
+          <div class="card-title">Trajectory DB</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Games indexed</span><span id="tdb-games">—</span></div>
+            <div class="stat-row"><span>Prefix entries</span><span id="tdb-entries">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-games">
+          <div class="card-title">Game Records</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Total games</span><span id="gm-count">—</span></div>
+            <div class="stat-row"><span>Earliest</span><span id="gm-earliest">—</span></div>
+            <div class="stat-row"><span>Latest</span><span id="gm-latest">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-weights">
+          <div class="card-title">Evolved Weights</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Status</span><span id="wt-status">—</span></div>
+            <div class="stat-row"><span>Size</span><span id="wt-size">—</span></div>
+            <div class="stat-row"><span>Modified</span><span id="wt-mtime">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-openings">
+          <div class="card-title">Opening Book</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Total openings</span><span id="ob-total">—</span></div>
+            <div class="stat-row"><span>Named</span><span id="ob-named">—</span></div>
+          </div>
+        </div>
+
+      </div>
+      <button class="btn-refresh" id="btn-refresh-status">&#x21BB; Refresh Status</button>
+    </section>
+
+    <!-- ── Build FullGame DB ──────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Build FullGame DB</h2>
+      <p class="tool-desc">Scans human-played games to find common positions, then BFS-expands around them to cover opponent responses not seen in the corpus. Output is a sorted binary (.bin) file.</p>
+      <div class="tool-form">
+        <label>Min seed frequency <input type="number" id="fg-minseed" value="2" min="1" max="100" style="width:5em" title="Minimum times a position must appear in human games to be used as a BFS seed"></label>
+        <label>Early expand depth <input type="number" id="fg-expdepth-early" value="8" min="1" max="20" style="width:4em" title="BFS depth for early-game positions (0 pieces placed); tapers to late depth by end of placement"></label>
+        <label>Late expand depth <input type="number" id="fg-expdepth" value="4" min="1" max="12" style="width:4em" title="BFS depth for late-game positions (all pieces placed)"></label>
+        <label>Max expand positions <input type="number" id="fg-maxexpand" value="200000" min="1000" style="width:8em" title="Hard cap on total BFS-expanded positions (controls file size)"></label>
+        <label>Output dir (blank = data/) <input type="text" id="fg-dbdir" value="" placeholder="data/" style="width:16em"></label>
+      </div>
+      <button class="btn-run" id="btn-build-fg" data-tool="build_fullgame_db">&#9654; Build FullGame DB</button>
+    </section>
+
+    <!-- ── Build Endgame DB ───────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Build Endgame Solved DB</h2>
+      <p class="tool-desc">Retrograde-solve all positions with ≤5 pieces per side. Takes minutes to hours depending on depth. Output goes to <code>data/endgame/</code>.</p>
+      <div class="tool-form">
+        <label>Output dir <input type="text" id="eg-outdir" value="data/endgame" style="width:18em"></label>
+      </div>
+      <button class="btn-run" id="btn-build-eg" data-tool="build_endgame_db">&#9654; Build Endgame DB</button>
+    </section>
+
+    <!-- ── Self-Play ──────────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Self-Play</h2>
+      <p class="tool-desc">Run AI vs AI games to accumulate training data. Uses <code>tools/self_play.py</code>. Saves game records to <code>data/games/</code>.</p>
+      <div class="tool-form">
+        <label>Games <input type="number" id="sp-games" value="20" min="1" max="500" style="width:5em"></label>
+        <label>White difficulty <input type="number" id="sp-white" value="5" min="1" max="10" style="width:4em"></label>
+        <label>Black difficulty <input type="number" id="sp-black" value="5" min="1" max="10" style="width:4em"></label>
+        <label>Parallel workers <input type="number" id="sp-parallel" value="2" min="1" max="8" style="width:4em"></label>
+        <label><input type="checkbox" id="sp-nollm" checked> Skip LLM (faster)</label>
+      </div>
+      <button class="btn-run" id="btn-selfplay" data-tool="self_play">&#9654; Run Self-Play</button>
+    </section>
+
+    <!-- ── Evolve Weights ─────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Evolve Heuristic Weights</h2>
+      <p class="tool-desc">Runs a CMA-ES / evolutionary search to find better heuristic weights. Uses <code>tools/evolve_weights_v2.py</code>. Saves to <code>data/weights/best.json</code>.</p>
+      <div class="tool-form">
+        <label>Generations <input type="number" id="ew-gens" value="30" min="1" max="200" style="width:5em"></label>
+        <label>Games/gen <input type="number" id="ew-gpg" value="20" min="1" max="100" style="width:5em"></label>
+        <label>Difficulty <input type="number" id="ew-diff" value="5" min="1" max="10" style="width:4em"></label>
+        <label>Parallel <input type="number" id="ew-parallel" value="4" min="1" max="8" style="width:4em"></label>
+        <label>Sigma <input type="number" id="ew-sigma" value="0.12" min="0.01" max="1" step="0.01" style="width:5em"></label>
+      </div>
+      <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
+    </section>
+
+    <!-- ── Name Openings ──────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Name Openings</h2>
+      <p class="tool-desc">Merges duplicate openings and names unnamed ones via the LLM. Requires Ollama to be running for naming; deduplication always runs.</p>
+      <div class="tool-form">
+        <label><input type="checkbox" id="no-dryrun"> Dry run (no changes)</label>
+        <label><input type="checkbox" id="no-mergeonly"> Merge only (skip LLM naming)</label>
+        <label>Min common moves <input type="number" id="no-mincommon" value="4" min="1" max="12" style="width:4em"></label>
+      </div>
+      <button class="btn-run" id="btn-nameopenings" data-tool="name_openings">&#9654; Name Openings</button>
+    </section>
+
+    <!-- ── Purge AI Learning ──────────────────────────────────────────── -->
+    <section class="tools-section tools-section-danger">
+      <h2>&#9888; Purge AI Self-Play Learning</h2>
+      <p class="tool-desc">Removes AI-generated openings and self-play game records. Keeps human games and book-imported openings. Writes a backup before making changes.</p>
+      <div class="tool-form">
+        <label><input type="checkbox" id="purge-dryrun" checked> Dry run first (preview only)</label>
+      </div>
+      <button class="btn-run btn-danger" id="btn-purge" data-tool="purge_ai_learning">&#x1F5D1; Purge AI Learning</button>
+    </section>
+
+    <!-- ── Output Log ─────────────────────────────────────────────────── -->
+    <section class="tools-section" id="section-log">
+      <h2>Output <span id="log-tool-label"></span></h2>
+      <div id="log-output"></div>
+      <div class="log-controls">
+        <button id="btn-stop" style="display:none" class="btn-danger">&#x23F9; Stop</button>
+        <button id="btn-clear-log">&#x2715; Clear</button>
+        <label><input type="checkbox" id="chk-autoscroll" checked> Auto-scroll</label>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Purge confirmation modal -->
+<div id="modal-confirm" style="display:none">
+  <div class="modal-box">
+    <h3>Confirm Purge</h3>
+    <p>This will permanently remove all AI self-play generated openings and self-play game records. A backup will be created first.</p>
+    <p>Are you sure?</p>
+    <div class="modal-btns">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-confirm-ok" class="btn-danger">Yes, Purge</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/tools.js"></script>
+</body>
+</html>

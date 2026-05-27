@@ -10,11 +10,10 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 
 | Priority | Item | Key outcome |
 |----------|------|-------------|
-| ★★ | **B-52** | FullGameDB from human games (frequency-weighted) |
-| ★★ | **SE-14** | DB-Guided Horizon Search (wires B-52 into negamax) |
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) |
-| ★ | **B-27** | Make binary format the default DB output |
+| ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | ★ | **B-51** | Expand retrograde solver beyond 3v3 |
+| ★ | **B-56** | Add D4 board symmetry to endgame database (8x size/speed reduction) ✅ 2026-05-28 |
 | ★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | | **SE-11** | Opponent likelihood weighting via TrajectoryDB |
 | | **SE-12** | Incremental evaluation cache (Zobrist-keyed) |
@@ -30,65 +29,11 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 ### Enhancement B-23 — Endgame position database builder ✅ 2026-05-26
 *(Archived — see plan_done.md)*
 
-### Enhancement B-27 — Make binary format the default fullgame DB output ⬜
+### Enhancement B-27 — Make binary format the default fullgame DB output ✅ 2026-05-26
+*(Archived — see plan_done.md)*
 
-**Goal:** Switch `--format` default from `"sqlite"` to `"binary"` in `tools/build_fullgame_db.py`. After a successful build, auto-write the output path back to `data/settings.json` as `fullgame_db_path` so the server picks up the new DB on next restart.
-
-**Current state:** `--format [sqlite|binary]` already exists in the CLI. Binary export (`export_to_binary`) already works. The default is still `"sqlite"`.
-
-**Changes required:**
-
-1. `tools/build_fullgame_db.py` — change `default="sqlite"` to `default="binary"` for `--format`.
-2. After build completes (either path), resolve the final output path (`.bin` for binary, `.sqlite` for sqlite) and write it to `data/settings.json`:
-   ```python
-   settings["fullgame_db_path"] = str(final_path)
-   with open(settings_path, "w") as f:
-       json.dump(settings, f, indent=2)
-   ```
-3. Print a confirmation line: `Settings updated: fullgame_db_path = <path>`.
-
-**Files:**
-- `tools/build_fullgame_db.py`
-- `data/settings.json` (auto-updated at runtime)
-
----
-
-### Enhancement B-52 — FullGameDB: Frequency-Weighted Build from Human-Played Games ⬜ ★ High Impact
-
-**Goal:** Update `tools/build_fullgame_db.py` so the DB reflects positions that actually occur in human play, not the full synthetic game tree. This enables frequency-based pruning: uncommon positions are dropped, making the DB smaller and denser in strategically important territory so deeper analysis is practical along those lines.
-
-**Why:** The current build does a bounded BFS/DFS over the full NMM game tree (synthetic positions). Many reachable positions are never played in practice — symmetry-equivalent placements, blunder-induced transpositions, AI-AI self-play lines. Including them wastes DB space and dilutes the signal from positions that actually recur. A DB built from real human games is:
-- Smaller and fits in RAM more easily
-- Automatically weighted toward opening and midgame structures humans actually create
-- Self-improving: more games → better frequency signal → tighter pruning → deeper coverage per MB
-
-**Game source filtering:**
-- Include only `human-human` and `human-AI` games from `data/games/` JSONL records
-- Exclude AI-AI self-play (detected by: `human_color` is null AND at least one move has a non-null `game_ai_score` for both colors)
-- Field detection: `human_color` non-null → human-AI; `human_color` null and all `game_ai_score` null → human-human; otherwise exclude
-
-**Frequency tracking per position:**
-- For every position (by canonical key) in included games, record how many games reached it
-- Store `frequency` (integer count) in the DB record alongside existing `outcome`, `depth`, `best_move`
-- Binary format record gains a `frequency` field (replace one pad byte or expand to 36 bytes)
-
-**Pruning rules:**
-- `--min-frequency N`: drop any position reached in fewer than N games (default 1 = keep all)
-- `--min-frequency-placement P`: stricter threshold during placement phase (positions covered by many games → keep; rare variants → prune)
-- A position is always kept if its `outcome` is known (WIN/LOSS/DRAW) regardless of frequency — don't throw away solved positions
-
-**Incremental update mode:**
-- `--update-from-games DIR`: scan new JSONL files since last build, increment frequencies, re-apply pruning threshold
-- Tracked via a `last_updated` timestamp in the DB header
-- Allows weekly rebuilds as games accumulate without full re-enumeration
-
-**Deliverables:**
-
-- `tools/build_fullgame_db.py` — add `--source-games DIR` flag (replaces BFS enumeration with JSONL game scan); `--min-frequency N`; `--update-from-games DIR`; game-type filtering logic
-- `ai/fullgame_db.py` — `frequency` field in `FullGameResult`; `query_min_frequency()` helper to allow caller to filter by confidence
-- `tools/build_fullgame_db.py` — frequency-based pruning pass after initial build
-
----
+### Enhancement B-52 — FullGameDB: Frequency-Weighted Build from Human-Played Games ✅ 2026-05-26
+*(Archived — see plan_done.md)*
 
 ### Enhancement B-24 — GUI settings for position DB usage ⬜
 
@@ -118,33 +63,11 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 
 ---
 
-### Enhancement B-25 — Tools management page ⬜
+### Enhancement SE-14 — DB-Guided Horizon Search ✅ 2026-05-26
+*(Archived — see plan_done.md)*
 
-**Goal:** A new web page (`/tools`) that lets the user inspect the state of all AI knowledge bases and trigger training tools from the browser, without needing a terminal.
-
-**Access:** A **Tools** button added to the NMM game page header bar opens `/tools` in a new browser tab.
-
-**Page sections:**
-
-**1. Database Status** — file size, last-modified, position count, coverage note, Rebuild button (streams output).
-
-**2. Heuristic Weight Evolution** — current `best.json` vs defaults; run `evolve_weights.py` / `evolve_weights_v2.py` buttons with configurable args; live log output.
-
-**3. Self-Play & Training** — game count and date range; trajectory DB size; run self-play button; train value net button.
-
-**4. Opening Book** — total openings, play count; Name openings / Purge AI learning buttons (with confirmation).
-
-**Implementation notes:**
-- FastAPI route `GET /tools` serves `tools.html` (standalone page)
-- `/ws/tools` WebSocket streams subprocess stdout line-by-line
-- Only one tool subprocess runs at a time; all run buttons disabled while active
-- Destructive actions (purge, rebuild DB) show confirmation dialog
-
-**Files:**
-- `web/templates/tools.html` (new)
-- `web/static/tools.js` (new)
-- `web/app.py` — `/tools` route, `/api/tool_status`, `/ws/tools` WebSocket
-- `web/templates/index.html` — add **Tools** button to header bar
+### Enhancement B-25 — Tools management page ✅ 2026-05-27
+*(Archived — see plan_done.md)*
 
 ---
 

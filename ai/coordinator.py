@@ -514,7 +514,10 @@ class Coordinator:
                     llm_move = None
             if llm_move and llm_move != ai_move:
                 llm_score = self.game_ai.score_move(board, llm_move)
-                if llm_score + self.LLM_BONUS > ai_score:
+                # Never let the LLM override the engine during tactical emergencies
+                # (must-block or own-mill-closure), regardless of score delta.
+                _tac_lock = tac["must_block_opponent"] or tac["can_close_mill"]
+                if llm_score + self.LLM_BONUS > ai_score and not _tac_lock:
                     move = llm_move
                     self.emit(
                         "GameAI",

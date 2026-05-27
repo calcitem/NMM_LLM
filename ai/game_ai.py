@@ -50,8 +50,10 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
                 if any(board.positions[nb] == opp for nb in ADJACENCY[empty]):
                     threats.add(empty)
 
-    # Placement phase fork: when the opponent holds ≥2 simultaneous 2-configs,
-    # restrict the current player to the closing squares of those mills.
+    # Placement phase: any opponent 2-config is an immediate threat — restrict STM
+    # to blocking squares.  Fork (≥2 simultaneous threats) always restricts.
+    # Single threat: carveout allows STM to close their own mill instead (own-mill
+    # closure is at least as strong as blocking one threat in most positions).
     if opp_placed < 9:
         closing = [
             next(p for p in mill if board.positions[p] == "")
@@ -61,6 +63,15 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
         ]
         if len(closing) >= 2:
             threats.update(closing)
+        elif closing:
+            stm = board.turn
+            stm_can_close = any(
+                [board.positions[p] for p in mill].count(stm) == 2
+                and [board.positions[p] for p in mill].count("") == 1
+                for mill in MILLS
+            )
+            if not stm_can_close:
+                threats.update(closing)
 
     return threats
 
@@ -483,8 +494,12 @@ class GameAI:
         # Early-game cap: for time-limited difficulties only (5+), use a shorter
         # budget before enough pieces are placed for the full time budget to be useful.
         # Fixed-depth difficulties (1–4) don't need this; their tree is already small.
+        # Guard: never apply the early-game cap in fly phase (3v3 endgame also has
+        # < 10 pieces but needs the full time budget to find multi-move fork combinations).
         total_on_board = sum(board.pieces_on_board.values())
+        _in_placement = get_game_phase(board, board.turn) == "place"
         if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
+                and _in_placement
                 and not fast_early_game
                 and self.difficulty in _TIME_LIMIT):
             # Cap search depth for the very first placements: on a near-empty board,
@@ -592,8 +607,10 @@ class GameAI:
         if not moves:
             return 0.5
 
+        from game.rules import get_game_phase
         total_on_board = sum(board.pieces_on_board.values())
-        if total_on_board < _EARLY_GAME_PIECE_THRESHOLD:
+        if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
+                and get_game_phase(board, board.turn) == "place"):
             depth = 3
         else:
             depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)

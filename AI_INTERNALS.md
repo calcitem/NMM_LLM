@@ -551,13 +551,24 @@ WDL values are packed 2 bits per slot (4 slots per byte): `UNKNOWN=0`, `WIN=1`, 
 
 ### Offline solver (`tools/build_endgame_db.py`)
 
-1. **Pass 0 — terminal wins.** For every 3v3 position where the side to move can close a mill (fly move to any empty square that completes 3-in-a-row) and then capture any opponent piece, that position is marked `WIN` — the mover can immediately reduce the opponent to 2 pieces.
-2. **Propagation passes.** Repeated passes apply:
-   - A position is `LOSS` if **all** successors are `WIN` (the mover is forced into a lost position no matter what they play).
-   - A position is `WIN` if **any** successor is `LOSS` (the mover can force the opponent into a `LOSS`).
-3. **DRAW assignment.** All positions still `UNKNOWN` after propagation converges are marked `DRAW`.
+The solver uses **D4 dihedral symmetry** to reduce computation by ~8×. NMM mills and adjacency are all D4-invariant, so the WDL value of a position is identical to the WDL of any of its 7 symmetric equivalents. The algorithm exploits this as follows:
+
+1. **Canonical precomputation.** All 5_383_840 position IDs are scanned once and those in the **canonical (bitmask-minimum) D4 equivalence class** are collected into `canonical_ids` (~672 K entries, one-eighth of the total). Canonicality is tested via `_canonical_indices(w, b)` in `build_endgame_db.py`, which applies all 7 non-identity D4 bitmask permutations and returns the minimum `(w_mask, b_mask)` form.
+
+2. **Pass 0 — terminal wins (canonical only).** For every canonical position where the side to move can close a mill (fly move to any empty square that completes 3-in-a-row) and then capture any opponent piece, that position is marked `WIN` — the mover can immediately reduce the opponent to 2 pieces.
+
+3. **Propagation passes (canonical only).** Repeated passes over `canonical_ids` apply:
+   - A position is `LOSS` if **all** successors are `WIN`.
+   - A position is `WIN` if **any** successor is `LOSS`.
+   - Successor encoding always canonicalises the resulting `(w, b)` pair before looking up the table, so every lookup lands on a canonical entry.
+
+4. **DRAW assignment (canonical only).** Canonical positions still `UNKNOWN` after convergence are marked `DRAW`.
+
+5. **Fill pass.** A single final pass over all 5_383_840 positions copies the WDL from each position's canonical equivalent to fill the non-canonical slots. The output file is fully populated — `EndgameSolvedDB.query()` requires no canonicalization at runtime.
 
 Mill detection uses bitmasks: `_MILL_MASKS_FOR[i]` stores each mill mask that covers square `i`. `_closes_mill(piece_mask, to_idx)` runs in O(mills_per_square) time with no memory allocation.
+
+D4 permutation pairs are precomputed at module load from `ai/board_symmetry._BOARD_PERM` as `_BPERM_MASKS` — a list of 7 × 24 `(old_bit, new_bit)` pairs — avoiding heap allocations during the inner canonicalization loop.
 
 ### Runtime usage
 

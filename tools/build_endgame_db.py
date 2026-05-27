@@ -1,26 +1,40 @@
 #!/usr/bin/env python3
-"""tools/build_endgame_db.py — Retrograde endgame solver for NMM (3,3) positions.
+"""tools/build_endgame_db.py — Generalized retrograde endgame solver for NMM.
 
 Usage
 -----
-    python tools/build_endgame_db.py [--out-dir DIR] [--verbose]
+    # Build a specific table (loads its sub-tables from disk automatically):
+    python tools/build_endgame_db.py --nW 4 --nB 3
 
-Builds ``endgame_3_3.wdl`` in the output directory (default: ``data/endgame/``).
-The file is consumed at query time by ``ai/endgame_solved_db.EndgameSolvedDB``.
+    # Build all tables up to nW+nB ≤ <max-sum> in dependency order:
+    python tools/build_endgame_db.py --build-all [--max-sum 11]
+
+    # Skip tables that already exist on disk:
+    python tools/build_endgame_db.py --build-all --skip-existing
+
+Output: data/endgame/endgame_{nW}_{nB}.wdl
 
 Algorithm
 ---------
-All C(24,3)×C(21,3)×2 = 5,383,840 (3,3) fly-phase positions are enumerated via
-the combinatorial index.  Positions where any fly move closes a mill are
-immediately marked WIN (the capturing player reduces the opponent to 2 pieces,
-which is an instant loss under NMM rules).  A fixed-point forward pass then
-propagates:
+All C(24,nW)×C(24-nW,nB)×2 positions are enumerated via the combinatorial index.
 
-  WIN  — has at least one move leading to a terminal-WIN or a LOSS-labelled
-          successor (opponent is to move and is in a losing position).
-  LOSS — every move leads to a WIN-labelled successor for the opponent.
+Pass 0: mark every position whose outcome is immediately determinable (blocked
+move-phase mover → LOSS; any mill-closing move with a WIN capture → WIN).
 
-Positions remaining UNKNOWN after convergence are in drawn cycles → DRAW.
+Iterative forward passes propagate WIN and LOSS until fixed-point.
+Remaining UNKNOWN positions → DRAW.
+
+Tables are built in ascending (nW+nB) order so sub-tables are always fully
+solved before they are consulted.  The 3v3 base case requires no sub-tables
+because any mill capture there immediately reduces the opponent below 3 pieces.
+
+Performance notes
+-----------------
+* _CT: precomputed Pascal's triangle avoids math.comb() function-call overhead.
+* _RI: reusable 24-int buffer for the B-remapping step in _encode.
+* Inner move loop uses bitmask occupancy checks and incremental mask updates
+  rather than set/list allocations.
+* new_mover list is only built when needed (mill-closing or non-capture encode).
 """
 
 from __future__ import annotations
@@ -48,10 +62,17 @@ _esdb_mod = _ilu.module_from_spec(_spec)
 sys.modules["ai.endgame_solved_db"] = _esdb_mod
 _spec.loader.exec_module(_esdb_mod)
 
-from game.board import MILLS, POSITIONS
+# Load ai.board_symmetry for D4 canonicalization helpers.
+_bs_spec = _ilu.spec_from_file_location(
+    "ai.board_symmetry", str(_ROOT / "ai" / "board_symmetry.py")
+)
+_bs_mod = _ilu.module_from_spec(_bs_spec)
+sys.modules["ai.board_symmetry"] = _bs_mod
+_bs_spec.loader.exec_module(_bs_mod)
+_BPERM = _bs_mod._BOARD_PERM  # _BPERM[sym_idx][old_idx] = new_idx
 
-combo_unrank = _esdb_mod.combo_unrank
-TABLE_SIZE_3_3 = _esdb_mod.TABLE_SIZE_3_3
+from game.board import ADJACENCY, MILLS, POSITIONS
+
 get_wdl = _esdb_mod.get_wdl
 set_wdl = _esdb_mod.set_wdl
 WDL_UNKNOWN = _esdb_mod.WDL_UNKNOWN
@@ -66,14 +87,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Fast combinatorial helpers ─────────────────────────────────────────────────
+# Precomputed Pascal's triangle: _CT[n][k] = C(n, k) for 0 ≤ n,k ≤ 24.
+# Avoids math.comb() function-call overhead in tight inner loops.
+_CT: list[list[int]] = [[0] * 25 for _ in range(25)]
+for _n in range(25):
+    _CT[_n][0] = 1
+    for _k in range(1, 25):
+        if _k <= _n:
+            _CT[_n][_k] = _CT[_n - 1][_k - 1] + _CT[_n - 1][_k]
+
+# Reusable buffer: _RI[sq] = rank of square sq in the "remaining" list after
+# removing white pieces.  Single-threaded use only.
+_RI: list[int] = [0] * 24
+
 # ── Board constants ────────────────────────────────────────────────────────────
 
 _POS_TO_IDX: dict[str, int] = {pos: i for i, pos in enumerate(POSITIONS)}
 _N = 24
-_ALL_MASK = (1 << _N) - 1
 
-# ── Mill bitmasks ──────────────────────────────────────────────────────────────
-# For each square i, list of mill bitmasks that include i.
+# ── Adjacency as index lists ───────────────────────────────────────────────────
+
+_ADJACENCY_IDX: list[list[int]] = [[] for _ in range(_N)]
+for _pos_name, _neighbors in ADJACENCY.items():
+    _ADJACENCY_IDX[_POS_TO_IDX[_pos_name]] = [_POS_TO_IDX[nb] for nb in _neighbors]
+
+# ── Mill bitmasks per square ────────────────────────────────────────────────────
+
 _MILL_MASKS_FOR: list[list[int]] = [[] for _ in range(_N)]
 for _mill in MILLS:
     _mask = 0
@@ -83,204 +123,526 @@ for _mill in MILLS:
         _MILL_MASKS_FOR[_POS_TO_IDX[_p]].append(_mask)
 
 
+# ── D4 canonicalization ────────────────────────────────────────────────────────
+# Precomputed bitmask permutation pairs for the 7 non-identity D4 transforms.
+# Each entry is a list of (old_bit, new_bit) pairs covering all 24 squares.
+# Using bitmasks avoids list allocations in the inner canonicalization loop.
+_BPERM_MASKS: list[list[tuple[int, int]]] = []
+for _sym_idx in range(1, 8):
+    _perm = _BPERM[_sym_idx]
+    if _perm is None:
+        continue
+    _BPERM_MASKS.append([(1 << _old, 1 << _perm[_old]) for _old in range(_N)])
+
+
+def _canonical_indices(w: list[int], b: list[int]) -> tuple[list[int], list[int]]:
+    """Return the D4-canonical (w, b) index lists (bitmask-minimum over 8 transforms)."""
+    w_mask = 0
+    for i in w:
+        w_mask |= 1 << i
+    b_mask = 0
+    for i in b:
+        b_mask |= 1 << i
+    best_w, best_b = w_mask, b_mask
+    for pairs in _BPERM_MASKS:
+        tw = tb = 0
+        for old_bit, new_bit in pairs:
+            if w_mask & old_bit:
+                tw |= new_bit
+            if b_mask & old_bit:
+                tb |= new_bit
+        if (tw, tb) < (best_w, best_b):
+            best_w, best_b = tw, tb
+    w_can = [i for i in range(_N) if (best_w >> i) & 1]
+    b_can = [i for i in range(_N) if (best_b >> i) & 1]
+    return w_can, b_can
+
+
+def _is_canonical(w: list[int], b: list[int]) -> bool:
+    w_can, b_can = _canonical_indices(w, b)
+    return w_can == w and b_can == b
+
+
 def _closes_mill(piece_mask: int, to_idx: int) -> bool:
-    """True if adding piece at to_idx closes a mill given current piece_mask."""
     for mm in _MILL_MASKS_FOR[to_idx]:
         if (piece_mask & mm) == mm:
             return True
     return False
 
 
-# ── Fast position ID encoding (index-level, avoids POSITIONS name lookups) ────
-
-_C21_3 = comb(21, 3)   # 1330
-_C21_3_x2 = _C21_3 * 2  # 2660
-
-
-def _encode(w_sorted: list[int], b_sorted: list[int], turn_bit: int) -> int:
-    """Fast encode_position_id operating on sorted index lists + turn bit."""
-    # white_rank
-    wr = comb(w_sorted[0], 1) + comb(w_sorted[1], 2) + comb(w_sorted[2], 3)
-    # remaining squares (not occupied by white), sorted
-    w_set = set(w_sorted)
-    remaining = [i for i in range(_N) if i not in w_set]
-    # remap black indices through remaining
-    b0 = remaining.index(b_sorted[0])
-    b1 = remaining.index(b_sorted[1])
-    b2 = remaining.index(b_sorted[2])
-    br = comb(b0, 1) + comb(b1, 2) + comb(b2, 3)
-    return wr * _C21_3_x2 + br * 2 + turn_bit
+def _in_mill(piece_idx: int, piece_mask: int) -> bool:
+    for mm in _MILL_MASKS_FOR[piece_idx]:
+        if (piece_mask & mm) == mm:
+            return True
+    return False
 
 
-def _decode(pos_id: int) -> tuple[list[int], list[int], int]:
-    """Return (w_sorted, b_sorted, turn_bit) from pos_id."""
+# ── General encode / decode ────────────────────────────────────────────────────
+
+def _table_size(nW: int, nB: int) -> int:
+    return _CT[_N][nW] * _CT[_N - nW][nB] * 2
+
+
+def _encode(
+    w_sorted: list[int], b_sorted: list[int], turn_bit: int, nC_b: int
+) -> int:
+    """Pack (W_indices, B_indices, turn_bit) into a table position-ID.
+
+    nC_b = C(_N - nW, nB) must be pre-computed by the caller.
+    Uses precomputed _CT and _RI buffer — no per-call heap allocations.
+    W_indices are always passed first, regardless of who is to move.
+    """
+    nW = len(w_sorted)
+    nB = len(b_sorted)
+    # White rank: Σ C(w[i], i+1)
+    wr = 0
+    for i in range(nW):
+        wr += _CT[w_sorted[i]][i + 1]
+    # Fill _RI: for each non-white square, _RI[sq] = its rank in the remaining list.
+    k = 0
+    wp = 0
+    for sq in range(_N):
+        if wp < nW and w_sorted[wp] == sq:
+            wp += 1
+        else:
+            _RI[sq] = k
+            k += 1
+    # Black rank: Σ C(_RI[b[i]], i+1)
+    br = 0
+    for i in range(nB):
+        br += _CT[_RI[b_sorted[i]]][i + 1]
+    return wr * nC_b * 2 + br * 2 + turn_bit
+
+
+def _decode(
+    pos_id: int, nW: int, nB: int, nC_b: int
+) -> tuple[list[int], list[int], int]:
+    """Unpack a position-ID into (w_sorted, b_sorted, turn_bit).
+
+    Inlines combo_unrank using the _CT table for fast comb lookups.
+    """
     turn_bit = pos_id & 1
     rem = pos_id >> 1
-    br = rem % _C21_3
-    wr = rem // _C21_3
-    w = combo_unrank(wr, 3, _N)
-    w_set = set(w)
-    remaining = [i for i in range(_N) if i not in w_set]
-    b_remapped = combo_unrank(br, 3, 21)
-    b = sorted(remaining[j] for j in b_remapped)
+    br = rem % nC_b
+    wr = rem // nC_b
+    # Unrank white (inline combo_unrank(wr, nW, 24))
+    w = []
+    rr = wr
+    up = _N - 1
+    for i in range(nW, 0, -1):
+        c = up
+        while c >= i - 1 and _CT[c][i] > rr:
+            c -= 1
+        rr -= _CT[c][i]
+        w.append(c)
+        up = c - 1
+    w.reverse()
+    # Unrank black remapping (inline combo_unrank(br, nB, _N-nW))
+    b_rem = []
+    rr = br
+    up = _N - nW - 1
+    for i in range(nB, 0, -1):
+        c = up
+        while c >= i - 1 and _CT[c][i] > rr:
+            c -= 1
+        rr -= _CT[c][i]
+        b_rem.append(c)
+        up = c - 1
+    b_rem.reverse()
+    # Map remapped B indices back to actual squares
+    k = 0
+    wp = 0
+    remaining = []
+    for sq in range(_N):
+        if wp < nW and w[wp] == sq:
+            wp += 1
+        else:
+            remaining.append(sq)
+    b = sorted(remaining[j] for j in b_rem)
     return w, b, turn_bit
 
 
-# ── Fly-move successor generator ───────────────────────────────────────────────
+# ── Capture helpers ────────────────────────────────────────────────────────────
 
-def _fly_successors(
-    mover: list[int], other: list[int], next_turn_bit: int
-) -> list[tuple[bool, int]]:
-    """Return (is_terminal_win, succ_id) for each legal fly move.
+def _valid_captures(other_list: list[int]) -> list[int]:
+    """Non-mill opponent pieces; fall back to all if every piece is in a mill."""
+    other_mask = 0
+    for i in other_list:
+        other_mask |= 1 << i
+    non_mill = [i for i in other_list if not _in_mill(i, other_mask)]
+    return non_mill if non_mill else list(other_list)
 
-    is_terminal_win=True means the move closes a mill (opponent reduced to 2 pieces).
-    succ_id is only valid when is_terminal_win=False.
+
+def _best_capture_wdl_for_mover(
+    new_mover: list[int],
+    other_list: list[int],
+    turn_bit: int,
+    nW: int,
+    nB: int,
+    sub_tables: dict[tuple[int, int], bytes],
+) -> int:
+    """WDL for the current mover after closing a mill, choosing the best capture.
+
+    Returns WDL_WIN, WDL_DRAW, WDL_LOSS, or WDL_UNKNOWN.
+    Cross-table convention:
+      turn_bit == 0 (W moves): W captures B piece → sub-table (nW, nB-1), B next.
+      turn_bit == 1 (B moves): B captures W piece → sub-table (nW-1, nB), W next.
+    W_indices are always the first argument to _encode.
     """
-    occupied_mask = 0
-    for i in mover + other:
-        occupied_mask |= 1 << i
-    empty_mask = _ALL_MASK & ~occupied_mask
-    results = []
-    for fi, from_idx in enumerate(mover):
-        new_mover_base = [mover[j] for j in range(3) if j != fi]
+    captures = _valid_captures(other_list)
+    best = WDL_LOSS
+    has_unknown = False
+
+    for cap_idx in captures:
+        new_other = sorted(i for i in other_list if i != cap_idx)
+        n_new_other = len(new_other)
+
+        if n_new_other < 3:
+            return WDL_WIN  # opponent below 3 → immediate loss for them
+
+        if turn_bit == 0:
+            sub_key_nw, sub_key_nb = nW, n_new_other
+            sub_nC_b = _CT[_N - sub_key_nw][sub_key_nb]
+            w_c, b_c = _canonical_indices(new_mover, new_other)
+            sub_key = _encode(w_c, b_c, 1, sub_nC_b)
+        else:
+            sub_key_nw, sub_key_nb = n_new_other, nB
+            sub_nC_b = _CT[_N - sub_key_nw][sub_key_nb]
+            w_c, b_c = _canonical_indices(new_other, new_mover)
+            sub_key = _encode(w_c, b_c, 0, sub_nC_b)
+
+        sub_tbl = sub_tables.get((sub_key_nw, sub_key_nb))
+        if sub_tbl is None:
+            has_unknown = True
+            continue
+
+        sub_val = get_wdl(sub_tbl, sub_key)
+        if sub_val == WDL_LOSS:
+            return WDL_WIN
+        elif sub_val == WDL_WIN:
+            pass
+        elif sub_val == WDL_DRAW:
+            if best != WDL_WIN:
+                best = WDL_DRAW
+
+    if has_unknown and best == WDL_LOSS:
+        return WDL_UNKNOWN
+    return best
+
+
+# ── Core solver ────────────────────────────────────────────────────────────────
+
+def _process_pos(
+    w: list[int], b: list[int], turn_bit: int,
+    table: bytearray,
+    nW: int, nB: int, nC_b: int,
+    sub_tables: dict,
+) -> int:
+    """Evaluate one position; return WDL_WIN/LOSS/UNKNOWN.
+
+    Bitmask occupancy checks and incremental mask updates avoid Python object
+    allocations in the hot path.  new_mover list is only built for mill-closing
+    moves (rare) and non-capture moves that need encoding.
+    """
+    mover = w if turn_bit == 0 else b
+    other = b if turn_bit == 0 else w
+    n_mover = len(mover)
+    fly_mover = n_mover <= 3
+    next_bit = 1 - turn_bit
+
+    mover_mask = 0
+    for i in mover:
+        mover_mask |= 1 << i
+    occ_mask = mover_mask
+    for i in other:
+        occ_mask |= 1 << i
+
+    all_opponent_win = True
+    has_any_move = False
+
+    for fi in range(n_mover):
+        from_idx = mover[fi]
         from_bit = 1 << from_idx
-        # After picking up the piece, from_idx becomes empty too.
-        avail = empty_mask | from_bit
-        bits = avail
-        while bits:
-            lb = bits & (-bits)
-            bits ^= lb
-            to_idx = lb.bit_length() - 1
-            if to_idx == from_idx:
+        mover_no_fi = mover_mask ^ from_bit
+
+        targets = range(_N) if fly_mover else _ADJACENCY_IDX[from_idx]
+
+        for to_idx in targets:
+            to_bit = 1 << to_idx
+            if occ_mask & to_bit:
                 continue
-            new_mover = sorted(new_mover_base + [to_idx])
-            new_mask = (occupied_mask & ~from_bit) | lb
-            mover_mask = 0
-            for i in new_mover:
-                mover_mask |= 1 << i
-            if _closes_mill(mover_mask, to_idx):
-                results.append((True, -1))
+            has_any_move = True
+
+            new_mover_mask = mover_no_fi | to_bit
+
+            if _closes_mill(new_mover_mask, to_idx):
+                new_mover = []
+                for j in range(n_mover):
+                    if j != fi:
+                        new_mover.append(mover[j])
+                new_mover.append(to_idx)
+                new_mover.sort()
+
+                outcome = _best_capture_wdl_for_mover(
+                    new_mover, other, turn_bit, nW, nB, sub_tables
+                )
+                if outcome == WDL_WIN:
+                    return WDL_WIN
+                elif outcome in (WDL_DRAW, WDL_UNKNOWN):
+                    all_opponent_win = False
             else:
-                if next_turn_bit == 1:  # next is B, so current was W → new_mover=W, other=B
-                    succ_id = _encode(new_mover, other, next_turn_bit)
-                else:  # next is W, so current was B → new_mover=B, other=W
-                    succ_id = _encode(other, new_mover, next_turn_bit)
-                results.append((False, succ_id))
-    return results
+                new_mover = []
+                for j in range(n_mover):
+                    if j != fi:
+                        new_mover.append(mover[j])
+                new_mover.append(to_idx)
+                new_mover.sort()
+
+                if turn_bit == 0:
+                    w_c, b_c = _canonical_indices(new_mover, other)
+                else:
+                    w_c, b_c = _canonical_indices(other, new_mover)
+                succ_id = _encode(w_c, b_c, next_bit, nC_b)
+                sv = get_wdl(table, succ_id)
+                if sv == WDL_LOSS:
+                    return WDL_WIN
+                elif sv != WDL_WIN:
+                    all_opponent_win = False
+
+    if not has_any_move:
+        return WDL_LOSS
+    if all_opponent_win:
+        return WDL_LOSS
+    return WDL_UNKNOWN
 
 
-# ── Solver ─────────────────────────────────────────────────────────────────────
+def solve_table(
+    nW: int,
+    nB: int,
+    sub_tables: dict[tuple[int, int], bytes],
+    verbose: bool = True,
+) -> bytearray:
+    """Solve all (nW, nB) positions.  Returns the WDL bytearray.
 
-def solve_3_3(out_dir: Path, verbose: bool = True) -> bytearray:
-    """Solve all (3,3) positions.  Returns the WDL bytearray."""
-    n_bytes = (TABLE_SIZE_3_3 + 3) >> 2
+    sub_tables must contain fully-solved (nW, nB-1) and (nW-1, nB) tables.
+    The 3v3 base case passes sub_tables={} because mill captures there
+    always reduce the opponent to 2 pieces (immediate WIN).
+    """
+    ts = _table_size(nW, nB)
+    n_bytes = (ts + 3) >> 2
     table = bytearray(n_bytes)
+    nC_b = _CT[_N - nW][nB]
     t0 = time.time()
 
-    # Pass 0 — mark positions where any fly move closes a mill as WIN.
-    n_win0 = 0
-    for pos_id in range(TABLE_SIZE_3_3):
-        w, b, turn_bit = _decode(pos_id)
-        mover = w if turn_bit == 0 else b
-        other = b if turn_bit == 0 else w
-        mover_mask = sum(1 << i for i in mover)
-        occupied_mask = mover_mask | sum(1 << i for i in other)
-        empty_mask = _ALL_MASK & ~occupied_mask
-        found = False
-        for fi, from_idx in enumerate(mover):
-            new_base = [mover[j] for j in range(3) if j != fi]
-            from_bit = 1 << from_idx
-            avail = empty_mask | from_bit
-            bits = avail
-            while bits and not found:
-                lb = bits & (-bits)
-                bits ^= lb
-                to_idx = lb.bit_length() - 1
-                if to_idx == from_idx:
-                    continue
-                new_mask = (mover_mask & ~from_bit) | lb
-                if _closes_mill(new_mask, to_idx):
-                    found = True
-            if found:
-                break
-        if found:
-            set_wdl(table, pos_id, WDL_WIN)
-            n_win0 += 1
-    if verbose:
-        logger.info("Pass 0: %d immediate WINs (%.1fs)", n_win0, time.time() - t0)
+    # ── Precompute canonical position IDs (~ts/8) ─────────────────────────────
+    canonical_ids: list[int] = []
+    for pos_id in range(ts):
+        w, b, _tb = _decode(pos_id, nW, nB, nC_b)
+        if _is_canonical(w, b):
+            canonical_ids.append(pos_id)
 
-    # Iterative forward passes.
-    for pass_num in range(1, 30):
+    if verbose:
+        logger.info(
+            "(%d,%d) Canonical positions: %d / %d (%.1f%%)",
+            nW, nB, len(canonical_ids), ts, 100.0 * len(canonical_ids) / ts,
+        )
+
+    # ── Pass 0: mark terminals (canonical positions only) ─────────────────────
+    n_pass0 = 0
+    for pos_id in canonical_ids:
+        w, b, turn_bit = _decode(pos_id, nW, nB, nC_b)
+        v = _process_pos(w, b, turn_bit, table, nW, nB, nC_b, sub_tables)
+        if v != WDL_UNKNOWN:
+            set_wdl(table, pos_id, v)
+            n_pass0 += 1
+
+    if verbose:
+        logger.info(
+            "(%d,%d) Pass 0: %d resolved (%.1fs)", nW, nB, n_pass0, time.time() - t0
+        )
+
+    # ── Iterative forward passes (canonical positions only) ───────────────────
+    for pass_num in range(1, 60):
         changed = 0
         tp = time.time()
-        for pos_id in range(TABLE_SIZE_3_3):
+        for pos_id in canonical_ids:
             if get_wdl(table, pos_id) != WDL_UNKNOWN:
                 continue
-            w, b, turn_bit = _decode(pos_id)
-            mover = w if turn_bit == 0 else b
-            other = b if turn_bit == 0 else w
-            next_bit = 1 - turn_bit
-            succs = _fly_successors(mover, other, next_bit)
-
-            has_winning_move = False
-            all_opponent_wins = True
-            for is_terminal, succ_id in succs:
-                if is_terminal:
-                    has_winning_move = True
-                    all_opponent_wins = False
-                else:
-                    sv = get_wdl(table, succ_id)
-                    if sv == WDL_LOSS:
-                        has_winning_move = True
-                        all_opponent_wins = False
-                    elif sv == WDL_WIN:
-                        pass  # opponent wins from succ
-                    else:
-                        all_opponent_wins = False
-
-            if has_winning_move:
-                set_wdl(table, pos_id, WDL_WIN)
-                changed += 1
-            elif all_opponent_wins:
-                set_wdl(table, pos_id, WDL_LOSS)
+            w, b, turn_bit = _decode(pos_id, nW, nB, nC_b)
+            v = _process_pos(w, b, turn_bit, table, nW, nB, nC_b, sub_tables)
+            if v != WDL_UNKNOWN:
+                set_wdl(table, pos_id, v)
                 changed += 1
 
         if verbose:
-            logger.info("Pass %d: %d newly resolved (%.1fs)", pass_num, changed, time.time() - tp)
+            logger.info(
+                "(%d,%d) Pass %d: %d newly resolved (%.1fs)",
+                nW, nB, pass_num, changed, time.time() - tp,
+            )
         if changed == 0:
             break
 
-    # Mark remaining UNKNOWN as DRAW.
+    # ── Mark remaining canonical UNKNOWN as DRAW ──────────────────────────────
     n_draw = 0
-    for pos_id in range(TABLE_SIZE_3_3):
+    for pos_id in canonical_ids:
         if get_wdl(table, pos_id) == WDL_UNKNOWN:
             set_wdl(table, pos_id, WDL_DRAW)
             n_draw += 1
 
-    n_win = sum(1 for i in range(TABLE_SIZE_3_3) if get_wdl(table, i) == WDL_WIN)
-    n_loss = sum(1 for i in range(TABLE_SIZE_3_3) if get_wdl(table, i) == WDL_LOSS)
+    # ── Fill non-canonical positions from their canonical equivalents ─────────
+    for pos_id in range(ts):
+        w, b, turn_bit = _decode(pos_id, nW, nB, nC_b)
+        w_can, b_can = _canonical_indices(w, b)
+        if w_can == w and b_can == b:
+            continue  # canonical: already solved
+        can_id = _encode(w_can, b_can, turn_bit, nC_b)
+        set_wdl(table, pos_id, get_wdl(table, can_id))
+
     if verbose:
+        n_win = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_WIN)
+        n_loss = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_LOSS)
         logger.info(
-            "Solved: %d WIN  %d LOSS  %d DRAW  (total %d, %.1fs)",
-            n_win, n_loss, n_draw, TABLE_SIZE_3_3, time.time() - t0,
+            "(%d,%d) Solved: %d WIN  %d LOSS  %d DRAW  (total %d, %.1fs)",
+            nW, nB, n_win, n_loss, n_draw, ts, time.time() - t0,
         )
+
     return table
 
 
+def solve_3_3(out_dir: Path, verbose: bool = True) -> bytearray:
+    """Convenience wrapper: solve the (3,3) base case."""
+    return solve_table(3, 3, {}, verbose=verbose)
+
+
+# ── Table file I/O ─────────────────────────────────────────────────────────────
+
+def _wdl_path(out_dir: Path, nW: int, nB: int) -> Path:
+    return out_dir / f"endgame_{nW}_{nB}.wdl"
+
+
+def _load_table(out_dir: Path, nW: int, nB: int) -> bytes | None:
+    p = _wdl_path(out_dir, nW, nB)
+    if not p.exists():
+        return None
+    expected_bytes = (_table_size(nW, nB) + 3) >> 2
+    data = p.read_bytes()
+    if len(data) != expected_bytes:
+        logger.warning(
+            "(%d,%d) Size mismatch: %s has %d bytes (expected %d) — skipping.",
+            nW, nB, p, len(data), expected_bytes,
+        )
+        return None
+    return data
+
+
+# ── Build schedule ─────────────────────────────────────────────────────────────
+
+_ALL_TABLES: list[tuple[int, int]] = [
+    (nW, nB)
+    for s in range(6, 12)
+    for nW in range(3, s)
+    for nB in [s - nW]
+    if nB >= 3
+]
+
+
+def _sub_tables_needed(nW: int, nB: int) -> list[tuple[int, int]]:
+    deps = []
+    if nB - 1 >= 3:
+        deps.append((nW, nB - 1))
+    if nW - 1 >= 3:
+        deps.append((nW - 1, nB))
+    return deps
+
+
+# ── Main ────────────────────────────────────────────────────────────────────────
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build NMM retrograde endgame WDL table.")
-    ap.add_argument("--out-dir", default="data/endgame",
-                    help="Directory to write endgame_3_3.wdl (default: data/endgame)")
-    ap.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    ap = argparse.ArgumentParser(
+        description="Build NMM retrograde endgame WDL tables."
+    )
+    ap.add_argument(
+        "--out-dir", default="data/endgame",
+        help="Directory to write endgame_*.wdl files (default: data/endgame)",
+    )
+    ap.add_argument("--nW", type=int, help="White piece count for a single table build")
+    ap.add_argument("--nB", type=int, help="Black piece count for a single table build")
+    ap.add_argument(
+        "--build-all", action="store_true",
+        help="Build all tables in dependency order",
+    )
+    ap.add_argument(
+        "--max-sum", type=int, default=11,
+        help="Maximum nW+nB to build when using --build-all (default: 11)",
+    )
+    ap.add_argument(
+        "--skip-existing", action="store_true",
+        help="Skip tables whose .wdl file already exists on disk",
+    )
+    ap.add_argument("--quiet", action="store_true", help="Suppress per-pass logging")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    wdl_path = out_dir / "endgame_3_3.wdl"
+    verbose = not args.quiet
 
-    table = solve_3_3(out_dir, verbose=not args.quiet)
-    wdl_path.write_bytes(bytes(table))
-    logger.info("Wrote %s (%d bytes)", wdl_path, len(table))
+    if args.build_all:
+        schedule = [
+            (nW, nB) for (nW, nB) in _ALL_TABLES if nW + nB <= args.max_sum
+        ]
+    elif args.nW is not None and args.nB is not None:
+        if args.nW < 3 or args.nB < 3:
+            ap.error("--nW and --nB must each be ≥ 3")
+        schedule = [(args.nW, args.nB)]
+    else:
+        ap.error("Specify --build-all or both --nW and --nB")
+
+    loaded: dict[tuple[int, int], bytes] = {}
+
+    for nW, nB in schedule:
+        wdl_path = _wdl_path(out_dir, nW, nB)
+        if args.skip_existing and wdl_path.exists():
+            logger.info("(%d,%d) Already exists — skipping.", nW, nB)
+            data = _load_table(out_dir, nW, nB)
+            if data is not None:
+                loaded[(nW, nB)] = data
+            continue
+
+        sub_tables: dict[tuple[int, int], bytes] = {}
+        for dep_nw, dep_nb in _sub_tables_needed(nW, nB):
+            if (dep_nw, dep_nb) in loaded:
+                sub_tables[(dep_nw, dep_nb)] = loaded[(dep_nw, dep_nb)]
+            else:
+                data = _load_table(out_dir, dep_nw, dep_nb)
+                if data is not None:
+                    sub_tables[(dep_nw, dep_nb)] = data
+                    loaded[(dep_nw, dep_nb)] = data
+                else:
+                    logger.warning(
+                        "(%d,%d) Sub-table (%d,%d) not found — capture outcomes "
+                        "into that table will be treated as UNKNOWN.",
+                        nW, nB, dep_nw, dep_nb,
+                    )
+
+        logger.info(
+            "Building (%d,%d): %d positions, %.1f MB table",
+            nW, nB,
+            _table_size(nW, nB),
+            (_table_size(nW, nB) + 3) / 4 / 1024 / 1024,
+        )
+        table = solve_table(nW, nB, sub_tables, verbose=verbose)
+        wdl_path.write_bytes(bytes(table))
+        logger.info("Wrote %s (%d bytes)", wdl_path, len(table))
+        loaded[(nW, nB)] = bytes(table)
+
+        remaining_schedule = set(schedule[schedule.index((nW, nB)) + 1:])
+        still_needed = set()
+        for rnW, rnB in remaining_schedule:
+            for dep in _sub_tables_needed(rnW, rnB):
+                still_needed.add(dep)
+        for key in list(loaded.keys()):
+            if key not in remaining_schedule and key not in still_needed:
+                del loaded[key]
 
 
 if __name__ == "__main__":

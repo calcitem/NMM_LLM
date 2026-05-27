@@ -1904,17 +1904,16 @@ def tactical_move_bonus(
         # concrete mill threat, not just a structural seed.
         setup_mill_bonus = int(weights.setup_mill * 1.3) * two_cfg_gained
 
-    # B-39: penalise creating a (own, own, opp) dead-mill pattern in move phase.
+    # B-39: penalise creating a (own, own, opp) dead-mill pattern.
     # Two own pieces in a mill already blocked by an opponent piece can never close
-    # — moving into such a pattern wastes structural potential.
+    # — moving or placing into such a pattern wastes structural potential.
     disrupted_two_config_penalty = 0
-    if not _is_placement:
-        for _mill in MILLS:
-            _vb = [before.positions[p] for p in _mill]
-            _va = [after.positions[p]  for p in _mill]
-            if (_va.count(color) == 2 and _va.count(opp) == 1
-                    and not (_vb.count(color) == 2 and _vb.count(opp) == 1)):
-                disrupted_two_config_penalty += weights.disrupted_two_config
+    for _mill in MILLS:
+        _vb = [before.positions[p] for p in _mill]
+        _va = [after.positions[p]  for p in _mill]
+        if (_va.count(color) == 2 and _va.count(opp) == 1
+                and not (_vb.count(color) == 2 and _vb.count(opp) == 1)):
+            disrupted_two_config_penalty += weights.disrupted_two_config
 
     # Mill-opening bonus: reward sliding out of a closed mill when the position
     # still has a cycling-ready mill (i.e. the move enables a future recapture).

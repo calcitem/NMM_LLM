@@ -1,18 +1,19 @@
-"""ai/endgame_solved_db.py — Retrograde endgame database for ≤6-piece positions.
+"""ai/endgame_solved_db.py — Retrograde endgame database for post-placement positions.
 
-Stores WDL (Win/Draw/Loss) results for positions where each side has exactly 3
-pieces (fly-phase positions).  The database uses a direct O(1) combinatorial
-index — no binary search needed.
+Stores WDL (Win/Draw/Loss) results for positions where all pieces have been
+placed and both sides have between 3 and 7 pieces on the board.  The database
+uses a direct O(1) combinatorial index — no binary search needed.
 
-Position ID formula (v1: nW = nB = 3)
----------------------------------------
-white_rank  = combo_rank(sorted(W_indices), 24)     # in [0, C(24,3)) = [0, 2024)
-remaining   = sorted([0..23] \\ W_indices)           # 21 squares not occupied by W
+Position ID formula (general: any nW, nB ≥ 3)
+-----------------------------------------------
+white_rank  = combo_rank(sorted(W_indices), 24)           # C(24,nW) possible values
+remaining   = sorted([0..23] \\ W_indices)                 # 24-nW squares
 B_remapped  = [remaining.index(b) for b in sorted(B_indices)]
-black_rank  = combo_rank(B_remapped, 21)             # in [0, C(21,3)) = [0, 1330)
-pos_id      = white_rank * 1330 * 2 + black_rank * 2 + turn_bit
+black_rank  = combo_rank(B_remapped, 24-nW)                # C(24-nW,nB) possible values
+pos_id      = white_rank * C(24-nW,nB) * 2 + black_rank * 2 + turn_bit
 
-Total slots: C(24,3) × C(21,3) × 2 = 2024 × 1330 × 2 = 5,383,840
+File names: endgame_{nW}_{nB}.wdl in the configured database directory.
+The 3v3 table (5,383,840 positions, ~1.3 MB) is the base case.
 
 WDL encoding (2 bits per slot, packed 4 per byte)
 -------------------------------------------------
@@ -20,7 +21,6 @@ WDL encoding (2 bits per slot, packed 4 per byte)
   1 = W (side to move wins)
   2 = L (side to move loses)
   3 = D (draw)
-Stored in a flat byte array of length ceil(5,383,840 / 4) = 1,345,960 bytes.
 
 Public surface
 --------------
@@ -164,62 +164,85 @@ def set_wdl(table: bytearray, pos_id: int, value: int) -> None:
 
 # ── EndgameSolvedDB ────────────────────────────────────────────────────────────
 
+def _table_size(nW: int, nB: int) -> int:
+    return comb(_N_POS, nW) * comb(_N_POS - nW, nB) * 2
+
+
+def _expected_bytes(nW: int, nB: int) -> int:
+    return (_table_size(nW, nB) + 3) >> 2
+
+
 class EndgameSolvedDB:
     """Read-only query interface for the retrograde endgame WDL database.
 
-    The DB is optional: ``is_available()`` returns False when no WDL file is
-    found in db_dir.  When available, ``query()`` returns "W", "L", "D", or
-    None.  None means the position is outside scope or has not been solved.
+    Loads every endgame_{nW}_{nB}.wdl file found in db_dir on construction.
+    ``is_available()`` returns True when at least one table is loaded.
+    ``query()`` dispatches to the correct table by piece count, returning
+    "W", "L", "D", or None.
     """
 
-    _WDL_FILENAME = "endgame_3_3.wdl"
-
     def __init__(self, db_dir: str | Path | None) -> None:
-        self._table_3_3: Optional[bytes] = None
+        self._tables: dict[tuple[int, int], bytes] = {}
         if db_dir is None:
             return
-        wdl_path = Path(db_dir) / self._WDL_FILENAME
-        if not wdl_path.exists():
+        db_path = Path(db_dir)
+        if not db_path.is_dir():
             return
-        try:
-            data = wdl_path.read_bytes()
-            if len(data) != _WDL_BYTES_3_3:
+        for wdl_path in sorted(db_path.glob("endgame_*.wdl")):
+            stem = wdl_path.stem  # e.g. "endgame_3_3"
+            parts = stem.split("_")
+            if len(parts) != 3:
+                continue
+            try:
+                nW, nB = int(parts[1]), int(parts[2])
+            except ValueError:
+                continue
+            if nW < 3 or nB < 3:
+                continue
+            expected = _expected_bytes(nW, nB)
+            try:
+                data = wdl_path.read_bytes()
+            except OSError as exc:
+                logger.warning("EndgameSolvedDB: could not read %s: %s", wdl_path, exc)
+                continue
+            if len(data) != expected:
                 logger.warning(
-                    "EndgameSolvedDB: %s has wrong size %d (expected %d)",
-                    wdl_path, len(data), _WDL_BYTES_3_3,
+                    "EndgameSolvedDB: %s has wrong size %d (expected %d) — skipped.",
+                    wdl_path, len(data), expected,
                 )
-                return
-            self._table_3_3 = data
-            logger.info("EndgameSolvedDB: loaded %s (%d positions)", wdl_path, TABLE_SIZE_3_3)
-        except OSError as exc:
-            logger.warning("EndgameSolvedDB: could not read %s: %s", wdl_path, exc)
+                continue
+            self._tables[(nW, nB)] = data
+            logger.info(
+                "EndgameSolvedDB: loaded %s (%d positions)", wdl_path, _table_size(nW, nB)
+            )
 
     def is_available(self) -> bool:
-        return self._table_3_3 is not None
+        return bool(self._tables)
 
     def query(self, board: BoardState) -> Optional[str]:
         """Return "W" (side to move wins), "L" (loses), "D" (draw), or None.
 
         Returns None when:
-        - the DB is not loaded
-        - either side does not have exactly 3 pieces on the board
-        - neither side has fully placed all 9 pieces (not yet fly phase)
-        - the position has not been solved (WDL_UNKNOWN)
+        - no table for the current (nW, nB) piece count is loaded
+        - either side has not yet placed all 9 pieces (pre-placement phase)
+        - the position ID resolves to WDL_UNKNOWN (should not occur in solved tables)
         """
-        if self._table_3_3 is None:
+        if not self._tables:
+            return None
+        if board.pieces_placed.get("W", 0) < 9 or board.pieces_placed.get("B", 0) < 9:
             return None
         w_pieces = [p for p, owner in board.positions.items() if owner == "W"]
         b_pieces = [p for p, owner in board.positions.items() if owner == "B"]
-        if len(w_pieces) != 3 or len(b_pieces) != 3:
-            return None
-        if board.pieces_placed.get("W", 0) < 9 or board.pieces_placed.get("B", 0) < 9:
+        nW, nB = len(w_pieces), len(b_pieces)
+        table = self._tables.get((nW, nB))
+        if table is None:
             return None
         try:
             pos_id = encode_position_id(w_pieces, b_pieces, board.turn)
         except (KeyError, ValueError, IndexError):
             return None
-        val = get_wdl(self._table_3_3, pos_id)
+        val = get_wdl(table, pos_id)
         return _WDL_CHAR[val]
 
     def close(self) -> None:
-        self._table_3_3 = None
+        self._tables.clear()

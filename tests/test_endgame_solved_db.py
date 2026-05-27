@@ -340,5 +340,117 @@ class TestEndgameSolvedDBWithFakeTable(unittest.TestCase):
             db.close()
 
 
+class TestEndgameSolvedDBTableSizes(unittest.TestCase):
+    """Verify table-size formula for known (nW,nB) combinations."""
+
+    def _check(self, nW, nB, expected_positions, expected_bytes):
+        from math import comb
+        actual_pos = comb(24, nW) * comb(24 - nW, nB) * 2
+        actual_bytes = (actual_pos + 3) >> 2
+        self.assertEqual(actual_pos, expected_positions)
+        self.assertEqual(actual_bytes, expected_bytes)
+
+    def test_3_3(self):
+        self._check(3, 3, 5_383_840, 1_345_960)
+
+    def test_4_3(self):
+        # C(24,4)*C(20,3)*2 = 10626*1140*2
+        self._check(4, 3, 10626 * 1140 * 2, (10626 * 1140 * 2 + 3) >> 2)
+
+    def test_symmetry_4_3_vs_3_4(self):
+        from math import comb
+        size_43 = comb(24, 4) * comb(20, 3) * 2
+        size_34 = comb(24, 3) * comb(21, 4) * 2
+        self.assertEqual(size_43, size_34)
+
+
+class TestEndgameSolvedDBMultiTable(unittest.TestCase):
+    """Tests for multi-table loading and dispatch by piece count."""
+
+    def _make_board(self, w, b, turn, w_placed=9, b_placed=9):
+        return BoardState(
+            positions={p: "W" for p in w} | {p: "B" for p in b},
+            turn=turn,
+            pieces_on_board={"W": len(w), "B": len(b)},
+            pieces_placed={"W": w_placed, "B": b_placed},
+            pieces_captured={"W": 0, "B": 9 - len(w)},
+        )
+
+    def test_loads_both_3_3_and_second_table(self):
+        from math import comb
+        # Build zero-filled tables of the correct byte size for 3v3 and 4v3.
+        bytes_33 = _WDL_BYTES_3_3
+        bytes_43 = (comb(24, 4) * comb(20, 3) * 2 + 3) >> 2
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "endgame_3_3.wdl").write_bytes(bytes(bytes_33))
+            (Path(td) / "endgame_4_3.wdl").write_bytes(bytes(bytes_43))
+            db = EndgameSolvedDB(td)
+            self.assertTrue(db.is_available())
+            # Both tables should be in _tables
+            self.assertIn((3, 3), db._tables)
+            self.assertIn((4, 3), db._tables)
+            db.close()
+        self.assertFalse(db.is_available())
+
+    def test_3v3_query_uses_3_3_table(self):
+        w = ["a7", "d7", "g7"]
+        b = ["g4", "g1", "d1"]
+        pos_id = encode_position_id(w, b, "W")
+        table_33 = bytearray(_WDL_BYTES_3_3)
+        set_wdl(table_33, pos_id, WDL_WIN)
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "endgame_3_3.wdl").write_bytes(bytes(table_33))
+            db = EndgameSolvedDB(td)
+            result = db.query(self._make_board(w, b, "W"))
+            self.assertEqual(result, "W")
+            db.close()
+
+    def test_4v3_query_dispatches_to_4_3_table(self):
+        from math import comb
+        # 4v3: build a zero table (all WDL_UNKNOWN → query returns None)
+        bytes_43 = (comb(24, 4) * comb(20, 3) * 2 + 3) >> 2
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "endgame_3_3.wdl").write_bytes(bytes(_WDL_BYTES_3_3))
+            (Path(td) / "endgame_4_3.wdl").write_bytes(bytes(bytes_43))
+            db = EndgameSolvedDB(td)
+            board = BoardState(
+                positions={"a7": "W", "d7": "W", "g7": "W", "g4": "W",
+                           "g1": "B", "d1": "B", "a1": "B"},
+                turn="W",
+                pieces_on_board={"W": 4, "B": 3},
+                pieces_placed={"W": 9, "B": 9},
+                pieces_captured={"W": 0, "B": 6},
+            )
+            # All-zero table → WDL_UNKNOWN → None
+            self.assertIsNone(db.query(board))
+            db.close()
+
+    def test_no_table_for_piece_count_returns_none(self):
+        # Only 3v3 loaded: 4v3 query → None
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "endgame_3_3.wdl").write_bytes(bytes(_WDL_BYTES_3_3))
+            db = EndgameSolvedDB(td)
+            board = BoardState(
+                positions={"a7": "W", "d7": "W", "g7": "W", "g4": "W",
+                           "g1": "B", "d1": "B", "a1": "B"},
+                turn="W",
+                pieces_on_board={"W": 4, "B": 3},
+                pieces_placed={"W": 9, "B": 9},
+                pieces_captured={"W": 0, "B": 6},
+            )
+            self.assertIsNone(db.query(board))
+            db.close()
+
+    def test_malformed_filename_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "endgame_3_3.wdl").write_bytes(bytes(_WDL_BYTES_3_3))
+            (Path(td) / "endgame_foo_bar.wdl").write_bytes(b"\x00" * 100)
+            (Path(td) / "endgame_2_3.wdl").write_bytes(b"\x00" * 100)  # nW<3 → skip
+            db = EndgameSolvedDB(td)
+            self.assertIn((3, 3), db._tables)
+            self.assertNotIn((2, 3), db._tables)
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

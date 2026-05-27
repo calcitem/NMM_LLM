@@ -47,7 +47,7 @@
   },
   {
     "opening_id": "book-01-a3fa19",
-    "name": "Try Try Again",
+    "name": "Inner mill trap - black",
     "aliases": [],
     "family": "Early Game",
     "side": "W",
@@ -86,7 +86,7 @@
     },
     "outcome_stats": {
       "W": 1,
-      "B": 0,
+      "B": 2,
       "D": 0
     },
     "confidence": 0.8,
@@ -331,7 +331,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 1,
+      "B": 2,
       "D": 0
     },
     "confidence": 0.8,
@@ -344,7 +344,7 @@
   },
   {
     "opening_id": "book-07-a33845",
-    "name": "Game Five A",
+    "name": "Z mill - c4 / e3 Bg7 variant",
     "aliases": [],
     "family": "Early Game",
     "side": "W",
@@ -395,7 +395,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 3,
+      "W": 13,
       "B": 0,
       "D": 0
     },
@@ -539,7 +539,7 @@
   },
   {
     "opening_id": "book-11-04f0dc",
-    "name": "Creating Opportunities",
+    "name": "Yin-Yang",
     "aliases": [],
     "family": "Early Game",
     "side": "both",
@@ -591,7 +591,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 3,
+      "B": 7,
       "D": 0
     },
     "confidence": 0.8,
@@ -839,7 +839,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 0,
+      "W": 1,
       "B": 0,
       "D": 0
     },
@@ -3308,119 +3308,6 @@
     "needs_llm_name": false
   },
   {
-    "opening_id": "novel-b38b6f41",
-    "name": "Novel — d7-d6-g4",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d6",
-      "g4",
-      "d1",
-      "e4",
-      "f4",
-      "g7",
-      "a7",
-      "g1"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.W.B...B..............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W.B...B.B.......W....|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BWWW.B...B.B.......W....|W|4|4"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
-    "opening_id": "novel-74b0aa91",
-    "name": "Novel — d7-d6-g4",
-    "aliases": [],
-    "family": "novel",
-    "side": "both",
-    "seed_source": "learned",
-    "line_moves": [
-      "d7",
-      "d6",
-      "g4",
-      "f4",
-      "d1",
-      "d2",
-      "d3",
-      "a7",
-      "a4",
-      "c4",
-      "b4",
-      "c5",
-      "d5",
-      "c3"
-    ],
-    "branch_moves": [],
-    "opening_fen_signatures": [
-      {
-        "ply": 4,
-        "fen": ".W.W.....B.B............|W|2|2"
-      },
-      {
-        "ply": 6,
-        "fen": ".W.W.W...B.B.B..........|W|3|3"
-      },
-      {
-        "ply": 8,
-        "fen": "BW.W.W...B.B.B.......W..|W|4|4"
-      },
-      {
-        "ply": 10,
-        "fen": "BW.W.W.W.B.B.B.......W.B|W|5|5"
-      }
-    ],
-    "strategic_notes": "",
-    "common_blunders": [],
-    "recommended_responses": {
-      "W": [],
-      "B": []
-    },
-    "outcome_stats": {
-      "W": 0,
-      "B": 1,
-      "D": 0
-    },
-    "confidence": 0.3,
-    "tags": [
-      "novel",
-      "learned"
-    ],
-    "source_reference": "",
-    "needs_llm_name": true
-  },
-  {
     "opening_id": "novel-6402adb4",
     "name": "T mills",
     "aliases": [],
@@ -3889,7 +3776,7 @@
   },
   {
     "opening_id": "novel-1475f4d5",
-    "name": "Novel — d6-d7-f4",
+    "name": "Side column - variant 3",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -3931,6 +3818,499 @@
       {
         "ply": 10,
         "fen": ".B.B...BWWWWB....B....W.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 3,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-25964b79",
+    "name": "The \"Northern Shield Formation",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "f4",
+      "b4",
+      "d2",
+      "b6",
+      "g4",
+      "e4",
+      "g7",
+      "b2",
+      "d1",
+      "d3",
+      "e4",
+      "f4",
+      "g1",
+      "g7",
+      "e5",
+      "a1",
+      "d5",
+      "c5",
+      "e3",
+      "d3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "........B..W.W.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...W....B..W.W.B...B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "..WW....B..W.WBB...B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "..WW.W..B..W.WBB...B.B..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-aaff64e3",
+    "name": "The \"Five Rings Advance",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "b6",
+      "e5",
+      "f2",
+      "e5",
+      "a4",
+      "c5",
+      "d5",
+      "d7",
+      "g4",
+      "e4",
+      "e3",
+      "c3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W......B...B.....W.....|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.....BB...B.....W.....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.....BB...B...WBW.....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B...BB...B...WBW.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-8954c3ea",
+    "name": "Cardinal Keyhole",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "f4",
+      "b4",
+      "d2",
+      "e4",
+      "f6",
+      "f2",
+      "b6",
+      "a4",
+      "e5",
+      "c4",
+      "d5",
+      "c5",
+      "d2",
+      "c3",
+      "d3",
+      "g4",
+      "d2",
+      "d2",
+      "d2",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "...........W.W.B...B....|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "..........WWBW.B...B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".......BW.WWBW.B...B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".......BW.WWBW.B..WB...B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-211dd44b",
+    "name": "The King's Anchor",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "b2",
+      "f2",
+      "b6",
+      "f4",
+      "e5",
+      "f6",
+      "e5",
+      "f6",
+      "d1",
+      "f6",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "........W..BB.W.........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........W.BBB.W...W.....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........W.BBB.W...W.....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".....W..W.BBB.W...W.....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-9797f3f0",
+    "name": "The \"Midline Fortress",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "e5",
+      "e3",
+      "c3",
+      "c5",
+      "g7",
+      "g1",
+      "f2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "................B.W.B.W.|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "..W.B...........B.W.B.W.|W|3|3"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-03c5f5dc",
+    "name": "The Weaver’s Ascent",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "b2",
+      "f2",
+      "d2",
+      "a4",
+      "a7",
+      "g4",
+      "g7",
+      "d6",
+      "f4",
+      "d3",
+      "a1",
+      "c4",
+      "b4",
+      "b6",
+      "f6",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.......B..B.W.........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.....B.B..BWW.........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "WW.B...B.B..BWW.........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "WWWB...B.B..BWW.........|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-6390aa8a",
+    "name": "Strategic Ascent",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "a7",
+      "g7",
+      "g4",
+      "e4",
+      "d1",
+      "b2",
+      "f6",
+      "c4",
+      "g1",
+      "a1",
+      "b4",
+      "f2",
+      "d2",
+      "d3",
+      "d5",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "WWB......B..............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "WWBW.....B.........B....|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "WWBW.W...B....B....B....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "WWBW.W...BW...B....B...B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-052cdb96",
+    "name": "The Serpent’s Ascent",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "f4",
+      "a7",
+      "g7",
+      "d7",
+      "g1",
+      "g4",
+      "d3",
+      "f2",
+      "b4",
+      "d5",
+      "b2",
+      "b6",
+      "a1",
+      "d1",
+      "c4",
+      "a4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "B........W.W.B..........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "BBW......W.W.B..........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "BBWBW....W.W.B..........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "BBWBW....W.WBB.......W..|W|5|5"
       }
     ],
     "strategic_notes": "",

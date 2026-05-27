@@ -12,16 +12,15 @@ fallback signal).  Only when an exact canonical hit is found does the DB
 override the search — and even then GameAI may blend the result with the
 heuristic via ``score_delta()``.
 
-Two on-disk formats are supported
------------------------------------
-SQLite  (legacy / build intermediate):
-    positions(key BLOB PK, outcome INT, depth INT, best_move TEXT,
-              trajectories TEXT, samples INT)
-
-Binary (preferred for production):
-    32-byte file header + sorted 32-byte fixed-length records.
+Only binary v2 format is supported
+------------------------------------
+Binary (v2, preferred):
+    32-byte file header + sorted 36-byte fixed-length records.
     Format auto-detected by magic bytes ``b"NMM_FGDB"`` at offset 0.
     Binary search gives O(log N) lookup; the whole file is mmap'd read-only.
+
+    Record layout (36 bytes):
+        key(9) + outcome(1) + depth(2) + best_move(4) + 4×child(4) + frequency(4)
 
 `key` is a packed 9-byte canonical position id.  We rely on the existing
 ``ai.board_symmetry`` D4 helpers for canonicalization, so the DB only stores
@@ -41,7 +40,6 @@ from __future__ import annotations
 
 import logging
 import mmap
-import sqlite3
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,19 +57,15 @@ logger = logging.getLogger(__name__)
 # ── Binary format constants ──────────────────────────────────────────────────
 
 HEADER_MAGIC = b"NMM_FGDB"
-FORMAT_VERSION = 1      # legacy: 32-byte records, no frequency
 FORMAT_VERSION_2 = 2    # current: 36-byte records, includes frequency
 HEADER_SIZE = 32    # bytes
-RECORD_SIZE_V1 = 32  # bytes (version 1)
-RECORD_SIZE = 36    # bytes (version 2, default for new builds)
+RECORD_SIZE = 36    # bytes (version 2)
 KEY_SIZE = 9        # bytes
 
 _HEADER_FMT = "<8sHI18x"    # magic(8) + version(2) + record_count(4) + pad(18)
-_RECORD_FMT_V1 = "<9sBHIIIII"   # key(9) + outcome(1) + depth(2) + best_move(4) + 4×child(4)
-_RECORD_FMT = "<9sBHIIIIII"     # v2: same + frequency(4)
+_RECORD_FMT = "<9sBHIIIIII"     # v2: key(9)+outcome(1)+depth(2)+best_move(4)+4×child(4)+frequency(4)
 
 assert struct.calcsize(_HEADER_FMT) == HEADER_SIZE
-assert struct.calcsize(_RECORD_FMT_V1) == RECORD_SIZE_V1
 assert struct.calcsize(_RECORD_FMT) == RECORD_SIZE
 
 # Position index tables for move packing
@@ -169,92 +163,6 @@ def _encode_canonical(board24: str, turn: str, placed_w: int, placed_b: int) -> 
     )
 
 
-def _unpack_trajectories(blob: str) -> list[tuple[str, bytes, str]]:
-    if not blob:
-        return []
-    out = []
-    for part in blob.split("|"):
-        try:
-            n, ck, f = part.rsplit(":", 2)
-        except ValueError:
-            continue
-        try:
-            out.append((n, bytes.fromhex(ck), f))
-        except ValueError:
-            continue
-    return out
-
-
-def export_to_binary(sqlite_path: str | Path, binary_path: str | Path) -> int:
-    """Export a fullgame SQLite DB to the sorted binary format (version 2).
-
-    Reads *sqlite_path* (must exist) in key-ascending order and writes
-    *binary_path*.  The SQLite file is not modified.  Returns the number of
-    records written.
-
-    Version 2 records are 36 bytes: key(9) + outcome(1) + depth(2) +
-    best_move(4) + 4×child(4) + frequency(4).
-    """
-    sqlite_path = Path(sqlite_path)
-    binary_path = Path(binary_path)
-
-    conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
-    # Check whether a frequency column exists (added by B-52 builder)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
-    has_freq = "frequency" in cols
-    if has_freq:
-        rows = conn.execute(
-            "SELECT key, outcome, depth, best_move, trajectories, frequency "
-            "FROM positions ORDER BY key ASC"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT key, outcome, depth, best_move, trajectories "
-            "FROM positions ORDER BY key ASC"
-        ).fetchall()
-    conn.close()
-
-    records: list[bytes] = []
-    for row in rows:
-        if has_freq:
-            key, outcome, depth, best_move, traj_blob, freq = row
-        else:
-            key, outcome, depth, best_move, traj_blob = row
-            freq = 1
-
-        outcome_byte = _OUTCOME_ENCODE.get(outcome, 0)
-        depth_val = 0xFFFF if depth is None else min(int(depth), 0xFFFE)
-        bm_packed = _pack_move(best_move, "N")
-        freq_val = max(0, int(freq or 1))
-
-        edges = _unpack_trajectories(traj_blob or "")
-        informative = [e for e in edges if e[2] in ("W", "L")]
-        neutral = [e for e in edges if e[2] == "N"]
-        top4 = (informative + neutral)[:4]
-
-        children = [_pack_move(n, f) for n, _, f in top4]
-        while len(children) < 4:
-            children.append(_EMPTY_MOVE)
-
-        records.append(struct.pack(
-            _RECORD_FMT,
-            key, outcome_byte, depth_val, bm_packed,
-            children[0], children[1], children[2], children[3],
-            freq_val,
-        ))
-
-    record_count = len(records)
-    header = struct.pack(_HEADER_FMT, HEADER_MAGIC, FORMAT_VERSION_2, record_count)
-
-    with open(binary_path, "wb") as fh:
-        fh.write(header)
-        for rec in records:
-            fh.write(rec)
-
-    logger.info("export_to_binary: wrote %d records → %s", record_count, binary_path)
-    return record_count
-
-
 @dataclass
 class FullGameResult:
     """One row from the position table, with the symmetry index used to
@@ -265,22 +173,19 @@ class FullGameResult:
     depth: Optional[int]            # plies to result, or None
     best_move_canonical: Optional[str]
     sym_idx: int                    # transform that maps actual board → canonical
-    trajectories: list[tuple[str, bytes, str]]  # (canonical_notation, child_key, flag)
+    trajectories: list[tuple[str, bytes, str]]  # (canonical_notation, empty_bytes, flag)
     frequency: int = 0              # number of human games that reached this position
 
 
 class FullGameDB:
-    """Read-only wrapper around the position database (SQLite or binary)."""
+    """Read-only wrapper around the binary position database."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-        self._conn: Optional[sqlite3.Connection] = None
         self._binary: bool = False
         self._mmap: Optional[mmap.mmap] = None
         self._file_handle = None
         self._record_count: int = 0
-        self._record_size: int = RECORD_SIZE   # set by _open_binary
-        self._record_fmt: str = _RECORD_FMT    # set by _open_binary
 
         if not self.path.exists():
             return
@@ -295,7 +200,7 @@ class FullGameDB:
         if magic == HEADER_MAGIC:
             self._open_binary()
         else:
-            self._open_sqlite()
+            logger.warning("FullGameDB: %s does not look like a binary DB (bad magic).", self.path)
 
     def _open_binary(self) -> None:
         try:
@@ -306,26 +211,15 @@ class FullGameDB:
             magic, version, record_count = struct.unpack(_HEADER_FMT, raw)
             if magic != HEADER_MAGIC:
                 raise ValueError(f"bad magic: {magic!r}")
-            if version == FORMAT_VERSION:
-                self._record_size = RECORD_SIZE_V1
-                self._record_fmt = _RECORD_FMT_V1
-            elif version == FORMAT_VERSION_2:
-                self._record_size = RECORD_SIZE
-                self._record_fmt = _RECORD_FMT
-            else:
-                raise ValueError(f"unsupported version: {version}")
+            if version != FORMAT_VERSION_2:
+                raise ValueError(f"unsupported binary version: {version} (expected {FORMAT_VERSION_2})")
             self._record_count = record_count
             self._binary = True
             if record_count == 0:
                 logger.warning("FullGameDB: binary %s has 0 records.", self.path)
-                return  # available but empty; _mmap stays None
-            self._mmap = mmap.mmap(
-                self._file_handle.fileno(), 0, access=mmap.ACCESS_READ
-            )
-            logger.info(
-                "FullGameDB: opened binary %s — %d records (v%d).",
-                self.path, record_count, version,
-            )
+                return
+            self._mmap = mmap.mmap(self._file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+            logger.info("FullGameDB: opened binary %s — %d records (v2).", self.path, record_count)
         except Exception as exc:
             logger.warning("FullGameDB: could not open binary %s — %s", self.path, exc)
             if self._file_handle is not None:
@@ -333,19 +227,8 @@ class FullGameDB:
                 self._file_handle = None
             self._binary = False
 
-    def _open_sqlite(self) -> None:
-        try:
-            self._conn = sqlite3.connect(
-                f"file:{self.path}?mode=ro", uri=True, check_same_thread=False,
-            )
-            self._conn.execute("SELECT key FROM positions LIMIT 1").fetchone()
-            logger.info("FullGameDB: opened SQLite %s (read-only).", self.path)
-        except sqlite3.Error as exc:
-            logger.warning("FullGameDB: could not open SQLite %s — %s", self.path, exc)
-            self._conn = None
-
     def is_available(self) -> bool:
-        return self._conn is not None or self._binary
+        return self._binary
 
     def close(self) -> None:
         if self._mmap is not None:
@@ -355,21 +238,16 @@ class FullGameDB:
             self._file_handle.close()
             self._file_handle = None
         self._binary = False
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
 
     # ── Binary reader ────────────────────────────────────────────────────────
 
     def _query_binary(self, key: bytes) -> Optional[FullGameResult]:
-        """Binary search the mmap'd sorted records for `key`."""
         if self._mmap is None or self._record_count == 0:
             return None
-
         lo, hi = 0, self._record_count - 1
         while lo <= hi:
             mid = (lo + hi) // 2
-            offset = HEADER_SIZE + mid * self._record_size
+            offset = HEADER_SIZE + mid * RECORD_SIZE
             rec_key = self._mmap[offset : offset + KEY_SIZE]
             if rec_key == key:
                 return self._decode_record(offset)
@@ -380,77 +258,38 @@ class FullGameDB:
         return None
 
     def _decode_record(self, offset: int) -> FullGameResult:
-        raw = self._mmap[offset : offset + self._record_size]
-        unpacked = struct.unpack(self._record_fmt, raw)
-        _key, outcome_byte, depth_val, bm_packed = unpacked[0], unpacked[1], unpacked[2], unpacked[3]
-        c0, c1, c2, c3 = unpacked[4], unpacked[5], unpacked[6], unpacked[7]
-        frequency = int(unpacked[8]) if len(unpacked) > 8 else 0
-
+        raw = self._mmap[offset : offset + RECORD_SIZE]
+        _key, outcome_byte, depth_val, bm_packed, c0, c1, c2, c3, frequency = struct.unpack(_RECORD_FMT, raw)
         outcome = _OUTCOME_DECODE.get(outcome_byte)
         depth = None if depth_val == 0xFFFF else depth_val
         bm_notation, _ = _unpack_move(bm_packed)
-
         trajectories: list[tuple[str, bytes, str]] = []
         for packed in (c0, c1, c2, c3):
             notation, flag = _unpack_move(packed)
             if notation is not None:
                 trajectories.append((notation, b"", flag))
-
         return FullGameResult(
             outcome=outcome,
             depth=depth,
             best_move_canonical=bm_notation,
-            sym_idx=0,  # caller fills in the real sym_idx after binary search
+            sym_idx=0,
             trajectories=trajectories,
-            frequency=frequency,
+            frequency=int(frequency),
         )
 
     # ── Query ────────────────────────────────────────────────────────────────
 
     def query(self, board: BoardState) -> Optional[FullGameResult]:
-        """Look up the canonical position for `board`.  Returns None on miss."""
         fen = board.to_fen_string()
         board24, turn, pw, pb = fen.split("|")
         canon, sym = canonical_board_str(board24)
         key = _encode_canonical(canon, turn, int(pw), int(pb))
-
-        if self._binary:
-            result = self._query_binary(key)
-            if result is not None:
-                result.sym_idx = sym
-            return result
-
-        if self._conn is None:
+        if not self._binary:
             return None
-
-        # Try to fetch frequency if the column exists; fall back gracefully.
-        try:
-            row = self._conn.execute(
-                "SELECT outcome, depth, best_move, trajectories, frequency "
-                "FROM positions WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                return None
-            outcome, depth, best_move, traj_blob, freq = row
-        except sqlite3.OperationalError:
-            row = self._conn.execute(
-                "SELECT outcome, depth, best_move, trajectories FROM positions WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                return None
-            outcome, depth, best_move, traj_blob = row
-            freq = 0
-
-        return FullGameResult(
-            outcome=outcome,
-            depth=depth,
-            best_move_canonical=best_move,
-            sym_idx=sym,
-            trajectories=_unpack_trajectories(traj_blob or ""),
-            frequency=int(freq or 0),
-        )
+        result = self._query_binary(key)
+        if result is not None:
+            result.sym_idx = sym
+        return result
 
     # ── Convenience helpers used by GameAI ──────────────────────────────────
 
@@ -534,12 +373,6 @@ class FullGameDB:
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
     def stats(self) -> dict[str, int]:
-        if self._binary:
-            return {"available": 1, "positions": self._record_count, "resolved": -1}
-        if self._conn is None:
+        if not self._binary:
             return {"available": 0}
-        total = self._conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
-        resolved = self._conn.execute(
-            "SELECT COUNT(*) FROM positions WHERE outcome IS NOT NULL"
-        ).fetchone()[0]
-        return {"available": 1, "positions": total, "resolved": resolved}
+        return {"available": 1, "positions": self._record_count, "resolved": -1}

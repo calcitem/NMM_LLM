@@ -1,9 +1,10 @@
 """
-tests/test_blocking.py — Unit tests for B-50: placement-phase fork blocking.
+tests/test_blocking.py — Unit tests for placement-phase threat blocking.
 
-_immediate_mill_threats() must return non-empty during placement when the
-opponent holds ≥2 simultaneous 2-configs (a fork), restricting the
-current player to the closing squares of those mills.
+_immediate_mill_threats() restricts the current player to the opponent's
+closing squares when:
+  - Fork (≥2 simultaneous opponent 2-configs): always restrict.
+  - Single threat: restrict unless STM can close their own mill this turn.
 """
 from __future__ import annotations
 
@@ -19,12 +20,13 @@ def _place(positions: dict, turn: str = "W") -> BoardState:
 
 class TestImmediateMillThreatsPlacement(unittest.TestCase):
 
-    # ── Single 2-config: no mandatory block ────────────────────────────────────
+    # ── Single 2-config: mandatory block (unless STM has own 2-config) ──────────
 
-    def test_single_two_config_no_threat(self):
-        # Black has one 2-config (a7+d7 → closing g7); White to place.
+    def test_single_two_config_is_threat_when_stm_has_no_own_config(self):
+        # Black has one 2-config (a7+d7 → closing g7); White has g4 only (no own 2-config).
+        # Single threat with no carveout → g7 must be blocked.
         b = _place({"a7": "B", "d7": "B", "g4": "W"})
-        self.assertEqual(_immediate_mill_threats(b), set())
+        self.assertEqual(_immediate_mill_threats(b), {"g7"})
 
     def test_zero_two_configs_no_threat(self):
         # No opponent 2-config at all.
@@ -63,18 +65,18 @@ class TestImmediateMillThreatsPlacement(unittest.TestCase):
 
     # ── One of two closing squares already occupied ────────────────────────────
 
-    def test_one_of_two_intended_configs_blocked_gives_single_config(self):
+    def test_single_two_config_is_now_a_threat(self):
         # a7+g7 → closing d7 is the one real 2-config.
         # f2+b2 would close d2, but d2 is White → not a 2-config.
-        # a7 and g7 share no other mills with each other; f2 and b2 share none.
-        # Count = 1 → no fork → empty set.
+        # W (e4 only) has no own 2-config so carveout doesn't fire.
+        # Single threat → d7 is mandatory block.
         b = _place({
             "a7": "B", "g7": "B",              # → d7
             "f2": "B", "b2": "B", "d2": "W",   # blocked by White → not counted
             "e4": "W",
         })
         threats = _immediate_mill_threats(b)
-        self.assertEqual(threats, set())
+        self.assertEqual(threats, {"d7"})
 
     # ── Phase guard: move-phase board must not use placement-fork logic ─────────
 
@@ -106,16 +108,16 @@ class TestImmediateMillThreatsPlacement(unittest.TestCase):
         move = ai.choose_move(b)
         self.assertIn(move["to"], threats)
 
-    def test_choose_move_unrestricted_with_single_two_config(self):
-        # Only one Black 2-config → no mandatory block → AI free to choose any square.
+    def test_choose_move_unrestricted_when_stm_has_own_two_config(self):
+        # Black has one 2-config (a7+d7 → g7); White has e4+g4 (own 2-config e4-f4-g4).
+        # Carveout fires: stm_can_close → threats empty → AI free to choose any square.
         b = _place({
             "a7": "B", "d7": "B",
             "g4": "W", "e4": "W",
         })
+        self.assertEqual(_immediate_mill_threats(b), set())
         ai = GameAI(color="W", difficulty=3)
         move = ai.choose_move(b)
-        # Move is legal (not checking destination — just verifying it doesn't crash
-        # and is not artificially restricted to g7 alone).
         self.assertIsNotNone(move)
         self.assertIn("to", move)
 

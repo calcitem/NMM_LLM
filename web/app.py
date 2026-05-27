@@ -304,27 +304,34 @@ class AdaptiveTracker:
 _PERSONALITY_WEIGHTS: dict[str, dict] = {
     "balanced":   {},  # defaults only
     "aggressive": {
-        "close_mill": 700, "block_opponent_mill": 250, "cycling_mill": 500,
+        # Prioritises closing mills and cycling; accepts weaker blocking in exchange.
+        # block_opponent_mill kept at floor (200 = 50% of default 400) — aggressive by design.
+        "close_mill": 700, "block_opponent_mill": 200, "cycling_mill": 500,
         "feeder_diamond": 300, "mill_wrapping": 250, "setup_mill": 200,
         "cardinal_block": 150, "make_mistakes": 5,
     },
     "defensive": {
+        # Prioritises blocking; still closes mills at a sane rate (floor: 250).
+        # % multipliers capped at 133 to avoid distorting evaluate() calibration.
         "close_mill": 350, "block_opponent_mill": 600, "stop_opponent_mills": 700,
-        "cardinal_block": 550, "cycling_mill": 150, "feeder_diamond": 100,
+        "cardinal_block": 400, "cycling_mill": 150, "feeder_diamond": 100,
         "mill_wrapping": 80, "make_mistakes": 3,
     },
     "positional": {
-        "long_term_position": 180, "feeder_diamond": 320, "setup_mill": 200,
-        "mill_count_scale": 140, "mobility_scale": 130, "blocked_scale": 130,
+        # Structure-first; % multipliers capped at 133.
+        "long_term_position": 133, "feeder_diamond": 320, "setup_mill": 200,
+        "mill_count_scale": 133, "mobility_scale": 130, "blocked_scale": 130,
         "close_mill": 400, "block_opponent_mill": 350,
     },
     "scholar": {
-        "opening_adherence": 90, "setup_mill": 250, "feeder_diamond": 280,
-        "scatter_placement": 180, "close_mill": 450, "cycling_mill": 350,
+        # Book-heavy; tactical weights within safe range.
+        "opening_adherence": 90, "setup_mill": 200, "feeder_diamond": 280,
+        "scatter_placement": 150, "close_mill": 450, "cycling_mill": 350,
     },
     "chaos": {
-        "make_mistakes": 25, "scatter_placement": 50, "cardinal_block": 50,
-        "feeder_diamond": 50, "cycling_mill": 100,
+        # Intentionally erratic — makes occasional mistakes.
+        "make_mistakes": 15, "scatter_placement": 50, "cardinal_block": 100,
+        "feeder_diamond": 100, "cycling_mill": 150,
     },
 }
 
@@ -504,7 +511,7 @@ async def save_weights(request: Request):
 
 
 _PERSONALITIES_DIR = _ROOT / "data" / "personalities"
-_VALID_PERSONALITIES = {"balanced", "aggressive", "defensive", "positional", "scholar", "chaos", "custom"}
+_VALID_PERSONALITIES = {"balanced", "aggressive", "defensive", "positional", "scholar", "chaos"}
 
 
 @app.get("/api/personalities/{name}")
@@ -597,6 +604,165 @@ async def list_openings():
             ],
         })
     return JSONResponse(result)
+
+
+# ── Tools page ────────────────────────────────────────────────────────────────
+
+import collections as _collections
+from fastapi.responses import JSONResponse as _JSONResponse
+
+_TOOLS_LOCK = asyncio.Lock()
+_tools_proc: "asyncio.subprocess.Process | None" = None
+_tools_log: "_collections.deque[str]" = _collections.deque(maxlen=500)
+
+
+@app.get("/tools")
+async def tools_page(request: Request):
+    return templates.TemplateResponse(request, "tools.html")
+
+
+def _db_file_info(path: "Path | None") -> dict:
+    if path is None or not path.exists():
+        return {"path": str(path) if path else None, "exists": False, "size_mb": 0, "mtime": None}
+    stat = path.stat()
+    from datetime import datetime as _dt
+    return {
+        "path": str(path),
+        "exists": True,
+        "size_mb": round(stat.st_size / 1_048_576, 2),
+        "mtime": _dt.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+@app.get("/api/tool_status")
+async def tool_status():
+    import glob as _glob
+    from datetime import datetime as _dt
+
+    # FullGame DB
+    fgdb_path = _fgdb_path if _fgdb_path.exists() else None
+    fgdb_info = _db_file_info(fgdb_path)
+    if _fullgame_db and _fullgame_db.is_available():
+        s = _fullgame_db.stats()
+        fgdb_info["positions"] = s.get("positions", 0)
+        fgdb_info["resolved"]  = s.get("resolved", 0)
+
+    # Endgame solved DB
+    esdb_info = _db_file_info(_esdb_dir if _esdb_dir.exists() else None)
+    if _endgame_solved_db and _endgame_solved_db.is_available():
+        s2 = _endgame_solved_db.stats() if hasattr(_endgame_solved_db, "stats") else {}
+        esdb_info["positions"] = s2.get("positions", 0) if s2 else 0
+
+    # Trajectory DB
+    tdb_info = {
+        "games":   _trajectory_db.game_count,
+        "entries": _trajectory_db.entry_count,
+    }
+
+    # Endgame (in-memory from games) DB
+    edb_info = {
+        "games":     _endgame_db.game_count,
+        "positions": _endgame_db.position_count,
+    }
+
+    # Evolved weights
+    weights_path = _ROOT / "data" / "weights" / "best.json"
+    weights_info = _db_file_info(weights_path if weights_path.exists() else None)
+
+    # Opening book
+    book = OpeningBook()
+    ob_total = len(list(book.values()))
+    ob_named = sum(1 for o in book.values() if not o.needs_llm_name)
+
+    # Games dir stats
+    games_files = sorted(_glob.glob(str(_ROOT / "data" / "games" / "*.jsonl")))
+    games_count = len(games_files)
+    games_earliest = games_files[0].split("game_")[1][:10] if games_files else None
+    games_latest   = games_files[-1].split("game_")[1][:10] if games_files else None
+
+    busy = _TOOLS_LOCK.locked()
+
+    return _JSONResponse({
+        "fullgame_db":    fgdb_info,
+        "endgame_solved": esdb_info,
+        "trajectory_db":  tdb_info,
+        "endgame_db":     edb_info,
+        "weights":        weights_info,
+        "opening_book":   {"total": ob_total, "named": ob_named},
+        "games":          {"count": games_count, "earliest": games_earliest, "latest": games_latest},
+        "busy":           busy,
+    })
+
+
+@app.websocket("/ws/tools")
+async def ws_tools(websocket: WebSocket):
+    global _tools_proc
+    await websocket.accept()
+
+    async def _send_line(text: str, kind: str = "log") -> None:
+        try:
+            await websocket.send_json({"type": kind, "text": text})
+        except Exception:
+            pass
+
+    try:
+        msg = await websocket.receive_json()
+        tool = msg.get("tool", "")
+        args = msg.get("args", [])
+
+        # Validate tool name — only allow known scripts
+        _ALLOWED = {
+            "build_fullgame_db", "build_endgame_db", "self_play",
+            "evolve_weights", "evolve_weights_v2", "name_openings", "purge_ai_learning",
+        }
+        if tool not in _ALLOWED:
+            await _send_line(f"Unknown tool: {tool!r}", "error")
+            return
+
+        # Purge requires confirmed=True in the message
+        if tool == "purge_ai_learning" and not msg.get("confirmed"):
+            await _send_line("confirmation_required", "confirm")
+            return
+
+        if _TOOLS_LOCK.locked():
+            await _send_line("Another tool is already running. Please wait.", "error")
+            return
+
+        async with _TOOLS_LOCK:
+            script = str(_ROOT / "tools" / f"{tool}.py")
+            cmd = [sys.executable, "-u", script, *[str(a) for a in args]]
+            log.info("Tools: running %s", cmd)
+            await _send_line(f"$ {' '.join(cmd[2:])}", "cmd")
+
+            _tools_proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(_ROOT),
+            )
+            proc = _tools_proc
+
+            async def _stream():
+                assert proc.stdout
+                async for raw in proc.stdout:
+                    line = raw.decode(errors="replace").rstrip()
+                    _tools_log.append(line)
+                    await _send_line(line)
+
+            stream_task = asyncio.create_task(_stream())
+            await asyncio.wait_for(stream_task, timeout=3600)
+            await proc.wait()
+            rc = proc.returncode
+            await _send_line(f"[exited {rc}]", "done" if rc == 0 else "error")
+            _tools_proc = None
+
+    except asyncio.TimeoutError:
+        await _send_line("[timed out after 1 hour]", "error")
+    except WebSocketDisconnect:
+        log.info("Tools WebSocket disconnected — process keeps running")
+    except Exception as exc:
+        log.error("Tools WebSocket error: %s", exc, exc_info=True)
+        await _send_line(f"[error: {exc}]", "error")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

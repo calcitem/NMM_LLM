@@ -415,7 +415,7 @@ The `tools/` directory contains scripts for building and improving the AI's know
 | `evolve\_weights\_v2.py` | Per-personality era-aware (1+1)-ES; evolves each personality’s weight overrides and saves back to `data/personalities/*.json` |
 | `build\_fullgame\_db.py` | Build a bounded SQLite position database with win/loss/draw outcomes via D4-symmetric enumeration |
 | `fullgame\_db.py` | Read-only query interface for the full-game position DB (used by `GameAI` at move-selection time) |
-| `build\_endgame\_db.py` | Offline retrograde solver: builds an exact WDL table for all 3v3 fly-phase positions and writes `data/endgame/endgame_3_3.wdl` |
+| `build\_endgame\_db.py` | Offline retrograde solver: builds an exact WDL table for all 3v3 fly-phase positions using D4 symmetry (~8× speedup); writes `data/endgame/endgame_3_3.wdl` |
 | `train\_value\_net.py` | Train a small MLP value estimator from saved game records |
 | `import\_openings.py` | Validate and import curated opening lines from a JSON book file |
 | `import\_book\_games.py` | Seed opening win/loss statistics from annotated book game records |
@@ -796,7 +796,7 @@ NMM\_ollama/
 │   ├── evolve\_weights.py        \# Era-aware (1+1)-ES to tune global heuristic weights  
 │   ├── evolve\_weights\_v2.py     \# Per-personality era-aware (1+1)-ES  
 │   ├── build\_fullgame\_db.py     \# Build bounded SQLite position DB with win/loss outcomes  
-│   ├── build\_endgame\_db.py      \# Retrograde solver: exact WDL for all 3v3 fly-phase positions  
+│   ├── build\_endgame\_db.py      \# Retrograde solver: exact WDL for all 3v3 fly-phase positions (D4 sym, ~8× faster)  
 │   ├── fullgame\_db.py           \# Query interface for the full-game position DB  
 │   ├── import\_openings.py       \# Import openings from strategy book text file  
 │   ├── import\_book\_games.py     \# Import games into opening book  

@@ -2277,3 +2277,32 @@ python tools/endgame\_play.py --seed-from-games --positions 200 --parallel 4
 
 - `ai/game_ai.py` — `_immediate_mill_threats()` extended for placement phase: when opponent has ≥2 simultaneous 2-configs, both closing squares added to threats set, triggering mandatory-block filter.
 
+
+### B-27 — Binary format is now the default fullgame DB output ✅ *(2026-05-26)*
+
+- `tools/build_fullgame_db.py` — `--format` default changed `"sqlite"` → `"binary"`; `_update_settings()` writes `fullgame_db_path` to `data/settings.json` after every build.
+
+### B-52 — FullGameDB: Frequency-Weighted Build from Human-Played Games ✅ *(2026-05-26)*
+
+- `tools/build_fullgame_db.py` — `GameBasedBuilder` scans JSONL game files (human-human + human-AI only); `frequency` column added to SQLite schema; `apply_pruning()` removes low-frequency non-solved positions; `--source-games`, `--min-frequency`, `--min-frequency-placement`, `--update-from-games` CLI flags.
+- `ai/fullgame_db.py` — `FORMAT_VERSION_2` (36-byte records); `frequency: int = 0` field on `FullGameResult`; `best_move_validated()` and `query_min_frequency()` helpers.
+
+### SE-14 — DB-Guided Horizon Search ✅ *(2026-05-26)*
+
+- `ai/game_ai.py` — `_negamax` probes `FullGameDB` between SE-4 and SE-8: exact outcomes return `±(INF-depth)` immediately; `best_move_canonical` hint promoted to front of move list (TT retains final priority).
+- Gracefully degrades when DB absent or position not covered.
+
+### B-25 — Tools management page ✅ *(2026-05-27)*
+
+- `web/templates/tools.html` (new) — standalone page with DB status cards and tool run sections for: Build FullGame DB, Build Endgame DB, Self-Play, Evolve Weights, Name Openings, Purge AI Learning.
+- `web/static/tools.js` (new) — fetches `/api/tool_status` on load and every 15 s; opens `/ws/tools` WebSocket per run; streams output to log div; purge shows confirmation modal.
+- `web/static/tools.css` (new) — dark-theme page styles matching the game UI.
+- `web/app.py` — `GET /tools`, `GET /api/tool_status`, `WebSocket /ws/tools`; module-level `asyncio.Lock` serialises subprocesses; `asyncio.create_subprocess_exec` (no shell=True); bounded 500-line deque for log buffer; purge requires `confirmed=True` server-side.
+- `web/templates/index.html` — Tools button added to header bar (opens `/tools` in new tab).
+
+### Binary-first refactor + ExpandFromGamesBuilder ✅ *(2026-05-27)*
+
+- `ai/fullgame_db.py` — removed SQLite reading entirely: `sqlite3` import, `_open_sqlite()`, `export_to_binary()`, `_unpack_trajectories()`, v1 binary constants gone. Reader now binary-v2 only; `is_available()`, `close()`, `query()`, `stats()` simplified.
+- `tools/build_fullgame_db.py` — binary format constants + helpers added inline (`_pack_move_bin`, `_decode_key_to_board`, `_backpropagate_conn`, `write_binary`). All build paths now use a hidden `<output>.build.tmp` working SQLite; on success binary is exported and temp deleted. Removed `--format`, `--vacuum`, `--update-from-games`. Added `ExpandFromGamesBuilder` class: Phase 1 scans games for frequency-weighted seeds, Phase 2 BFS-expands from seeds to cover unexplored opponent responses (up to `--expand-depth` plies), Phase 3 backpropagates outcomes. CLI flags: `--expand-from-games DIR`, `--min-seed-frequency N`, `--expand-depth D`, `--max-expand-positions N`.
+- `tests/test_fullgame_db.py` — updated to use `write_binary` / `.bin` paths; removed SQLite comparison tests; v2 record size (36 bytes) checked.
+- `web/templates/tools.html` / `web/static/tools.js` — FullGame DB section simplified to expand-from-games mode only; format dropdown removed; output dir (--db-dir), min seed frequency, expand depth, max expand positions exposed.
