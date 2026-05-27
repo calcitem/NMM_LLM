@@ -617,15 +617,22 @@ python tools/build\_fullgame\_db.py
 
 Scans human-played JSONL game records, BFS-expands around frequently-visited positions, back-propagates win/loss/draw outcomes, and writes a sorted binary `.bin` file. Uses D4 board symmetry so each equivalence class is stored once. Output is consulted at move-selection time via `ai/fullgame_db.py` using O(log N) binary search.
 
+Positions are stored in a temporary SQLite file during the build so that large
+expansions never require holding all data in RAM simultaneously. Only a small
+key-set (~9 bytes per position) is kept in memory. The temp DB is deleted
+automatically once the binary output is written.
+
 | Flag | Default | Description |
 | - | - | - |
 | `--expand-from-games DIR` | `data/games` | Directory of human JSONL game records |
 | `--output PATH` | `data/fullgame.bin` | Output binary file |
+| `--temp-db PATH` | `<output>.tmp.db` | Path for the temporary SQLite build DB — point at a large/fast drive for big builds |
+| `--max-db-gb GB` | `10.0` | Stop BFS and write partial results if the temp DB grows beyond this. Raise to e.g. `100` or `1000` for very large builds on a big drive |
 | `--min-seed-frequency N` | `2` | Only positions seen ≥ N times in human games seed the BFS |
 | `--expand-depth D` | `4` | BFS depth for late-game / end-of-placement seeds |
 | `--early-expand-depth D` | `2×expand-depth` | BFS depth for early-game seeds (tapers linearly to `--expand-depth`) |
 | `--max-expand-positions N` | unlimited | Hard cap on total positions expanded |
-| `--max-gb GB` | `6.0` | Abort BFS and write partial results if RSS exceeds this |
+| `--max-gb GB` | `6.0` | Secondary RAM guard: abort BFS if process RSS exceeds this |
 | `--passes N` | `6` | Backpropagation passes for win/loss labelling |
 | `--dry-run` | — | Build from a tiny synthetic game set; no disk write |
 
@@ -636,8 +643,10 @@ python tools/build\_fullgame\_db.py
 \# Smaller DB — higher seed threshold, shallower expansion:  
 python tools/build\_fullgame\_db.py --min-seed-frequency 5 --expand-depth 2  
   
-\# Limit RAM usage to 3 GB:  
-python tools/build\_fullgame\_db.py --max-gb 3.0  
+\# Very large build on a 2 TB drive, temp DB allowed up to 500 GB:  
+python tools/build\_fullgame\_db.py \\  
+    --temp-db /mnt/bigdrive/nmm_build.tmp.db \\  
+    --max-db-gb 500 --expand-depth 10  
   
 \# Dry run to verify the pipeline:  
 python tools/build\_fullgame\_db.py --dry-run

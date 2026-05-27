@@ -8,8 +8,11 @@ Builds a binary position database by:
      responses not present in the corpus, up to ``--expand-depth`` plies out.
   3. Backpropagating win/loss/draw outcomes through the expanded tree.
 
-The entire build runs in RAM.  Output is a sorted binary ``.bin`` file written
-directly — no SQLite or other intermediate file is created.
+Positions are stored in a temporary SQLite database during the build so that
+large expansions never require holding all data in RAM simultaneously.  Only
+a small ``seen`` key-set (~9 bytes per position) and per-pass outcome caches
+are kept in memory.  The temp DB is deleted automatically after the binary
+output file is written.
 
 Run inside the project venv:
     .venv/bin/python tools/build_fullgame_db.py --help
@@ -25,20 +28,24 @@ Run inside the project venv:
         --expand-depth 6 \\
         --output /mnt/external/fullgame.bin
 
-	python tools/build_fullgame_db.py --expand-from-games data/games --min-seed-frequency 4 --early-expand-depth 4 --expand-depth 6 --output /mnt/windows/fullgame.bin
+    # Store temp DB on a separate large drive:
+    .venv/bin/python tools/build_fullgame_db.py \\
+        --temp-db /mnt/bigdrive/nmm_build.tmp.db \\
+        --max-db-gb 100
+
+    python tools/build_fullgame_db.py --expand-from-games data/games --min-seed-frequency 4 --early-expand-depth 4 --expand-depth 6 --output /mnt/windows/fullgame.bin
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
+import sqlite3
 import struct
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -111,8 +118,10 @@ _POS_TO_IDX: dict[str, int] = {p: i for i, p in enumerate(POSITIONS)}
 _NO_POS_BIN = 31
 _EMPTY_MOVE_BIN = 0xFFFFFFFF
 _OUTCOME_ENCODE = {None: 0, 1: 1, -1: 2, 0: 3}
+_OUTCOME_DECODE = {0: None, 1: 1, 2: -1, 3: 0}
 _FLAG_ENCODE = {"N": 0, "W": 1, "L": 2}
-_BITS_TO_PIECE = {0b00: "", 0b01: "W", 0b10: "B"}   # "" matches BoardState.positions empty sentinel
+_FLAG_DECODE = {0: "N", 1: "W", 2: "L"}
+_BITS_TO_PIECE = {0b00: "", 0b01: "W", 0b10: "B"}
 
 # ── Canonical key encoding ────────────────────────────────────────────────────
 
@@ -210,6 +219,37 @@ def _current_rss_gb() -> float:
     return 0.0
 
 
+# ── Edge packing helpers ──────────────────────────────────────────────────────
+# Edges are stored as compact blobs in SQLite.
+# Per edge: flag(1) + notation_len(1) + child_key(9) + notation(N bytes).
+
+def _pack_edges(edges: list) -> Optional[bytes]:
+    """Pack [[notation, child_key_bytes, flag], ...] to a compact BLOB."""
+    if not edges:
+        return None
+    parts = []
+    for notation, child_key, flag in edges:
+        n_enc = notation.encode()
+        parts.append(bytes([_FLAG_ENCODE.get(flag, 0), len(n_enc)]) + child_key + n_enc)
+    return b"".join(parts)
+
+
+def _unpack_edges(data: Optional[bytes]) -> list:
+    """Unpack a BLOB back to [[notation, child_key_bytes, flag], ...]."""
+    if not data:
+        return []
+    edges = []
+    i = 0
+    while i < len(data):
+        flag = _FLAG_DECODE.get(data[i], "N")
+        n_len = data[i + 1]
+        child_key = bytes(data[i + 2:i + 11])
+        notation = data[i + 11:i + 11 + n_len].decode()
+        edges.append([notation, child_key, flag])
+        i += 11 + n_len
+    return edges
+
+
 # ── Game file helpers ─────────────────────────────────────────────────────────
 
 def _is_human_game(game: dict) -> bool:
@@ -226,35 +266,26 @@ def _game_notation_to_move(move: dict) -> Optional[dict]:
     return {"from": move.get("from"), "to": to, "capture": move.get("capture")}
 
 
-# ── In-memory position record ─────────────────────────────────────────────────
-
-@dataclass
-class _PosData:
-    outcome: Optional[int] = None       # 1=W wins, -1=B wins, 0=draw, None=unknown
-    depth: Optional[int] = None         # plies to terminal, or None
-    best_move: Optional[str] = None     # canonical-form best move notation
-    frequency: int = 0                  # human-game visit count
-    edges: list = field(default_factory=list)  # [[notation, child_key_bytes, flag], ...]
-
-
 # ── Builder ───────────────────────────────────────────────────────────────────
 
 class ExpandFromGamesBuilder:
-    """Frequency-seeded BFS builder.  Entirely in-memory — no intermediate files.
+    """Frequency-seeded BFS builder backed by a temporary SQLite database.
 
     Phase 1 — scan human JSONL game records; count how often each canonical
                position is visited.
     Phase 2 — BFS-expand from positions whose frequency meets
-               ``min_seed_frequency``.  Each seed's depth budget scales with
-               how early in the game it is: ``early_expand_depth`` at 0 pieces
-               placed, tapering linearly to ``expand_depth`` at 18 pieces
-               placed (end of placement phase).  Seeds are processed
-               deepest-first so early-game positions claim the BFS frontier
-               before late-game ones.
+               ``min_seed_frequency``.
     Phase 3 — backpropagate win/loss/draw outcomes through the expanded tree.
 
-    Call ``write_binary(output_path)`` after ``build()`` to flush to disk.
+    During the build, all position data is stored in a SQLite file on disk.
+    Only a set of seen keys (~9 bytes each) and per-pass outcome caches are
+    kept in RAM.  This allows arbitrarily large builds without OOM.
+
+    Call ``build(games_dir, output_path)`` then ``write_binary(output_path)``.
+    The temp DB is deleted automatically after ``write_binary`` completes.
     """
+
+    _COMMIT_INTERVAL = 500  # commit every N BFS steps
 
     def __init__(
         self,
@@ -265,6 +296,8 @@ class ExpandFromGamesBuilder:
         backprop_passes: int = 6,
         progress_every: float = 5.0,
         max_memory_gb: float = 10.0,
+        temp_db_path: Optional[Path] = None,
+        max_db_gb: float = 10.0,
     ) -> None:
         self.min_seed_frequency = min_seed_frequency
         self.expand_depth = expand_depth
@@ -273,37 +306,107 @@ class ExpandFromGamesBuilder:
         self.backprop_passes = backprop_passes
         self.progress_every = progress_every
         self.max_memory_gb = max_memory_gb
-        self._store: dict[bytes, _PosData] = {}
+        self.temp_db_path = temp_db_path
+        self.max_db_gb = max_db_gb
+        self._db_path: Optional[Path] = None
+        self._conn: Optional[sqlite3.Connection] = None
+        self._seen: set[bytes] = set()  # BFS dedup; 9 bytes per key
         self._games_processed = 0
         self._expanded = 0
         self._t_start = time.monotonic()
 
     def _depth_for_seed(self, key: bytes) -> int:
         """Return the BFS depth budget for a seed based on pieces placed."""
-        placed_total = key[7] + key[8]          # 0 (start) … 18 (all placed)
-        t = min(placed_total / 18.0, 1.0)       # 0.0 = early game, 1.0 = end of placement
+        placed_total = key[7] + key[8]
+        t = min(placed_total / 18.0, 1.0)
         depth = self.early_expand_depth * (1 - t) + self.expand_depth * t
         return max(self.expand_depth, round(depth))
 
+    # ── DB lifecycle ─────────────────────────────────────────────────────────
+
+    def _open_db(self, output_path: Optional[Path]) -> None:
+        if self.temp_db_path is not None:
+            self._db_path = Path(self.temp_db_path)
+        elif output_path is not None:
+            self._db_path = output_path.with_suffix(".tmp.db")
+        else:
+            import tempfile
+            self._db_path = Path(tempfile.mktemp(suffix=".tmp.db", prefix="nmm_fgdb_"))
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info("Temp DB: %s (limit %.1f GB)", self._db_path, self.max_db_gb)
+        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn.executescript("""
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            CREATE TABLE IF NOT EXISTS positions (
+                key       BLOB    PRIMARY KEY,
+                outcome   INTEGER NOT NULL DEFAULT 0,
+                depth     INTEGER,
+                best_move TEXT,
+                frequency INTEGER NOT NULL DEFAULT 0,
+                edges     BLOB
+            ) WITHOUT ROWID;
+        """)
+        self._conn.commit()
+
+    def _close_db(self, delete: bool = True) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+        if delete and self._db_path is not None and self._db_path.exists():
+            try:
+                self._db_path.unlink()
+                logger.info("Deleted temp DB: %s", self._db_path)
+            except OSError as exc:
+                logger.warning("Could not delete temp DB %s: %s", self._db_path, exc)
+
+    def _db_size_gb(self) -> float:
+        if self._db_path is None:
+            return 0.0
+        try:
+            return os.path.getsize(self._db_path) / (1024 ** 3)
+        except OSError:
+            return 0.0
+
     # ── Public API ───────────────────────────────────────────────────────────
 
-    def build(self, games_dir: Path) -> None:
-        self._scan_games(games_dir)
-        self._bfs_expand()
-        self._backpropagate()
+    def build(self, games_dir: Path, output_path: Optional[Path] = None) -> None:
+        self._open_db(output_path)
+        try:
+            self._scan_games(games_dir)
+            self._bfs_expand()
+            self._backpropagate()
+        except Exception:
+            self._close_db(delete=False)
+            raise
 
     def write_binary(self, output_path: Path) -> int:
-        """Sort the in-memory store by key and write a binary v2 file."""
-        sorted_keys = sorted(self._store.keys())
+        """Read from the temp DB (sorted by key) and write the binary v2 file."""
+        if self._conn is None:
+            raise RuntimeError("write_binary called before build()")
+
+        sorted_keys = [row[0] for row in self._conn.execute(
+            "SELECT key FROM positions ORDER BY key"
+        )]
+
         records: list[bytes] = []
         for key in sorted_keys:
-            data = self._store[key]
-            outcome_byte = _OUTCOME_ENCODE.get(data.outcome, 0)
-            depth_val = 0xFFFF if data.depth is None else min(data.depth, 0xFFFE)
-            bm_packed = _pack_move_bin(data.best_move)
-            freq_val = max(0, data.frequency)
-            informative = [(n, f) for n, _, f in data.edges if f in ("W", "L")]
-            neutral = [(n, f) for n, _, f in data.edges if f == "N"]
+            row = self._conn.execute(
+                "SELECT outcome, depth, best_move, frequency, edges FROM positions WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                continue
+            outcome_byte, depth_raw, best_move_str, freq, edges_blob = row
+            depth_val = 0xFFFF if depth_raw is None else min(depth_raw, 0xFFFE)
+            bm_packed = _pack_move_bin(best_move_str)
+            edges = _unpack_edges(edges_blob)
+            informative = [(n, f) for n, _, f in edges if f in ("W", "L")]
+            neutral = [(n, f) for n, _, f in edges if f == "N"]
             top4 = (informative + neutral)[:4]
             children = [_pack_move_bin(n, f) for n, f in top4]
             while len(children) < 4:
@@ -312,8 +415,9 @@ class ExpandFromGamesBuilder:
                 _RECORD_FMT,
                 key, outcome_byte, depth_val, bm_packed,
                 children[0], children[1], children[2], children[3],
-                freq_val,
+                max(0, freq),
             ))
+
         record_count = len(records)
         header = struct.pack(_HEADER_FMT, _HEADER_MAGIC, _FORMAT_VERSION_2, record_count)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,12 +426,18 @@ class ExpandFromGamesBuilder:
             for rec in records:
                 fh.write(rec)
         logger.info("write_binary: %d records → %s", record_count, output_path)
+
+        self._close_db(delete=True)
         return record_count
 
     def stats(self) -> tuple[int, int]:
         """Return (total_positions, resolved_positions)."""
-        total = len(self._store)
-        resolved = sum(1 for d in self._store.values() if d.outcome is not None)
+        if self._conn is None:
+            return 0, 0
+        total = self._conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+        resolved = self._conn.execute(
+            "SELECT COUNT(*) FROM positions WHERE outcome != 0"
+        ).fetchone()[0]
         return total, resolved
 
     # ── Phase 1: game scan ───────────────────────────────────────────────────
@@ -344,20 +454,25 @@ class ExpandFromGamesBuilder:
                         if not line:
                             continue
                         try:
+                            import json
                             game = json.loads(line)
-                        except json.JSONDecodeError:
+                        except Exception:
                             continue
                         if not _is_human_game(game):
                             continue
                         self._process_game(game)
             except OSError as exc:
                 logger.warning("Cannot read %s — %s", fpath, exc)
+            self._conn.commit()  # commit after each file
+
+        total, _ = self.stats()
         logger.info(
             "Scanned %d games → %d unique canonical positions.",
-            self._games_processed, len(self._store),
+            self._games_processed, total,
         )
 
     def _process_game(self, game: dict) -> None:
+        import json as _json
         moves = game.get("moves") or []
         board = BoardState.new_game()
         for move_record in moves:
@@ -366,22 +481,33 @@ class ExpandFromGamesBuilder:
                 break
             try:
                 key = position_key(board)
-                if key in self._store:
-                    self._store[key].frequency += 1
-                else:
-                    self._store[key] = _PosData(frequency=1)
+                self._conn.execute(
+                    "INSERT INTO positions(key, frequency) VALUES(?, 1) "
+                    "ON CONFLICT(key) DO UPDATE SET frequency = frequency + 1",
+                    (key,),
+                )
                 board = board.apply_move(mv)
             except Exception:
                 break
         try:
             key = position_key(board)
-            data = self._store.setdefault(key, _PosData())
-            data.frequency += 1
-            # Seed outcome from game result if not already resolved.
             winner = game.get("winner")
-            if data.outcome is None and winner in ("W", "B"):
-                data.outcome = 1 if winner == "W" else -1
-                data.depth = 0
+            if winner in ("W", "B"):
+                outcome_val = 1 if winner == "W" else 2
+                self._conn.execute(
+                    "INSERT INTO positions(key, frequency, outcome, depth) VALUES(?, 1, ?, 0) "
+                    "ON CONFLICT(key) DO UPDATE SET "
+                    "  frequency = frequency + 1, "
+                    "  outcome = CASE WHEN outcome = 0 THEN excluded.outcome ELSE outcome END, "
+                    "  depth    = CASE WHEN outcome = 0 THEN 0 ELSE depth END",
+                    (key, outcome_val),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO positions(key, frequency) VALUES(?, 1) "
+                    "ON CONFLICT(key) DO UPDATE SET frequency = frequency + 1",
+                    (key,),
+                )
         except Exception:
             pass
         self._games_processed += 1
@@ -389,25 +515,28 @@ class ExpandFromGamesBuilder:
     # ── Phase 2: BFS expansion ───────────────────────────────────────────────
 
     def _bfs_expand(self) -> None:
-        seeds = [k for k, v in self._store.items() if v.frequency >= self.min_seed_frequency]
+        seeds = [row[0] for row in self._conn.execute(
+            "SELECT key FROM positions WHERE frequency >= ?",
+            (self.min_seed_frequency,),
+        )]
         logger.info(
             "%d seed positions (freq >= %d); early depth %d → late depth %d.",
-            len(seeds), self.min_seed_frequency, self.early_expand_depth, self.expand_depth,
+            len(seeds), self.min_seed_frequency,
+            self.early_expand_depth, self.expand_depth,
         )
         if not seeds:
             logger.warning("No seeds — try lowering --min-seed-frequency.")
             return
         if self.early_expand_depth > 8:
             logger.warning(
-                "--early-expand-depth %d is very large — this can consume tens of GB of RAM. "
-                "The build will stop at --max-gb %.1f GB (RSS).",
-                self.early_expand_depth, self.max_memory_gb,
+                "--early-expand-depth %d is very large — this can consume large amounts of "
+                "disk space. The build will stop at --max-db-gb %.1f GB.",
+                self.early_expand_depth, self.max_db_gb,
             )
 
-        seen: set[bytes] = set(self._store.keys())
-        # Sort seeds deepest-budget-first so early-game positions claim the
-        # BFS frontier before late-game ones.  Store only (key, remaining) —
-        # boards are reconstructed on demand to keep queue memory small.
+        # Populate seen set from all positions already in the DB.
+        self._seen = set(row[0] for row in self._conn.execute("SELECT key FROM positions"))
+
         seed_entries = sorted(
             ((k, self._depth_for_seed(k)) for k in seeds),
             key=lambda x: -x[1],
@@ -415,8 +544,10 @@ class ExpandFromGamesBuilder:
         queue: deque[tuple[bytes, int]] = deque(seed_entries)
 
         t_last = time.monotonic()
-        _mem_check_counter = 0
-        _mem_limit_hit = False
+        _db_check_counter = 0
+        _db_limit_hit = False
+        _ops_since_commit = 0
+
         while queue:
             if (
                 self.max_expand_positions is not None
@@ -428,104 +559,133 @@ class ExpandFromGamesBuilder:
             key, remaining = queue.popleft()
             board = _decode_key_to_board(key)
 
-            # Memory guard — check every 1000 pops.
-            _mem_check_counter += 1
-            if _mem_check_counter >= 1000:
-                _mem_check_counter = 0
-                rss = _current_rss_gb()
-                if rss >= self.max_memory_gb:
+            _db_check_counter += 1
+            if _db_check_counter >= 1000:
+                _db_check_counter = 0
+                db_gb = self._db_size_gb()
+                if db_gb >= self.max_db_gb:
                     logger.warning(
-                        "Memory limit %.1f GB reached (RSS %.2f GB) after %d expanded — "
+                        "Temp DB limit %.1f GB reached (%.2f GB) after %d expanded — "
                         "stopping BFS early and writing partial results.",
-                        self.max_memory_gb, rss, self._expanded,
+                        self.max_db_gb, db_gb, self._expanded,
                     )
-                    _mem_limit_hit = True
+                    _db_limit_hit = True
                     break
 
             terminal, winner = is_terminal(board)
             if terminal:
                 outcome = 1 if winner == "W" else (-1 if winner == "B" else 0)
-                data = self._store.setdefault(key, _PosData())
-                if data.outcome is None:
-                    data.outcome = outcome
-                    data.depth = 0
+                outcome_val = _OUTCOME_ENCODE[outcome]
+                self._conn.execute(
+                    "INSERT INTO positions(key, outcome, depth) VALUES(?, ?, 0) "
+                    "ON CONFLICT(key) DO UPDATE SET "
+                    "  outcome = CASE WHEN outcome = 0 THEN excluded.outcome ELSE outcome END, "
+                    "  depth   = CASE WHEN outcome = 0 THEN 0 ELSE depth END",
+                    (key, outcome_val),
+                )
+                _ops_since_commit += 1
                 self._expanded += 1
-                continue
+            else:
+                _, sym, _turn, _pw, _pb = canonical_components(board)
+                edges: list[list] = []
+                for mv in get_all_legal_moves(board):
+                    child = board.apply_move(mv)
+                    child_key = position_key(child)
+                    canon_n = transform_notation(move_notation(mv), sym) or move_notation(mv)
+                    edges.append([canon_n, child_key, "N"])
+                    if child_key not in self._seen and remaining > 1:
+                        self._seen.add(child_key)
+                        self._conn.execute(
+                            "INSERT OR IGNORE INTO positions(key) VALUES(?)", (child_key,)
+                        )
+                        queue.append((child_key, remaining - 1))
 
-            _, sym, _turn, _pw, _pb = canonical_components(board)
-            edges: list[list] = []
-            for mv in get_all_legal_moves(board):
-                child = board.apply_move(mv)
-                child_key = position_key(child)
-                canon_n = transform_notation(move_notation(mv), sym) or move_notation(mv)
-                edges.append([canon_n, child_key, "N"])
-                if child_key not in seen and remaining > 1:
-                    seen.add(child_key)
-                    queue.append((child_key, remaining - 1))
+                packed = _pack_edges(edges)
+                self._conn.execute(
+                    "INSERT INTO positions(key, edges) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET "
+                    "  edges = CASE WHEN edges IS NULL THEN excluded.edges ELSE edges END",
+                    (key, packed),
+                )
+                _ops_since_commit += 1
+                self._expanded += 1
 
-            data = self._store.setdefault(key, _PosData())
-            if not data.edges:
-                data.edges = edges
-            self._expanded += 1
+            if _ops_since_commit >= self._COMMIT_INTERVAL:
+                self._conn.commit()
+                _ops_since_commit = 0
 
             now = time.monotonic()
             if now - t_last >= self.progress_every:
                 t_last = now
-                rss = _current_rss_gb()
+                db_gb = self._db_size_gb()
+                total, _ = self.stats()
                 logger.info(
-                    "BFS expand: %d expanded  %d queued  %d total  %.2f GB RSS",
-                    self._expanded, len(queue), len(self._store), rss,
+                    "BFS expand: %d expanded  %d queued  %d total  %.3f GB DB",
+                    self._expanded, len(queue), total, db_gb,
                 )
-                if rss >= self.max_memory_gb:
+                if db_gb >= self.max_db_gb:
                     logger.warning(
-                        "Memory limit %.1f GB reached (RSS %.2f GB) after %d expanded — "
+                        "Temp DB limit %.1f GB reached (%.2f GB) after %d expanded — "
                         "stopping BFS early and writing partial results.",
-                        self.max_memory_gb, rss, self._expanded,
+                        self.max_db_gb, db_gb, self._expanded,
                     )
-                    _mem_limit_hit = True
+                    _db_limit_hit = True
                     break
 
-        if _mem_limit_hit:
+        self._conn.commit()
+        total, _ = self.stats()
+        if _db_limit_hit:
             logger.info(
-                "BFS stopped by memory cap — %d expanded, %d total positions (partial).",
-                self._expanded, len(self._store),
+                "BFS stopped by DB size cap — %d expanded, %d total positions (partial).",
+                self._expanded, total,
             )
         else:
             logger.info(
                 "BFS complete — %d expanded, %d total positions.",
-                self._expanded, len(self._store),
+                self._expanded, total,
             )
 
     # ── Phase 3: backpropagation ─────────────────────────────────────────────
 
     def _backpropagate(self) -> None:
         for pass_no in range(1, self.backprop_passes + 1):
-            updated = 0
-            for key, data in self._store.items():
-                if data.outcome is not None or not data.edges:
-                    continue
+            # Load outcome + depth for every position into RAM once per pass.
+            # ~17 bytes × N positions — tiny compared to full _PosData objects.
+            outcome_cache: dict[bytes, tuple[Optional[int], Optional[int]]] = {}
+            for row in self._conn.execute("SELECT key, outcome, depth FROM positions"):
+                k, oc, d = row
+                outcome_cache[bytes(k)] = (_OUTCOME_DECODE[oc], d)
 
+            # Load all unresolved positions that have edges.
+            pending = self._conn.execute(
+                "SELECT key, edges FROM positions WHERE outcome = 0 AND edges IS NOT NULL"
+            ).fetchall()
+
+            updates: list[tuple] = []
+            for key, edges_blob in pending:
+                key = bytes(key)
                 side = "W" if key[6] == 0 else "B"
                 win_outcome = 1 if side == "W" else -1
+                loss_outcome = -win_outcome
 
-                # Collect child outcomes (None if child absent or unresolved).
-                child_infos: list[tuple[str, bytes, Optional[int], Optional[int]]] = []
-                for n, ck, _ in data.edges:
-                    ch = self._store.get(ck)
-                    child_infos.append((n, ck, ch.outcome if ch else None, ch.depth if ch else None))
+                edges = _unpack_edges(edges_blob)
+                child_infos: list[tuple] = []
+                for n, ck, _ in edges:
+                    ck = bytes(ck)
+                    entry = outcome_cache.get(ck)
+                    child_outcome = entry[0] if entry is not None else None
+                    child_depth = entry[1] if entry is not None else None
+                    child_infos.append((n, ck, child_outcome, child_depth))
 
                 outcomes = [o for _, _, o, _ in child_infos]
 
-                # WIN: any child is a forced win for STM — safe with partial coverage.
                 if win_outcome in outcomes:
                     best_o = win_outcome
-                # LOSS/DRAW: require all children in store and resolved.
                 elif any(o is None for o in outcomes):
                     continue
                 else:
                     best_o = max(outcomes) if side == "W" else min(outcomes)
 
-                loss_outcome = -win_outcome
                 new_edges: list[list] = []
                 best_move: Optional[str] = None
                 matching_depths: list[int] = []
@@ -542,25 +702,35 @@ class ExpandFromGamesBuilder:
                         matching_depths.append(child_d)
                     new_edges.append([n, ck, flag])
 
-                data.outcome = best_o
-                data.depth = (1 + min(matching_depths)) if matching_depths else None
-                data.best_move = best_move
-                data.edges = new_edges
-                updated += 1
+                new_depth = (1 + min(matching_depths)) if matching_depths else None
+                new_outcome_byte = _OUTCOME_ENCODE[best_o]
+                new_edges_blob = _pack_edges(new_edges)
+                updates.append((new_outcome_byte, new_depth, best_move, new_edges_blob, key))
 
-            logger.info("Backprop pass %d: labelled %d positions.", pass_no, updated)
-            if updated == 0:
+            if updates:
+                self._conn.executemany(
+                    "UPDATE positions SET outcome=?, depth=?, best_move=?, edges=? WHERE key=?",
+                    updates,
+                )
+                self._conn.commit()
+
+            logger.info("Backprop pass %d: labelled %d positions.", pass_no, len(updates))
+            if not updates:
                 break
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> int:
+    import json
+
     parser = argparse.ArgumentParser(
         description=(
             "Build the Nine Men's Morris full-game position database. "
             "Scans human game records, BFS-expands around common positions, "
-            "and writes a sorted binary .bin file directly — no intermediate files."
+            "and writes a sorted binary .bin file. "
+            "Uses a temporary SQLite file during the build so large expansions "
+            "never require holding all data in RAM."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -580,6 +750,22 @@ def main() -> int:
         help=(
             "Directory to write fullgame.bin into.  "
             "Shorthand for --output <dir>/fullgame.bin.  Ignored if --output is set."
+        ),
+    )
+    parser.add_argument(
+        "--temp-db", type=Path, default=None, metavar="PATH",
+        help=(
+            "Path for the temporary SQLite build database "
+            "(default: <output>.tmp.db alongside the output file). "
+            "Point this at a large drive for very large builds — e.g. /mnt/bigdrive/build.tmp.db"
+        ),
+    )
+    parser.add_argument(
+        "--max-db-gb", type=float, default=10.0, metavar="GB",
+        help=(
+            "Maximum size of the temporary SQLite database in GB (default: 10.0). "
+            "BFS stops and writes partial results when the temp DB exceeds this. "
+            "Raise to e.g. 100 or 1000 for builds on large drives."
         ),
     )
     parser.add_argument(
@@ -606,7 +792,7 @@ def main() -> int:
         "--max-gb", type=float, default=6.0, metavar="GB",
         help=(
             "Abort BFS and write partial results when process RSS exceeds this value in GB "
-            "(default: 6.0).  Prevents OOM when using large --early-expand-depth values."
+            "(default: 6.0).  Secondary guard alongside --max-db-gb."
         ),
     )
     parser.add_argument(
@@ -659,10 +845,12 @@ def main() -> int:
             with open(gdir / "dry_run.jsonl", "w") as f:
                 for g in synthetic:
                     f.write(json.dumps(g) + "\n")
-            builder = ExpandFromGamesBuilder(
-                min_seed_frequency=1, expand_depth=2, max_expand_positions=500,
-            )
-            builder.build(gdir)
+            with tempfile.TemporaryDirectory() as db_td:
+                builder = ExpandFromGamesBuilder(
+                    min_seed_frequency=1, expand_depth=2, max_expand_positions=500,
+                    temp_db_path=Path(db_td) / "dry_run.tmp.db",
+                )
+                builder.build(gdir, output_path=None)
         total, resolved = builder.stats()
         print(f"DRY RUN OK: positions={total} resolved={resolved}")
         return 0
@@ -684,8 +872,10 @@ def main() -> int:
         print(f"ERROR: output directory not writable ({output_path.parent}): {exc}", file=sys.stderr)
         return 1
 
-    print(f"Games dir: {games_dir}")
-    print(f"Output:    {output_path}")
+    temp_db = args.temp_db.resolve() if args.temp_db else None
+    print(f"Games dir:  {games_dir}")
+    print(f"Output:     {output_path}")
+    print(f"Temp DB:    {temp_db or str(output_path.with_suffix('.tmp.db'))} (max {args.max_db_gb:.1f} GB)")
 
     # ── Build ─────────────────────────────────────────────────────────────────
     t0 = time.monotonic()
@@ -696,8 +886,10 @@ def main() -> int:
         max_expand_positions=args.max_expand_positions,
         backprop_passes=args.passes,
         max_memory_gb=args.max_gb,
+        temp_db_path=temp_db,
+        max_db_gb=args.max_db_gb,
     )
-    builder.build(games_dir)
+    builder.build(games_dir, output_path)
     total, resolved = builder.stats()
     elapsed = time.monotonic() - t0
     print(f"Build: {total} positions ({resolved} resolved) in {elapsed:.1f}s.")
@@ -711,6 +903,7 @@ def main() -> int:
 
 
 def _update_settings(db_path: Path) -> None:
+    import json
     settings_path = _ROOT / "data" / "settings.json"
     try:
         settings: dict = {}
