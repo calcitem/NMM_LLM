@@ -413,7 +413,7 @@ The `tools/` directory contains scripts for building and improving the AI's know
 | `endgame\_play.py` | Generate endgame-only positions and play them out — much faster than full games for building the EndgameDB |
 | `evolve\_weights.py` | Era-aware (1+1)-ES to hill-climb the global `HeuristicWeights`; saves result to `data/weights/best.json` |
 | `evolve\_weights\_v2.py` | Per-personality era-aware (1+1)-ES; evolves each personality’s weight overrides and saves back to `data/personalities/*.json` |
-| `build\_fullgame\_db.py` | Build a bounded SQLite position database with win/loss/draw outcomes via D4-symmetric enumeration |
+| `build\_fullgame\_db.py` | Frequency-seeded BFS builder: scans human JSONL games, expands around common positions, writes a sorted binary `.bin` file with win/loss/draw outcomes |
 | `fullgame\_db.py` | Read-only query interface for the full-game position DB (used by `GameAI` at move-selection time) |
 | `build\_endgame\_db.py` | Offline retrograde solver: builds an exact WDL table for all 3v3 fly-phase positions using D4 symmetry (~8× speedup); writes `data/endgame/endgame_3_3.wdl` |
 | `train\_value\_net.py` | Train a small MLP value estimator from saved game records |
@@ -612,26 +612,74 @@ Restart the web server after the run to pick up updated personality files.
 ### Full-Game Position Database
 
 ```
-python tools/build\_fullgame\_db.py --output data/fullgame.sqlite --max-positions 500000
+python tools/build\_fullgame\_db.py
 ```
 
-Builds a SQLite database of Nine Men's Morris positions with win/loss/draw outcomes via bounded D4-symmetric enumeration. Full NMM has ~10¹⁰ legal positions so a complete solve is infeasible on a normal machine — the script runs to a configurable position cap or depth cap and can be interrupted and resumed.
+Scans human-played JSONL game records, BFS-expands around frequently-visited positions, back-propagates win/loss/draw outcomes, and writes a sorted binary `.bin` file. Uses D4 board symmetry so each equivalence class is stored once. Output is consulted at move-selection time via `ai/fullgame_db.py` using O(log N) binary search.
 
-When `data/fullgame.sqlite` exists, `GameAI` consults it at move-selection time via `ai/fullgame_db.py`. If a position is found, the DB result overrides or blends with the negamax search; if not found, the normal search runs unchanged.
-
-| Flag | Description |
-| - | - |
-| `--output PATH` | SQLite database path (default: `data/fullgame.sqlite`) |
-| `--max-positions N` | Stop after N positions are stored |
-| `--dry-run` | Validate pipeline without writing anything |
-| `--sample N` | Quick sanity test — enumerate only N positions |
+| Flag | Default | Description |
+| - | - | - |
+| `--expand-from-games DIR` | `data/games` | Directory of human JSONL game records |
+| `--output PATH` | `data/fullgame.bin` | Output binary file |
+| `--min-seed-frequency N` | `2` | Only positions seen ≥ N times in human games seed the BFS |
+| `--expand-depth D` | `4` | BFS depth for late-game / end-of-placement seeds |
+| `--early-expand-depth D` | `2×expand-depth` | BFS depth for early-game seeds (tapers linearly to `--expand-depth`) |
+| `--max-expand-positions N` | unlimited | Hard cap on total positions expanded |
+| `--max-gb GB` | `6.0` | Abort BFS and write partial results if RSS exceeds this |
+| `--passes N` | `6` | Backpropagation passes for win/loss labelling |
+| `--dry-run` | — | Build from a tiny synthetic game set; no disk write |
 
 ```
-\# Dry run to verify the pipeline  
-python tools/build\_fullgame\_db.py --dry-run  
+\# Default build (scan data/games, write data/fullgame.bin):  
+python tools/build\_fullgame\_db.py  
   
-\# Build to a manageable size (adjust to fit available disk)  
-python tools/build\_fullgame\_db.py --output data/fullgame.sqlite --max-positions 500000
+\# Smaller DB — higher seed threshold, shallower expansion:  
+python tools/build\_fullgame\_db.py --min-seed-frequency 5 --expand-depth 2  
+  
+\# Limit RAM usage to 3 GB:  
+python tools/build\_fullgame\_db.py --max-gb 3.0  
+  
+\# Dry run to verify the pipeline:  
+python tools/build\_fullgame\_db.py --dry-run
+```
+
+### Retrograde Endgame Database
+
+```
+python tools/build\_endgame\_db.py --nW 3 --nB 3
+```
+
+Retrograde solver that produces an exact WDL (Win/Draw/Loss from side-to-move) table for all fly-phase positions with a given piece count. Uses D4 board symmetry (~8× speedup) and writes directly to a memory-mapped binary file — large tables never require full RAM allocation.
+
+Output is written to `data/endgame/endgame_<nW>_<nB>.wdl` and consulted by `GameAI` at search time.
+
+| Flag | Default | Description |
+| - | - | - |
+| `--nW N --nB N` | — | Build a single table for this piece count |
+| `--build-all` | — | Build all tables in dependency order |
+| `--max-sum N` | `11` | Largest `nW+nB` to build when using `--build-all` |
+| `--skip-existing` | — | Skip tables whose `.wdl` file already exists |
+| `--out-dir PATH` | `data/endgame` | Output directory |
+| `--quiet` | — | Suppress per-pass logging |
+
+**Table sizes by `--max-sum`:**
+
+| `--max-sum` | Tables | Largest single table | Total disk |
+| - | - | - | - |
+| 6 | 3v3 only | 1.3 MB | ~1.3 MB |
+| 7 | + 4v3, 3v4 | ~5 MB each | ~11 MB |
+| 8 | + 5v3, 4v4, 3v5 | ~20–70 MB | ~200 MB |
+| 9 | + 6v3, 5v4, 4v5, 3v6 | ~82–330 MB | ~1.5 GB |
+
+```
+\# Build just the 3v3 base table (~30 min):  
+python tools/build\_endgame\_db.py --nW 3 --nB 3  
+  
+\# Build all tables up to 7-piece total, skipping existing:  
+python tools/build\_endgame\_db.py --build-all --max-sum 7 --skip-existing  
+  
+\# Build to a custom location:  
+python tools/build\_endgame\_db.py --build-all --max-sum 8 --out-dir /mnt/fast/endgame
 ```
 
 ### Value Network Training
