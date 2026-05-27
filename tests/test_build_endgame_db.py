@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util as _ilu
 import os
 import sys
+import tempfile
 import types
 import unittest
 from math import comb
@@ -86,7 +87,14 @@ class TestSolver3v3Properties(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.table = solve_table(3, 3, {}, verbose=False)
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls._out_path = Path(cls._tmpdir.name) / "endgame_3_3.wdl"
+        solve_table(3, 3, {}, cls._out_path, verbose=False)
+        cls.table = cls._out_path.read_bytes()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
 
     def test_table_length(self):
         expected_bytes = (TABLE_SIZE_3_3 + 3) >> 2

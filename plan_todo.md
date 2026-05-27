@@ -13,6 +13,7 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) |
 | ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | ★ | **B-51** | Expand retrograde solver beyond 3v3 |
+| ★ | **B-57** | Direct-to-disk binary writing for endgame DB and fullgame DB (mmap; no large in-memory arrays) ✅ 2026-05-28 |
 | ★ | **B-56** | Add D4 board symmetry to endgame database (8x size/speed reduction) ✅ 2026-05-28 |
 | ★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | | **SE-11** | Opponent likelihood weighting via TrajectoryDB |
@@ -451,6 +452,70 @@ Placing at `a4` instead would both block `a4-b4-c4` and create a 2-config approa
 **Files:**
 - `tools/build_endgame_db.py` — rewrite to accept `--nW` and `--nB` args; mixed fly/move successor generator; cross-table reference loading
 - `ai/endgame_solved_db.py` — extend `EndgameSolvedDB.__init__` to load all available tables; extend `query()` to dispatch by piece count
+
+**Prerequisite:** B-57 (direct-to-disk mmap writing) must land first — the 5v4 and 4v5 tables (82 MB each) will exceed practical `bytearray` size without it.
+
+---
+
+## B-57 — Direct-to-disk binary writing for endgame DB and fullgame DB ✅ 2026-05-28 ★
+
+**Goal:** Replace the in-memory `bytearray` (endgame) and large intermediate structures (fullgame) with direct writes to a pre-allocated binary file using Python's `mmap`. All solve and fill passes operate on the memory-mapped file handle instead of RAM. A final label pass then edits the file in-place to mark winning and losing trajectory positions.
+
+**Why this matters:**
+- 3v3 is 1.3 MB — RAM is not the constraint today.
+- B-51 tables (5v4, 4v5) reach 82–330 MB each; 6v5 exceeds 1 GB. These will not fit in a Python `bytearray` on most build machines.
+- The fill pass (non-canonical → canonical propagation) and label pass (WIN/LOSS annotation) are sequential scans with local reads — exactly the workload OS page caching excels at with mmap.
+
+---
+
+### Endgame DB (`tools/build_endgame_db.py`)
+
+**Current flow:**
+1. `table = bytearray(n_bytes)` — entire table allocated in RAM as UNKNOWN.
+2. Solve passes iterate `canonical_ids`, set WIN/LOSS/DRAW in `table`.
+3. Fill pass iterates all positions, copies from canonical entry.
+4. Caller does `wdl_path.write_bytes(bytes(table))`.
+
+**Proposed flow:**
+1. Pre-allocate the `.wdl` file on disk: `path.write_bytes(bytes(n_bytes))` (zeros = UNKNOWN = valid starting state).
+2. Open the file and `mmap.mmap(f.fileno(), n_bytes)` — the OS manages which pages are in RAM.
+3. All solve passes, fill pass, and DRAW marking operate on the mmap handle via the existing `get_wdl`/`set_wdl` API — **no API change required**.
+4. `table.flush(); table.close()` — file is already on disk; no bulk write at the end.
+5. **Label pass** (new, optional): after the file is fully solved, re-open it and mark a chosen subset of positions with a high-contrast sentinel (e.g. reuse `WDL_WIN`/`WDL_LOSS` is already the label — but if a richer annotation is needed, extend to 3 bits per entry or a sidecar index file mapping `pos_id → outcome + move`).
+
+**Key change in `solve_table`:**
+```python
+# Before
+table = bytearray(n_bytes)
+
+# After
+out_path.write_bytes(bytes(n_bytes))          # pre-allocate (UNKNOWN = 0x00)
+f = open(out_path, "r+b")
+table = mmap.mmap(f.fileno(), n_bytes)
+try:
+    _solve_passes(table, ...)
+    _fill_pass(table, ...)
+    table.flush()
+finally:
+    table.close()
+    f.close()
+```
+
+`solve_table` returns `None` (file is already written); callers that need the bytes for sub-table loading use `open(path, "rb").read()` or a second mmap.
+
+---
+
+### Fullgame DB (`tools/build_fullgame_db.py`)
+
+**Done (by B-52):** SQLite was already replaced with a sorted binary `.bin` format (36-byte records, mmap'd read-only at query time). A `--max-gb` guard prevents OOM during BFS. No further changes needed for B-57.
+
+### Files changed
+- `tools/build_endgame_db.py` — replaced `bytearray` with mmap; `solve_table` writes to `out_path`, returns None ✅
+- `ai/endgame_solved_db.py` — no change needed; `get_wdl`/`set_wdl` work on any `[]`-indexable type ✅
+- `tools/build_fullgame_db.py` — binary format already done (B-52); no change ✅
+- `ai/fullgame_db.py` — binary reader already in place (B-52); no change ✅
+
+**Prerequisite B-57 → B-51 satisfied.** B-51 (expand retrograde solver beyond 3v3) can now proceed.
 
 ---
 

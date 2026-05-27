@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import importlib.util as _ilu
 import logging
+import mmap
 import sys
 import time
 import types
@@ -334,7 +335,7 @@ def _best_capture_wdl_for_mover(
 
 def _process_pos(
     w: list[int], b: list[int], turn_bit: int,
-    table: bytearray,
+    table: bytearray | mmap.mmap,
     nW: int, nB: int, nC_b: int,
     sub_tables: dict,
 ) -> int:
@@ -420,19 +421,30 @@ def solve_table(
     nW: int,
     nB: int,
     sub_tables: dict[tuple[int, int], bytes],
+    out_path: Path,
     verbose: bool = True,
-) -> bytearray:
-    """Solve all (nW, nB) positions.  Returns the WDL bytearray.
+) -> None:
+    """Solve all (nW, nB) positions and write the WDL file to *out_path*.
 
     sub_tables must contain fully-solved (nW, nB-1) and (nW-1, nB) tables.
     The 3v3 base case passes sub_tables={} because mill captures there
     always reduce the opponent to 2 pieces (immediate WIN).
+
+    The file is pre-allocated as a sparse file (OS manages paging) so large
+    tables (5v4, 6v5, …) never require the full bytes to be in RAM at once.
     """
     ts = _table_size(nW, nB)
     n_bytes = (ts + 3) >> 2
-    table = bytearray(n_bytes)
     nC_b = _CT[_N - nW][nB]
     t0 = time.time()
+
+    # Pre-allocate sparse file (all zeros = WDL_UNKNOWN = valid start state).
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as _pre:
+        _pre.seek(max(n_bytes, 1) - 1)
+        _pre.write(b"\x00")
+    _fh = open(out_path, "r+b")
+    table = mmap.mmap(_fh.fileno(), n_bytes)
 
     # ── Precompute canonical position IDs (~ts/8) ─────────────────────────────
     canonical_ids: list[int] = []
@@ -490,28 +502,32 @@ def solve_table(
             n_draw += 1
 
     # ── Fill non-canonical positions from their canonical equivalents ─────────
-    for pos_id in range(ts):
-        w, b, turn_bit = _decode(pos_id, nW, nB, nC_b)
-        w_can, b_can = _canonical_indices(w, b)
-        if w_can == w and b_can == b:
-            continue  # canonical: already solved
-        can_id = _encode(w_can, b_can, turn_bit, nC_b)
-        set_wdl(table, pos_id, get_wdl(table, can_id))
+    try:
+        for pos_id in range(ts):
+            w, b, turn_bit = _decode(pos_id, nW, nB, nC_b)
+            w_can, b_can = _canonical_indices(w, b)
+            if w_can == w and b_can == b:
+                continue  # canonical: already solved
+            can_id = _encode(w_can, b_can, turn_bit, nC_b)
+            set_wdl(table, pos_id, get_wdl(table, can_id))
 
-    if verbose:
-        n_win = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_WIN)
-        n_loss = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_LOSS)
-        logger.info(
-            "(%d,%d) Solved: %d WIN  %d LOSS  %d DRAW  (total %d, %.1fs)",
-            nW, nB, n_win, n_loss, n_draw, ts, time.time() - t0,
-        )
+        if verbose:
+            n_win = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_WIN)
+            n_loss = sum(1 for i in range(ts) if get_wdl(table, i) == WDL_LOSS)
+            logger.info(
+                "(%d,%d) Solved: %d WIN  %d LOSS  %d DRAW  (total %d, %.1fs)",
+                nW, nB, n_win, n_loss, n_draw, ts, time.time() - t0,
+            )
 
-    return table
+        table.flush()
+    finally:
+        table.close()
+        _fh.close()
 
 
-def solve_3_3(out_dir: Path, verbose: bool = True) -> bytearray:
+def solve_3_3(out_dir: Path, verbose: bool = True) -> None:
     """Convenience wrapper: solve the (3,3) base case."""
-    return solve_table(3, 3, {}, verbose=verbose)
+    solve_table(3, 3, {}, _wdl_path(out_dir, 3, 3), verbose=verbose)
 
 
 # ── Table file I/O ─────────────────────────────────────────────────────────────
@@ -630,10 +646,11 @@ def main() -> None:
             _table_size(nW, nB),
             (_table_size(nW, nB) + 3) / 4 / 1024 / 1024,
         )
-        table = solve_table(nW, nB, sub_tables, verbose=verbose)
-        wdl_path.write_bytes(bytes(table))
-        logger.info("Wrote %s (%d bytes)", wdl_path, len(table))
-        loaded[(nW, nB)] = bytes(table)
+        solve_table(nW, nB, sub_tables, wdl_path, verbose=verbose)
+        logger.info("Wrote %s (%d bytes)", wdl_path, wdl_path.stat().st_size)
+        data = _load_table(out_dir, nW, nB)
+        if data is not None:
+            loaded[(nW, nB)] = data
 
         remaining_schedule = set(schedule[schedule.index((nW, nB)) + 1:])
         still_needed = set()
