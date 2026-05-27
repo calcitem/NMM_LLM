@@ -19,8 +19,8 @@ let thinkingInterval  = null; // setInterval handle while AI is thinking
 let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
 let _hintCountdown    = null; // setInterval handle for hint countdown
-let canMarkBad        = false; // true only between ai_move and the next human move commit
-let lastAiBadMoveDesc = "";   // move notation shown in the ban confirmation dialog
+let canOverride       = false; // true only between ai_move and the next human move commit
+let inGuidanceMode    = false; // true while human is directing the AI's move after override
 let canMarkGoodGame   = false; // true after a draw ends (AI vs human)
 let isVsHuman         = false; // true when current game is human vs human (handoff buttons visible)
 let replayMoves       = [];   // moves with FEN data, populated when game ends
@@ -323,18 +323,11 @@ document.addEventListener("DOMContentLoaded", () => {
     stopThinkingTimer();
     $("btn-force-move").hidden = true;
   });
-  $("btn-bad-move").addEventListener("click", () => {
-    if (!ws || !canMarkBad) return;
-    const desc = lastAiBadMoveDesc ? `"${lastAiBadMoveDesc}"` : "this move";
-    const confirmed = window.confirm(
-      `Ban ${desc} from this position?\n\n` +
-      `The AI will avoid it for the rest of this game and in future games ` +
-      `with the same move sequence. This is saved to disk and cannot be easily undone.`
-    );
-    if (!confirmed) return;
-    canMarkBad = false;
-    $("btn-bad-move").hidden = true;
-    ws.send(JSON.stringify({ type: "bad_move" }));
+  $("btn-override").addEventListener("click", () => {
+    if (!ws || !canOverride) return;
+    canOverride = false;
+    $("btn-override").hidden = true;
+    ws.send(JSON.stringify({ type: "override_ai" }));
   });
   $("btn-good-game").addEventListener("click", () => {
     if (!ws || !canMarkGoodGame) return;
@@ -473,8 +466,9 @@ function startNewGame() {
   renderMoves([]);
   $("btn-undo").disabled = true;
   $("btn-force-move").hidden = true;
-  $("btn-bad-move").hidden = true;
-  canMarkBad = false;
+  $("btn-override").hidden = true;
+  canOverride = false;
+  inGuidanceMode = false;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -538,8 +532,9 @@ function startAiVsAi() {
   renderMoves([]);
   $("btn-undo").disabled = true;
   $("btn-force-move").hidden = false;
-  $("btn-bad-move").hidden = true;
-  canMarkBad = false;
+  $("btn-override").hidden = true;
+  canOverride = false;
+  inGuidanceMode = false;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -726,8 +721,9 @@ function startSetupGame() {
   renderMoves([]);
   $("btn-undo").disabled = true;
   $("btn-force-move").hidden = true;
-  $("btn-bad-move").hidden = true;
-  canMarkBad = false;
+  $("btn-override").hidden = true;
+  canOverride = false;
+  inGuidanceMode = false;
   $("btn-good-game").hidden = true;
   canMarkGoodGame = false;
   stopThinkingTimer();
@@ -814,9 +810,14 @@ function handleMessage(msg) {
           ws.send(JSON.stringify({ type: "force_aggressive", active: false }));
         }
       }
-      // B: hide Bad Move button during opening replay
-      $("btn-bad-move").hidden = !canMarkBad || !!msg.opening_active;
-      if (msg.is_human_turn && replayIdx === -1) {
+      // Hide override during opening replay
+      if (msg.opening_active) { $("btn-override").hidden = true; canOverride = false; }
+      if (inGuidanceMode && replayIdx === -1) {
+        // Force the board into interactive mode so hints render for the AI's pieces.
+        board.isHuman = true;
+        board._drawHints();
+      }
+      if (msg.is_human_turn && replayIdx === -1 && !inGuidanceMode) {
         setStatus(
           msg.phase === "place"
             ? "Your turn — click a green node to place."
@@ -838,8 +839,9 @@ function handleMessage(msg) {
     case "thinking":
       startThinkingTimer(msg.color, msg.expected_seconds ?? 0, ws);
       $("btn-force-move").hidden = false;
-      canMarkBad = false;
-      $("btn-bad-move").hidden = true;
+      canOverride = false;
+      $("btn-override").hidden = true;
+      inGuidanceMode = false;
       break;
 
     case "ai_move": {
@@ -855,17 +857,19 @@ function handleMessage(msg) {
         }
       }
       if (msg.can_mark_bad) {
-        canMarkBad = true;
-        lastAiBadMoveDesc = msg.from + "→" + msg.to + (msg.capture ? "×" + msg.capture : "");
-        $("btn-bad-move").hidden = false;
+        canOverride = true;
+        $("btn-override").hidden = false;
       }
       break;
     }
 
-    case "bad_move_ack":
-      addCommentary("[Training]", `"${msg.bad_notation}" marked bad — AI retrying.`, "ai");
-      canMarkBad = false;
-      $("btn-bad-move").hidden = true;
+    case "override_ready":
+      inGuidanceMode = true;
+      setStatus(
+        gameState && gameState.phase === "place"
+          ? "Override: click an empty node to place the AI's piece."
+          : "Override: select an AI piece, then its destination."
+      );
       break;
 
     case "good_game_ack":
@@ -900,8 +904,9 @@ function handleMessage(msg) {
       phase = "game_over";
       stopThinkingTimer();
       $("btn-force-move").hidden = true;
-      canMarkBad = false;
-      $("btn-bad-move").hidden = true;
+      canOverride = false;
+      $("btn-override").hidden = true;
+      inGuidanceMode = false;
       // Show Good Game after a draw in AI vs human (reinforces strong AI play)
       canMarkGoodGame = !msg.winner && !isVsHuman && !isAiVsAi;
       $("btn-good-game").hidden = !canMarkGoodGame;
@@ -1060,10 +1065,8 @@ function onNodeClick(name) {
   if (setupMode) {
     const cur = setupGrid[name] || "";
     if (setupBrush !== undefined && setupBrush !== null) {
-      // Palette-driven: erase sets "", W/B sets that colour
       setupGrid[name] = setupBrush;
     } else {
-      // Cycle mode (fallback)
       setupGrid[name] = cur === "" ? "W" : cur === "W" ? "B" : "";
     }
     _renderSetupBoard();
@@ -1072,19 +1075,67 @@ function onNodeClick(name) {
   }
 
   if (!ws || phase === "idle" || phase === "game_over" || !gameState) return;
+
+  // ── Guidance mode: human is directing the AI's move after Override ──────────
+  if (inGuidanceMode) {
+    if (gameState.phase === "place") {
+      // Any empty square the AI could legally place on
+      if (gameState.legal_dests.includes(name) && !gameState.board[name]) {
+        inGuidanceMode = false;
+        board.isHuman = false;
+        board.legalDests = new Set();
+        board.legalSrcs  = new Set();
+        board._drawPieces();
+        board._drawHints();
+        ws.send(JSON.stringify({ type: "guided_move", from: null, to: name }));
+      }
+    } else {
+      // Movement/fly phase: first click picks an AI piece, second picks destination
+      const aiColor = gameState.turn;
+      if (!board.selected) {
+        if (gameState.board[name] === aiColor && gameState.legal_sources.includes(name)) {
+          board.selectSource(name);
+        }
+      } else {
+        const src = board.selected;
+        if (name === src) {
+          board.selected = null;
+          board._drawPieces();
+          board._drawHints();
+          return;
+        }
+        const pairs = board._movePairs || [];
+        const valid = pairs.some(([f, t]) => f === src && t === name);
+        if (valid) {
+          inGuidanceMode = false;
+          board.isHuman = false;
+          board.selected = null;
+          board.legalDests = new Set();
+          board.legalSrcs  = new Set();
+          board._drawPieces();
+          board._drawHints();
+          ws.send(JSON.stringify({ type: "guided_move", from: src, to: name }));
+        } else if (gameState.board[name] === aiColor && gameState.legal_sources.includes(name)) {
+          board.selectSource(name);  // re-select a different piece
+        }
+      }
+    }
+    return;
+  }
+
   if (!gameState.is_human_turn) return;
 
   if (phase === "capture") {
-    canMarkBad = false;
-    $("btn-bad-move").hidden = true;
+    canOverride = false;
+    $("btn-override").hidden = true;
     ws.send(JSON.stringify({ type: "capture", position: name }));
     return;
   }
 
   if (gameState.phase === "place") {
     if (gameState.legal_dests.includes(name) && !gameState.board[name]) {
-      canMarkBad = false;
-      $("btn-bad-move").hidden = true;
+      canOverride = false;
+      $("btn-override").hidden = true;
       // Optimistic render: show piece immediately before server confirms.
       board.grid = { ...gameState.board, [name]: gameState.turn };
       board.legalDests = new Set();
@@ -1113,8 +1164,8 @@ function onNodeClick(name) {
     const pairs = board._movePairs || [];
     const valid = pairs.some(([f, t]) => f === src && t === name);
     if (valid) {
-      canMarkBad = false;
-      $("btn-bad-move").hidden = true;
+      canOverride = false;
+      $("btn-override").hidden = true;
       // Optimistic render: move piece to destination immediately.
       const newGrid = { ...gameState.board };
       newGrid[name] = newGrid[src];

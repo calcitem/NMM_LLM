@@ -457,6 +457,7 @@ class Session:
         self._pre_ai_engine_turn: int = 1
         self._last_ai_move: Optional[dict] = None
         self._can_undo_ai: bool = False        # True only right after an AI move
+        self._awaiting_guided_move: bool = False  # True while human is directing AI's move
         self.adaptive: Optional[AdaptiveTracker] = None
         self.is_tournament_game: bool = False
         self._last_game_record: Optional[dict] = None  # stored after game ends for good_game
@@ -1573,45 +1574,17 @@ async def ws_endpoint(websocket: WebSocket):
                 await _commentary(websocket, session)
                 _maybe_start_ai()
 
-            # ── bad_move — mark last AI move as bad, undo it, re-deliberate ───
-            elif kind == "bad_move" and session and session.game_ai:
-                # B: Ignore bad-move reports during opening replay
+            # ── override_ai — undo last AI move; human will direct it manually ─
+            elif kind == "override_ai" and session and session.game_ai:
                 if session.opening_active:
-                    log.warning("bad_move ignored — opening replay is active")
+                    await _send(websocket, {"type": "error", "message": "Cannot override during opening replay"})
                     continue
                 if not session._can_undo_ai or session._last_ai_move is None:
-                    await _send(websocket, {"type": "error", "message": "Nothing to undo"})
+                    await _send(websocket, {"type": "error", "message": "Nothing to override"})
                     continue
                 if ai_thinking:
                     await _send(websocket, {"type": "error", "message": "AI is thinking — wait"})
                     continue
-
-                bad_move_dict  = session._last_ai_move
-                bad_notation   = (
-                    f"{bad_move_dict['from']}-{bad_move_dict['to']}"
-                    if bad_move_dict.get("from")
-                    else bad_move_dict["to"]
-                )
-                if bad_move_dict.get("capture"):
-                    bad_notation += f"x{bad_move_dict['capture']}"
-
-                # Ban the move for this exact board position.
-                # The per-game FEN ban makes the AI pick differently right now;
-                # the trajectory-DB ban persists across games via -1.0 sentinel.
-                _ban_fen = session._pre_ai_board.to_fen_string()
-                session.game_ai.ban_move(bad_notation, _ban_fen)
-                log.info("Bad move banned: %r  at fen=%s", bad_notation, _ban_fen[:24])
-
-                # Persist the ban so future games avoid this move from this sequence.
-                prior_notations = [
-                    m.get("notation", "") for m in (
-                        session.coordinator._game_moves if session.coordinator else []
-                    ) if m.get("notation")
-                ]
-                await asyncio.to_thread(
-                    _trajectory_db.save_bad_move,
-                    _BAD_MOVES_PATH, prior_notations, bad_notation,
-                )
 
                 # ── Restore engine to pre-AI-move state ──────────────────────
                 session.engine.board                 = session._pre_ai_board
@@ -1633,12 +1606,57 @@ async def ws_endpoint(websocket: WebSocket):
                     if session.coordinator.opening_recognizer:
                         session.coordinator.opening_recognizer.reset()
 
-                session._can_undo_ai   = False
-                session._last_ai_move  = None
+                session._can_undo_ai           = False
+                session._last_ai_move          = None
+                session._awaiting_guided_move  = True
 
-                await _send(websocket, {"type": "bad_move_ack", "bad_notation": bad_notation})
+                log.info("override_ai: board restored to pre-AI state; awaiting guided move")
+                await _send(websocket, {"type": "override_ready"})
                 await _send(websocket, _state(session))
-                _maybe_start_ai(force=True)  # force=True so it fires in human vs AI mode too
+
+            # ── guided_move — human directs the AI's move after override ─────
+            elif kind == "guided_move" and session and session._awaiting_guided_move:
+                frm = msg.get("from")   # None for placement
+                to  = msg.get("to")
+                if not to:
+                    await _send(websocket, {"type": "error", "message": "guided_move missing 'to'"})
+                    continue
+
+                board  = session.engine.board
+                legal  = get_all_legal_moves(board)
+                valid  = any(m.get("from") == frm and m["to"] == to for m in legal)
+                if not valid:
+                    await _send(websocket, {"type": "error", "message": f"Illegal guided move to {to}"})
+                    continue
+
+                move = {"from": frm, "to": to, "capture": None}
+
+                # Auto-pick capture if the guided move closes a mill.
+                if session.engine.move_forms_mill(move):
+                    caps = board.legal_captures(board.turn)
+                    move["capture"] = caps[0] if caps else None
+
+                session._awaiting_guided_move = False
+                session.engine.apply_move(move)
+
+                if session.opening_recognizer and not session.coordinator and frm is None:
+                    session.opening_recognizer.update(to, session.engine.board)
+
+                log.info("guided_move applied: from=%s to=%s capture=%s", frm, to, move.get("capture"))
+                await _send(websocket, {
+                    "type":        "ai_move",
+                    "from":        frm,
+                    "to":          to,
+                    "capture":     move.get("capture"),
+                    "was_blunder": False,
+                    "can_mark_bad": False,
+                })
+                await _commentary(websocket, session)
+                await _send(websocket, _state(session))
+
+                if session.engine.finished:
+                    await _game_over(websocket, session)
+                    await _after_game_end()
 
             # ── good_game — elevate a draw to win-like status in trajectory ────
             elif kind == "good_game" and session:
@@ -1971,7 +1989,7 @@ async def ws_endpoint(websocket: WebSocket):
                     human_color="B",
                     vs_human=(continue_mode == "practice"),
                 )
-                # B: mark opening replay active so bad_move reports are ignored
+                # B: mark opening replay active so override_ai requests are ignored
                 new_session.opening_active = True
                 session = new_session  # noqa: F841 — reassign nonlocal
 
