@@ -10,8 +10,14 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 
 | Priority | Item | Key outcome |
 |----------|------|-------------|
+| ★★ | **B-61** | Cycling capture blind spot: close_mill bonus = 0 when mill opens+closes simultaneously ✅ 2026-05-28 |
+| ★★ | **B-62** | own_convergence suppresses cycling mill closure (pivot piece leaves 2-config when mill closes) |
+| ★★ | **B-59** | Sealed 2-config detection in move phase (forced inner-ring mills) |
+| ★★ | **B-60** | Cycling-capture unblock awareness (avoid enabling opponent mill on vacated square) |
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) |
+| ★ | **B-63** | Fly-entry position undervalued: opponent mobility inflated after entering fly phase |
 | ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
+| ★★ | **B-58** | Multiple LLM provider support (Claude, OpenAI, Perplexity, Null) |
 | ★ | **B-51** | Expand retrograde solver beyond 3v3 |
 | ★ | **B-57** | Direct-to-disk binary writing for endgame DB and fullgame DB (mmap; no large in-memory arrays) ✅ 2026-05-28 |
 | ★ | **B-56** | Add D4 board symmetry to endgame database (8x size/speed reduction) ✅ 2026-05-28 |
@@ -331,6 +337,315 @@ Placing at `a4` instead would both block `a4-b4-c4` and create a 2-config approa
 
 ---
 
+### Bug B-59 — AI misses forced inner-ring mills in move phase (sealed 2-config) ⬜ ★★ High Priority
+
+**Symptom:** In the move phase, the AI fails to recognise and pursue a forced mill where both empty closing squares are accessible only to its own pieces (no opponent can reach either square to block). The AI drifts to known-good oscillation or cardinal-node mobility moves instead.
+
+**Motivating game** (White = Scholar, move phase begins after 9 placements each):
+```
+After placement: White on a7,g7,g4,a4,d3,c4,e4,f2,b6 / Black on d7,d6,b4,a1,g1,f6,d2,b2,d5
+10.g4-f4 g1-g4 / 11.d1-g1 d2-d1 / 12.f4-e4 b2-d2
+```
+After move 12, White has **d3, c4, e4** on the board. The inner ring bottom side **e3-d3-c3** is a forced two-move mill:
+- `c3` is adjacent only to `d3` (White) and `c4` (White) — no opponent piece can reach it.
+- `e3` is adjacent only to `e4` (White) and `d3` (White) — no opponent piece can reach it.
+Path A: `c4→c3`, then `e4→e3` (no Black piece can prevent e3). Path B: `e4→e3`, then `c4→c3`.
+White instead plays `f4→e4` (cardinal oscillation), missing the forced mill entirely.
+
+**Root cause (three layered failures):**
+
+1. **Static eval weight too small.** `_WEIGHTS["move"] = (30, 48, 12, 5, 50, 0)` — `two_cfg` weight = **5**. A normal 2-config contributes 5 to static eval; far too small to signal a forced win through deep negamax.
+
+2. **`setup_mill` bonus is root-only and undifferentiated.** `tactical_move_bonus` adds `int(weights.setup_mill * 1.3) * two_cfg_gained` (Scholar: `195`) to the root move score. This cannot propagate sealed mill urgency into the alpha-beta tree, and treats a sealed 2-config the same as an easily-blocked one.
+
+3. **Move ordering ignores sealed 2-configs.** `_order_moves` puts sealed-2-config-creating moves in bucket P2 (history-sorted), behind direct mill closes (P0) and opponent-mill blocks (P1). The sealed threats never surface early enough to guide search efficiently.
+
+**Fix — three coordinated changes:**
+
+**A. `_sealed_two_configs(board, color) -> int` in `ai/heuristics.py`**
+
+A "sealed" 2-config is a 2-config whose empty closing square satisfies:
+1. No opponent piece is adjacent to the closing square (`all(board.positions[nb] != opponent for nb in ADJACENCY[closing_sq])`).
+2. Guard: `_closeable_mills(board, opponent) == 0` — opponent cannot immediately close a mill of its own (which would let it capture the piece sealing the closing square before we act).
+
+```python
+def _sealed_two_configs(board: BoardState, color: str) -> int:
+    opponent = "B" if color == "W" else "W"
+    if _closeable_mills(board, opponent) > 0:
+        return 0   # guard: opponent can punish immediately
+    count = 0
+    for mill in MILLS:
+        own   = sum(1 for p in mill if board.positions[p] == color)
+        empty = [p for p in mill if board.positions[p] == ""]
+        if own == 2 and len(empty) == 1:
+            closing = empty[0]
+            if all(board.positions[nb] != opponent for nb in ADJACENCY[closing]):
+                count += 1
+    return count
+```
+
+**B. Boost sealed threat in static eval**
+
+In `evaluate()`, add a `sealed_two_cfg` term to the move-phase call beside the existing `two_cfg` term:
+
+```python
+sealed_w = _sealed_two_configs(board, "W")
+sealed_b = _sealed_two_configs(board, "B")
+sealed_score = (sealed_w - sealed_b) * SEALED_TWO_CFG_WEIGHT   # target weight: 18–22
+```
+
+`SEALED_TWO_CFG_WEIGHT` should be a constant ~18 (3-4× the regular `two_cfg` weight of 5) so the term propagates clearly through even 2–3 plies of negamax.
+
+**C. Elevate sealed-2-config-creating moves in `_order_moves` in `ai/game_ai.py`**
+
+After the existing P0 (direct mill close or fork) bucket, add a new **P0.5** bucket for moves that create a new sealed 2-config:
+
+```python
+# Compute post-move sealed count for each candidate (lightweight: only call for move-phase)
+if board.phase == "move":
+    sealed_before = _sealed_two_configs(board, color)
+    sealed_creates = {
+        m for m in moves
+        if _sealed_two_configs(board.apply_move({"from": m[0], "to": m[1], "capture": None}), color) > sealed_before
+    }
+else:
+    sealed_creates = set()
+
+# Priority buckets
+p0  = [m for m in moves if m[1] in close or _is_fork(m)]
+p05 = [m for m in moves if m not in p0 and m in sealed_creates]   # NEW
+p1  = [m for m in moves if m not in p0 and m not in p05 and (m[1] in block or _is_squeeze(m))]
+p2  = [m for m in moves if m not in p0 and m not in p05 and m not in p1]
+```
+
+**D. `sealed_setup_bonus` in `tactical_move_bonus`**
+
+Add a large root-level bonus for moves that create a new sealed 2-config:
+
+```python
+sealed_after  = _sealed_two_configs(new_board, color)
+sealed_before = _sealed_two_configs(board, color)
+sealed_gained = max(0, sealed_after - sealed_before)
+sealed_setup_bonus = int(weights.close_mill * 0.75) * sealed_gained   # ~243 for Scholar
+```
+
+This root-only bonus supplements the static eval term. Together they ensure the AI both evaluates sealed positions correctly in the tree and selects them decisively at the root.
+
+**Regression test (required):**
+
+```python
+# After move 12 (f4-e4 played by White, b2-d2 by Black), reconstruct board.
+# White: a7,g7,g4(moved to f4),a4,d3,c4,e4,f2,b6 minus piece at f4 plus at e4...
+# Exact FEN: build from game trace.
+# Assert: AI (White, difficulty ≥ 3) at this position selects c4→c3 or e4→e3, NOT f4→e4 or e4→e5.
+```
+
+**Files:**
+- `ai/heuristics.py` — `_sealed_two_configs()`, `SEALED_TWO_CFG_WEIGHT` constant, `evaluate()` sealed term, `tactical_move_bonus()` sealed_setup_bonus
+- `ai/game_ai.py` — `_order_moves()` P0.5 bucket for sealed-2-config-creating moves
+- `tests/test_heuristics.py` — unit test for `_sealed_two_configs` on the move-12 position
+- `tests/test_game_ai.py` — regression test: move selection asserts c4→c3 or e4→e3
+
+---
+
+### Bug B-60 — Cycling-capture unblock: AI ignores opponent threats enabled by vacating the mill ⬜ ★★ High Priority
+
+**Symptom:** When the AI closes a cycling mill (a mill it intends to oscillate by repeatedly moving the same piece in and out), it selects the highest-value capture by standard heuristics. It does not consider that its *next* oscillation move will vacate a square currently blocking an opponent 2-config, enabling an immediate opponent mill.
+
+**Motivating game** (continuation of the B-59 game, White = Scholar):
+```
+17.e4-e5 b4-b2 / 18.b6-b4xa7 f6-f4 / 19.e5-e4 d5-c5 / 20.a4-a7xg4 a1-a4
+21.g7-g4 d1-a1 / 22.g4-g7xf4 a1-d1 / 23.g7-g4 d6-b6
+```
+At **move 22**, White closes mill `g4-g7-g1` (g4→g7 + capture). White is cycling this mill via g7↔g4. After the capture:
+- White has **a7** on board (from the cycling mill on line 7: `a1-a4-a7`).
+- Black has **a1** and **a4** on board.
+- On White's next oscillation, White will move **g7→g4**, vacating a7. Black immediately closes **a1-a4-a7** — a full mill.
+- White should capture **a1** (removes one leg of Black's pending mill), but instead captures **f4** (a cardinal node, scored higher by `capture_feeder_bonus` / `capture_diamond_bonus`).
+
+**Root cause:**
+
+The capture-selection heuristics in `tactical_move_bonus` are fully reactive — they score the opponent piece being removed, not the opponent threat that will be unblocked next turn. None of the five existing capture bonuses (`capture_feeder_bonus`, `capture_diamond_bonus`, `safe_capture_bonus`, `capture_creates_diamond_bonus`, `capture_activates_feeder_bonus`) model the constraint:
+
+> *"This cycling mill will oscillate. When I vacate the oscillation square next turn, does the un-captured opponent piece complete a mill?"*
+
+**Fix — `_cycling_capture_unblock_penalty` in `tactical_move_bonus`:**
+
+When a move closes a mill on a **cycling-ready** line (i.e., the piece that was just moved can oscillate back next turn — it has an adjacent empty square), evaluate each legal capture against the following check:
+
+```python
+def _cycling_unblock_penalty(board_after_capture: BoardState,
+                              color: str,
+                              cycling_sq: str) -> int:
+    """
+    Score penalty: if the cycling piece at cycling_sq moves away next turn,
+    does the resulting board give the opponent an immediate mill closure?
+    """
+    opponent = "B" if color == "W" else "W"
+    # Simulate vacating the cycling square
+    sim = dict(board_after_capture.positions)
+    sim[cycling_sq] = ""
+    sim_board = board_after_capture  # lightweight: only need positions for mill check
+    # Check every mill containing cycling_sq
+    for mill in MILLS:
+        if cycling_sq not in mill:
+            continue
+        opp_count = sum(1 for p in mill if (sim[p] == opponent or (p == cycling_sq and sim[p] == "")))
+        # Recount with cycling_sq empty
+        opp_in_mill = sum(1 for p in mill if p != cycling_sq and board_after_capture.positions[p] == opponent)
+        empty_in_mill = sum(1 for p in mill if p != cycling_sq and board_after_capture.positions[p] == "")
+        if opp_in_mill == 2 and empty_in_mill == 0:
+            # cycling_sq is the only non-opponent square; vacating it hands opponent a mill
+            return weights.cycling_mill   # recycle the personality's cycling weight as a penalty scale
+    return 0
+```
+
+For each candidate capture `cap`, compute `_cycling_unblock_penalty(board_after_cap, color, cycling_sq)` and subtract it from the move score. This makes capturing the piece that contributes to the blocked mill worth more than capturing a high-value but irrelevant piece.
+
+**New personality weight:** `cycling_capture_unblock` (default 180). Subtract this from any capture that leaves an opponent 2-config with a closing square that is the next vacated square.
+
+**`cycling_capture_unblock` in `data/personalities/*.json`:** add to all personality files with value 180 (tunable).
+
+**Regression test (required):**
+
+```python
+# Reconstruct board at move 22 (White to move, g4→g7 closes cycling mill).
+# White pieces: a7, g1, g4, e4, c4, d3, a4, b4, b6
+# Black pieces: a1, a4(moved from), d1, c5, f4, b2, d6, d2 — adjust from exact trace
+# Assert: after White plays g4→g7 (closing cycling mill on g-column),
+#   the AI selects capture a1 (not f4 or other cardinal node).
+```
+
+**Files:**
+- `ai/heuristics.py` — `_cycling_unblock_penalty()` helper, `tactical_move_bonus()` apply penalty per candidate capture
+- `ai/game_ai.py` — no structural change needed (penalty applied inside existing capture loop)
+- `game/rules.py` or `ai/heuristics.py` — `_is_cycling_ready(board, sq) -> bool` helper (piece at sq has ≥1 adjacent empty square)
+- `data/personalities/aggressive.json`, `balanced.json`, `defensive.json`, `positional.json`, `scholar.json`, `custom.json` — add `cycling_capture_unblock: 180`
+- `tests/test_heuristics.py` — unit test for penalty function on the move-22 board
+- `tests/test_game_ai.py` — regression test: assert capture = a1 at move 22
+
+---
+
+### Bug B-61 — Cycling capture receives zero close_mill bonus (gross vs net mill delta) ⬜ ★★ High Priority
+
+**Symptom:** During the move phase, the AI refuses to execute winning cycling-mill captures. When a move simultaneously opens one closed mill and closes another (the cycling pattern), `tactical_move_bonus()` computes `mills_delta = max(0, _closed_mills(after) - _closed_mills(before)) = 0` because the net change is zero. The move receives no `close_mill_contribution` bonus (~500 pts) despite enabling a capture. The resulting ~400-point scoring gap causes the AI to prefer idle positional shuffles indefinitely.
+
+**Motivating example (game — turn 17):**
+
+Position: White {a7, d6, f2, a4, d1, b6, a1, d5} (8 pieces, closed mill: a7-a4-a1)  
+Black: {b4, g1, d2, b2} (4 pieces, no 2-configs)
+
+Correct move `a7→d7 xb4`:
+- Opens `a7-a4-a1` (a7 leaves) and closes `d5-d6-d7` (a7 arrives at d7)
+- `_closed_mills(before) = 1`, `_closed_mills(after) = 1` → `mills_delta = max(0, 0) = 0` → **no close_mill bonus**
+- Black drops to 3 pieces and enters fly phase — a near-winning position for White
+
+White instead repeats `f2↔f4` indefinitely; the game never finishes.
+
+**Root cause — line 1855 of `ai/heuristics.py`:**
+
+```python
+mills_delta = max(0, _closed_mills(after) - _closed_mills(before))   # net delta
+```
+
+A cycling move scores net 0 regardless of the capture it enables.
+
+**Fix — compute gross newly-closed mills:**
+
+```python
+before_closed_set = {
+    tuple(sorted(m)) for m in MILLS
+    if all(board.positions[p] == color for p in m)
+}
+after_closed_set = {
+    tuple(sorted(m)) for m in MILLS
+    if all(new_board.positions[p] == color for p in m)
+}
+mills_delta = len(after_closed_set - before_closed_set)   # replaces net-delta line
+```
+
+This mirrors the existing `mill_opened` variable (line 1924) which already counts gross opened mills; the symmetry makes the fix self-consistent.
+
+**Secondary fix — `_mill_threats()` phantom 2-config overcount:**
+
+`f2→f4` is also inflated by `herding_coverage` (+40) because f4 is adjacent to f2, which `_mill_threats()` counts as the closing square for Black's "2-config" f2-d2-b2. This 2-config is a phantom: moving d2→f2 leaves d2 empty while b2 is already in the line — the mill still cannot close. Fix in `_mill_threats()` (line ~464): when testing if any friendly piece is adjacent to a closing square, exclude pieces that are already inside the same mill being counted. This prevents `_closed_mills(before) - _closed_mills(after)` from going wrong — but more directly, it prevents `herding_coverage` from rewarding adjacency to impossible-to-close mills.
+
+**Files:**
+- `ai/heuristics.py` — `tactical_move_bonus()`: replace net `mills_delta` with gross `mills_delta = len(after_closed_set - before_closed_set)`; `_mill_threats()`: exclude pieces already in the same counted mill from the adjacency check
+
+**Tests:**
+- Unit test: construct the turn-17 board; assert `tactical_move_bonus(board, "W", move_a7_d7_xb4)` ≥ 450 (close_mill_contribution fires)
+- Regression: AI (White, any difficulty) at the turn-17 position selects `a7→d7`, not `f2→f4`
+
+---
+
+### Bug B-62 — `own_convergence` suppresses execution of cycling mills that share a pivot ⬜ ★★ High Priority
+
+**Symptom:** When White's two active 2-configs share a pivot piece (e.g., d6 is pivot for both `b6-d6-f6` and `d5-d6-d7`), the `own_convergence` bonus (+250) rewards White for keeping d6 as a convergence pivot. When White cycles a mill and a piece lands at d7 (closing `d5-d6-d7`), the 2-config becomes a closed mill — d6 is no longer a 2-config pivot. The convergence bonus drops from +250 to 0. This ~250-point static-eval loss partially offsets the close_mill bonus restored by B-61, and can still tip the scale against the cycling capture in some positions.
+
+**Root cause:**
+
+`evaluate()` computes `own_convergence` as a static term counting 2-config pairs sharing a pivot or closing square. After a 2-config closes into a mill (even when closing creates a capture), the convergence term drops. The evaluator treats a mill closure as a structural loss.
+
+**Fix — neutralize the convergence loss when a mill was just closed:**
+
+In `tactical_move_bonus()`, after the gross `mills_gross_closed` computation from B-61, add a restoration term:
+
+```python
+if mills_gross_closed > 0:
+    # Closing a mill is structurally good. Counteract the static-eval drop
+    # in own_convergence that fires when the closed 2-config loses its pivot status.
+    score += weights.own_convergence * mills_gross_closed
+```
+
+This is applied once per newly-closed mill, matching the scale of the convergence bonus that was suppressed. It does not affect moves where no mill was closed.
+
+**Note:** Implement B-61 first and re-test. B-62 is only needed if a scoring gap > 150 pts persists after B-61. The gap at turn 17 is approximately -250 from own_convergence on top of the -408 from the net-delta bug; after B-61 restores ~500 pts, the residual gap is ~250-408+500 ≈ +92 in favour of the correct move — meaning B-62 may be unnecessary. Verify empirically before implementing.
+
+**Files:**
+- `ai/heuristics.py` — `tactical_move_bonus()`: add `own_convergence * mills_gross_closed` restoration when `mills_gross_closed > 0`
+
+**Tests:**
+- Unit test: own_convergence restoration fires correctly when move closes a mill that shared a pivot in a convergence pair
+- Regression: turn-17 move selection is correct after B-61; add B-62 only if gap persists
+
+---
+
+### Bug B-63 — Fly-entry position undervalued: opponent mobility over-counted on entering fly phase ⬜ ★ Medium Priority
+
+**Symptom:** Immediately after White captures an opponent piece that drops Black to 3 pieces (fly phase), `_mobility(B)` returns the number of empty squares on the board (~13–15). This makes Black appear highly mobile. In `evaluate()`, the `(own_mob - opp_mob) × 8` term becomes strongly negative (`8 × (4 - 13) = -72`), penalising the position White just achieved. The AI systematically undervalues captures that send the opponent into fly phase — the very captures that are winning.
+
+**Root cause — `_mobility()` line ~451 of `ai/heuristics.py`:**
+
+```python
+if board.pieces_on_board[color] <= 3:
+    return len([p for p in POSITIONS if board.positions[p] == ""])
+```
+
+Fly phase mobility = empty squares ≈ 13–15. Normal move-phase mobility ≈ 3–6. The differential swings by ~70 points in the wrong direction on the ply where White makes its best move.
+
+**Fix — cap fly-phase mobility in the mobility differential:**
+
+```python
+if board.pieces_on_board[color] <= 3:
+    return 5   # constant cap; fly pieces can jump anywhere, so raw mobility is misleading
+```
+
+A constant of 5 (matching typical move-phase values) prevents fly-entry from appearing worse than the position before capture. An alternative is to use a separate `fly_mob_weight` field in `HeuristicWeights` (initially 0) and multiply the fly mobility by that instead of `mob_weight`, suppressing the fly mobility contribution entirely.
+
+The simple cap is preferred: fewer fields, same effect, easier to reason about.
+
+**Impact:** Prevents the ~50–80 point penalty that discourages capturing moves that send the opponent into fly. After B-61 and B-62, this is unlikely to be the deciding factor — but it causes systematic mis-scoring of whole game sub-trees whenever the fly transition is in the search horizon.
+
+**Files:**
+- `ai/heuristics.py` — `_mobility()`: return a capped constant (5) for fly-phase pieces instead of empty-square count
+
+**Tests:**
+- Unit test: `_mobility(board, "B")` returns ≤ 5 when Black has 3 pieces, regardless of board fill
+- Regression: AI (White) at a position one ply before sending Black into fly correctly prefers the capturing move
+
+---
+
 ### Note — GUI slider set is missing evolved heuristic weights
 
 **Symptom:** `tools/evolve_weights.py` tunes more heuristic fields than the web slider panel exposes. `HeuristicWeights` has 36 fields; the GUI exposes ~22.
@@ -516,6 +831,129 @@ finally:
 - `ai/fullgame_db.py` — binary reader already in place (B-52); no change ✅
 
 **Prerequisite B-57 → B-51 satisfied.** B-51 (expand retrograde solver beyond 3v3) can now proceed.
+
+---
+
+---
+
+## Enhancement B-58 — Multiple LLM Provider Support ⬜ ★★
+
+**Goal:** Replace the Ollama-only LLM integration with a pluggable provider abstraction. Allow the user to choose between Ollama (local), Claude (Anthropic), ChatGPT (OpenAI), Perplexity, or no LLM at all — without changing any game logic.
+
+---
+
+### Design constraints
+
+- API keys **never** go in `data/settings.json` (git-tracked). Use env vars only: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`.
+- Embedding provider is **separate** from the chat provider. Default: ChromaDB `DefaultEmbeddingFunction` (local, no key required). `ollama_embed_model` setting (B-53) remains available if user wants Ollama embeddings.
+- No streaming for v1 — all calls are blocking `chat(system, messages) -> str`.
+- On any error, return `""` (empty string) — matches current `_chat()` behaviour.
+- Graceful fallback: if a selected provider's package is not installed, log a warning and fall back to Null provider rather than crashing.
+
+---
+
+### New module: `ai/llm_provider.py`
+
+```python
+class BaseLLMProvider(ABC):
+    @abstractmethod
+    def chat(self, system: str, messages: list[dict]) -> str: ...
+    def available(self) -> bool: return True
+
+class OllamaProvider(BaseLLMProvider):     # existing behaviour, wraps requests
+class ClaudeProvider(BaseLLMProvider):     # anthropic SDK >= 0.20
+class OpenAIProvider(BaseLLMProvider):     # openai SDK >= 1.0
+class PerplexityProvider(BaseLLMProvider): # openai-compatible base URL
+class NullProvider(BaseLLMProvider):       # always returns ""
+
+def make_provider(settings: dict) -> BaseLLMProvider:
+    """Factory — reads settings['llm_provider'] and env vars."""
+```
+
+`messages` format matches the OpenAI schema: `[{"role": "user"/"assistant", "content": "..."}]`.
+
+`OllamaProvider` translates this internally to the Ollama `/api/chat` format (already what `MillsLLM._chat` does).
+
+---
+
+### Provider defaults
+
+| Provider | Default model setting key | Default model |
+|----------|--------------------------|---------------|
+| `ollama` | `ollama_model` | *(existing setting)* |
+| `claude` | `claude_model` | `claude-sonnet-4-6` |
+| `openai` | `openai_model` | `gpt-4o-mini` |
+| `perplexity` | `perplexity_model` | `sonar` |
+| `null` | — | — |
+
+---
+
+### `data/settings.json` additions
+
+```json
+"llm_provider": "ollama",
+"claude_model": "claude-sonnet-4-6",
+"openai_model": "gpt-4o-mini",
+"perplexity_model": "sonar",
+"embed_provider": "default"
+```
+
+`embed_provider` values: `"default"` (ChromaDB `DefaultEmbeddingFunction`), `"ollama"` (uses `ollama_embed_model`).
+
+---
+
+### Changes to existing files
+
+**`ai/mills_llm.py`**
+- `__init__` replaces `(url, model)` params with `(provider: BaseLLMProvider)`.
+- Remove `_chat()` helper (logic moves to `OllamaProvider.chat()`).
+- `get_move_commentary()` / `get_strategy_commentary()` call `self._provider.chat(system, messages)`.
+
+**`ai/memory_manager.py`**
+- Accept `embed_provider: str` param (default `"default"`).
+- If `embed_provider == "ollama"`, use `OllamaEmbeddingFunction(model=ollama_embed_model)`.
+- Otherwise use `DefaultEmbeddingFunction()`.
+
+**`web/app.py`**
+- Call `make_provider(settings)` once at startup.
+- Pass `provider` to `MillsLLM(provider)` and `embed_provider` to `MemoryManager`.
+
+**`requirements.txt`**
+- Add optional deps with comments:
+  ```
+  # Optional: anthropic>=0.20   # for Claude provider
+  # Optional: openai>=1.0       # for OpenAI / Perplexity provider
+  ```
+
+---
+
+### Settings UI additions
+
+In the Settings panel:
+
+| Control | Type | Notes |
+|---------|------|-------|
+| LLM Provider | Dropdown | `ollama / claude / openai / perplexity / none` |
+| Model | Text input | Shows the active model setting for the chosen provider |
+| API key status | Read-only badge | `✓ key found` (green) or `✗ key missing` (amber) — reads from `/api/provider_status` |
+| Embed provider | Dropdown | `default (local) / ollama` |
+
+New endpoint: `GET /api/provider_status` → `{ "provider": "claude", "model": "claude-sonnet-4-6", "key_present": true, "embed_provider": "default" }`.
+
+When `key_present` is false, the badge is amber with text "Set `ANTHROPIC_API_KEY` env var". Commentary is silently disabled (Null fallback) — the game still works.
+
+---
+
+### Files
+
+- `ai/llm_provider.py` — new; `BaseLLMProvider`, five concrete classes, `make_provider()`
+- `ai/mills_llm.py` — constructor change + remove `_chat()` helper
+- `ai/memory_manager.py` — `embed_provider` param
+- `web/app.py` — factory call, new `/api/provider_status` endpoint
+- `data/settings.json` — four new keys
+- `web/templates/index.html` — provider dropdown, model field, key-status badge, embed dropdown
+- `web/static/game.js` — load/save provider settings; call `/api/provider_status` on settings open
+- `requirements.txt` — optional dep comments
 
 ---
 

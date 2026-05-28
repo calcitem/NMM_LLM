@@ -482,7 +482,14 @@ def _mill_threats(board: BoardState, color: str) -> int:
             elif phase == "fly":
                 reachable = True
             else:
-                reachable = any(board.positions[nb] == color for nb in ADJACENCY[empty])
+                # Exclude pieces already inside this mill: they cannot slide to
+                # the closing square without dismantling the 2-config itself.
+                mill_set = set(mill)
+                reachable = any(
+                    board.positions[nb] == color
+                    for nb in ADJACENCY[empty]
+                    if nb not in mill_set
+                )
             if reachable:
                 count += 1
     return count
@@ -1851,8 +1858,16 @@ def tactical_move_bonus(
         else weights.fork_anticipation
     )
 
-    # Mills closed this move
-    mills_delta = max(0, _closed_mills(after, color) - _closed_mills(before, color))
+    # Mills closed this move — use gross newly-closed count, not net delta.
+    # A cycling move (opens mill A, closes mill B) has net delta = 0 but still
+    # closes a mill and enables a capture; the net-delta formula zeroed the bonus.
+    _before_closed_set = frozenset(
+        tuple(sorted(m)) for m in MILLS if all(before.positions[p] == color for p in m)
+    )
+    _after_closed_set = frozenset(
+        tuple(sorted(m)) for m in MILLS if all(after.positions[p] == color for p in m)
+    )
+    mills_delta = len(_after_closed_set - _before_closed_set)
 
     # Cycling mill setup gained (own) or disrupted for opponent this move.
     # Capped at 1: a move either creates/destroys a cycling opportunity or it doesn't.
