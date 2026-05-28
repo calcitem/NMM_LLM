@@ -11,7 +11,7 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 | Priority | Item | Key outcome |
 |----------|------|-------------|
 | ★★ | **B-61** | Cycling capture blind spot: close_mill bonus = 0 when mill opens+closes simultaneously ✅ 2026-05-28 |
-| ★★ | **B-62** | own_convergence suppresses cycling mill closure (pivot piece leaves 2-config when mill closes) |
+| ★★ | **B-62** | own_convergence suppresses cycling mill closure (pivot piece leaves 2-config when mill closes) ✅ 2026-05-28 |
 | ★★ | **B-59** | Sealed 2-config detection in move phase (forced inner-ring mills) |
 | ★★ | **B-60** | Cycling-capture unblock awareness (avoid enabling opponent mill on vacated square) |
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) |

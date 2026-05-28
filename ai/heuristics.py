@@ -2074,6 +2074,11 @@ def tactical_move_bonus(
     if _is_placement and placement_index == 8 and mills_delta > 0:
         close_mill_contribution = int(close_mill_contribution * 1.5)
 
+    # B-62: when a mill closes, the static eval loses own_convergence for the
+    # pivot piece that was shared between two 2-configs.  Restore that drop so
+    # closing a mill is never double-penalised for losing convergence structure.
+    convergence_restoration = weights.own_convergence * mills_delta if mills_delta > 0 else 0
+
     # Outer-ring mill penalty during early placement (pieces 1–6).
     # Each outer-ring side mill (a7-d7-g7, g7-g4-g1, g1-d1-a1, a1-a4-a7)
     # contains two corner squares with only 2 connections each.  Completing
@@ -2549,6 +2554,7 @@ def tactical_move_bonus(
 
     _contributions = [
         ("Closed mill",                    close_mill_contribution),
+        ("Convergence restoration (B-62)", convergence_restoration),
         ("Cycling mill setup",             weights.cycling_mill * (cycling_gain + opp_cycle_lost)),
         ("Own cycle lost (B-40)",          -weights.cycling_mill * self_cycle_lost),
         ("Cycling close",                  cycling_close_bonus),
