@@ -375,11 +375,16 @@ def evaluate(
     # B-15 structural mill quality:
     # — penalise own closed mills where the opponent can block all exit squares (trapped mills).
     # — reward own 2-configs whose closing square is not adjacent to any opponent piece (free threats).
+    # B-59: sealed 2-configs (opponent cannot contest AND has no immediate mill) get a
+    # stronger bonus so forced mills propagate through even 2–3 plies of negamax.
     if phase == "move":
         w_trap = weights.trapped_mill if weights else DEFAULT_WEIGHTS.trapped_mill
         w_pot  = weights.potential_mill if weights else DEFAULT_WEIGHTS.potential_mill
         base -= w_trap * _trapped_mill_count(board, color)
         base += w_pot * (_free_two_config_count(board, color) - _free_two_config_count(board, opp))
+        base += _SEALED_TWO_CFG_WEIGHT * (
+            _sealed_two_configs(board, color) - _sealed_two_configs(board, opp)
+        )
 
     # B-36: Unguarded cardinal mill alert — placement phase only.
     # Penalise positions where the opponent has 2 pieces in a cardinal mill (containing
@@ -673,6 +678,35 @@ def _free_two_config_count(board: BoardState, color: str) -> int:
             if not any(board.positions[nb] == opp for nb in ADJACENCY[closing_sq]):
                 count += 1
     return count
+
+
+def _sealed_two_configs(board: BoardState, color: str) -> int:
+    """Count own 2-configs that the opponent cannot contest in time.
+
+    A 2-config is "sealed" when:
+    1. No opponent piece is adjacent to the closing square (opponent cannot
+       block in one move regardless of what else is happening).
+    2. Guard: the opponent has no immediate mill of their own available
+       (if the opponent can close a mill this turn they can capture a sealing
+       piece, which breaks the seal).
+
+    Covers all 16 MILLS across all rings and cross-lines — not just inner ring.
+    """
+    opp = "B" if color == "W" else "W"
+    if _closeable_mills(board, opp) > 0:
+        return 0   # guard: opponent can punish / break the seal immediately
+    count = 0
+    for mill in MILLS:
+        own_count   = sum(1 for p in mill if board.positions[p] == color)
+        empty_sqs   = [p for p in mill if board.positions[p] == ""]
+        if own_count == 2 and len(empty_sqs) == 1:
+            closing = empty_sqs[0]
+            if all(board.positions[nb] != opp for nb in ADJACENCY[closing]):
+                count += 1
+    return count
+
+
+_SEALED_TWO_CFG_WEIGHT = 20  # ~4× the regular two_cfg weight (5); propagates through negamax
 
 
 def _open_mill_domination(board: BoardState, color: str) -> int:
@@ -1925,6 +1959,14 @@ def tactical_move_bonus(
         # concrete mill threat, not just a structural seed.
         setup_mill_bonus = int(weights.setup_mill * 1.3) * two_cfg_gained
 
+    # B-59: root-level bonus for moves that create a new sealed 2-config.
+    # Supplements the static eval term so the AI selects sealed-threat-creating
+    # moves decisively at the root.  Only fires in move phase; covers all MILLS.
+    sealed_setup_bonus = 0
+    if before_phase == "move":
+        sealed_gained = max(0, _sealed_two_configs(after, color) - _sealed_two_configs(before, color))
+        sealed_setup_bonus = int(weights.close_mill * 0.75) * sealed_gained
+
     # B-39: penalise creating a (own, own, opp) dead-mill pattern.
     # Two own pieces in a mill already blocked by an opponent piece can never close
     # — moving or placing into such a pattern wastes structural potential.
@@ -2571,6 +2613,7 @@ def tactical_move_bonus(
         ("Cardinal/cross control",         _cardinal_w * (our_cross_gained + opp_cross_lost)),
         ("Early scatter placement",        scatter),
         ("Setup mill (2-config gained)",   setup_mill_bonus),
+        ("Sealed 2-config bonus (B-59)",   sealed_setup_bonus),
         ("Mill opening bonus",             mill_open_bonus),
         ("Patience forcing",               patience_forcing_bonus),
         ("Late placement mill",            late_mill_bonus),

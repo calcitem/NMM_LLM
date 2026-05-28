@@ -12,7 +12,7 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 |----------|------|-------------|
 | ★★ | **B-61** | Cycling capture blind spot: close_mill bonus = 0 when mill opens+closes simultaneously ✅ 2026-05-28 |
 | ★★ | **B-62** | own_convergence suppresses cycling mill closure (pivot piece leaves 2-config when mill closes) ✅ 2026-05-28 |
-| ★★ | **B-59** | Sealed 2-config detection in move phase (forced inner-ring mills) |
+| ★★ | **B-59** | Sealed 2-config detection in move phase (forced mills, all rings) ✅ 2026-05-28 |
 | ★★ | **B-60** | Cycling-capture unblock awareness (avoid enabling opponent mill on vacated square) |
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) |
 | ★ | **B-63** | Fly-entry position undervalued: opponent mobility inflated after entering fly phase ✅ 2026-05-28 |
@@ -337,7 +337,7 @@ Placing at `a4` instead would both block `a4-b4-c4` and create a 2-config approa
 
 ---
 
-### Bug B-59 — AI misses forced inner-ring mills in move phase (sealed 2-config) ⬜ ★★ High Priority
+### Bug B-59 — AI misses forced mills in move phase (sealed 2-config) ✅ 2026-05-28 ★★
 
 **Symptom:** In the move phase, the AI fails to recognise and pursue a forced mill where both empty closing squares are accessible only to its own pieces (no opponent can reach either square to block). The AI drifts to known-good oscillation or cardinal-node mobility moves instead.
 

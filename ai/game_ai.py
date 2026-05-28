@@ -21,7 +21,7 @@ class _SearchAbort(Exception):
 
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_all_legal_moves, is_terminal
-from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus
+from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs
 from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
@@ -173,11 +173,26 @@ def _order_moves(board: BoardState, moves: list, killers=None, history=None) -> 
     if not close and not block and not killer_set and not history:
         return moves  # nothing to prioritize — skip the pass
 
-    p0, p1, pk, p2 = [], [], [], []
+    # B-59: P0.5 — moves that create a new sealed 2-config (uncontestable forced mill).
+    # Only computed in move phase when there are no direct mill closes (P0) — those
+    # dominate regardless, and the extra apply_move calls would be wasted.
+    # Covers all 16 MILLS (not just inner ring): any sealed pattern is elevated.
+    sealed_creates: set = set()  # stores (from, to) tuples
+    if get_game_phase(board, color) == "move" and not close:
+        sealed_before = _sealed_two_configs(board, color)
+        if sealed_before < len(MILLS):  # skip if already at max — nothing to gain
+            for m in moves:
+                nb = board.apply_move(m)
+                if _sealed_two_configs(nb, color) > sealed_before:
+                    sealed_creates.add((m.get("from"), m["to"]))
+
+    p0, p05, p1, pk, p2 = [], [], [], [], []
     for m in moves:
         t = m["to"]
         if t in close:
             p0.append(m)
+        elif (m.get("from"), t) in sealed_creates:
+            p05.append(m)
         elif t in block:
             p1.append(m)
         elif (m.get("from"), t) in killer_set:
@@ -186,7 +201,7 @@ def _order_moves(board: BoardState, moves: list, killers=None, history=None) -> 
             p2.append(m)
     if history and p2:
         p2.sort(key=lambda m: history.get((m.get("from"), m["to"]), 0), reverse=True)
-    return p0 + p1 + pk + p2
+    return p0 + p05 + p1 + pk + p2
 
 # Fixed-depth table for quick levels (1–4): search completes fast so no time cap needed.
 _DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5}
