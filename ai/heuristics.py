@@ -79,6 +79,9 @@ class HeuristicWeights:
     disrupted_two_config: int = 200  # penalty for creating a (own,own,opp) blocked mill pattern
     # ── B-60: Cycling-capture unblock ────────────────────────────────────────
     cycling_capture_unblock: int = 180  # penalty when capture leaves own piece blocking opp pending mill
+    # ── B-64: Dead/near-dead placement penalty ───────────────────────────────
+    dead_placement_penalty: int = 600   # penalty for placing a piece with 0 free adjacent squares
+    near_dead_placement_penalty: int = 150  # penalty for 1 free adjacent square (scales with placement index)
     # ── B-40: Self-cycle-lost penalty ────────────────────────────────────────
     # Uses cycling_mill weight — no separate field needed (mirrors cycling_gain).
     # ── B-33: Forcing placement quality ──────────────────────────────────────
@@ -2271,6 +2274,27 @@ def tactical_move_bonus(
                         ring_crowd_penalty = weights.ring_crowding_penalty
                     break
 
+    # B-64: Dead/near-dead placement penalty.
+    # A piece placed with 0 free adjacent squares is permanently immobile from birth.
+    # A piece with 1 free neighbour is nearly so and easily trapped next turn.
+    # Both are strategically harmful independent of short-term mill bonuses.
+    # Guard: skip when mills_delta > 0 (the piece has value as a mill member
+    # regardless of local mobility; the mill itself creates exit opportunities).
+    placement_mobility_penalty = 0
+    if _is_placement and mills_delta == 0:
+        _placed_sq_b64 = next(
+            (p for p in POSITIONS if after.positions[p] == color and before.positions[p] != color),
+            None,
+        )
+        if _placed_sq_b64 is not None:
+            free_nb = sum(1 for nb in ADJACENCY[_placed_sq_b64] if after.positions[nb] == "")
+            if free_nb == 0:
+                placement_mobility_penalty = weights.dead_placement_penalty
+            elif free_nb == 1:
+                placement_mobility_penalty = int(
+                    weights.near_dead_placement_penalty * (placement_index / 8)
+                )
+
     # Placement busy-opponent chain scan.
     # Rewards forcing sequences where every placement compels an opp response
     # while building toward a mill. Skipped if the current move already closes a
@@ -2721,6 +2745,7 @@ def tactical_move_bonus(
         ("Consolidation penalty (B-10)",   -consolidation_penalty_val),
         ("Opp chain non-disrupt (B-37)",   -opp_chain_nondisrupt_penalty),
         ("Disrupted 2-config (B-39)",      -disrupted_two_config_penalty),
+        ("Dead/near-dead placement (B-64)", -placement_mobility_penalty),
     ]
     _total = sum(v for _, v in _contributions)
 

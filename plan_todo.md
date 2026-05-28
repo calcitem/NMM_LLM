@@ -16,6 +16,7 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 | ★★ | **B-60** | Cycling-capture unblock awareness (avoid enabling opponent mill on vacated square) ✅ 2026-05-28 |
 | ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) ✅ 2026-05-28 |
 | ★ | **B-63** | Fly-entry position undervalued: opponent mobility inflated after entering fly phase ✅ 2026-05-28 |
+| ★★ | **B-64** | Dead/near-dead placement penalty: pieces placed with 0 or 1 free adjacent squares are strategically trapped ✅ 2026-05-28 |
 | ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | ★★ | **B-58** | Multiple LLM provider support (Claude, OpenAI, Perplexity, Null) |
 | ★ | **B-51** | Expand retrograde solver beyond 3v3 |
@@ -104,6 +105,28 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 **Files:**
 - `ai/coordinator.py` — load `phase_strategy.md` once at init; add `_get_phase_context(board)` helper
 - `ai/mills_llm.py` — accept optional `phase_context: str` parameter and prepend to system prompt
+
+---
+
+### Bug B-64 — AI places pieces with 0 or 1 free neighbours (dead/near-dead placement) ✅ 2026-05-28
+
+**Symptom:** White AI (balanced personality) places at b2 (1 free neighbour) on turn 6 and d1 (0 free neighbours) on turn 8, yielding a piece permanently trapped from birth. No penalty exists for creating a piece with no future movement options, so the tactical score prefers positionally strong but mobility-dead squares.
+
+**Root cause:** `tactical_move_bonus()` has no term that penalises placing a piece onto a square where it will have zero or near-zero free adjacent squares after placement. `_NEAR_BLOCKED_WEIGHTS["place"] = 0` means the static evaluator also ignores this.
+
+**Fix:**
+- Add `dead_placement_penalty: int = 600` and `near_dead_placement_penalty: int = 150` to `HeuristicWeights`.
+- In `tactical_move_bonus()`, when `_is_placement and mills_delta == 0`, find the placed square, count `free_nb = sum(1 for nb in ADJACENCY[sq] if after.positions[nb] == "")`. Apply:
+  - `free_nb == 0` → penalty = `dead_placement_penalty` (piece is permanently immobile)
+  - `free_nb == 1` → penalty = `near_dead_placement_penalty * (placement_index / 8)` (scales with how far into placement we are — early game has fewer pieces and more mobility options later)
+- Skip penalty when `mills_delta > 0` (piece is in a just-closed mill — it has value regardless of mobility).
+- Add entry `("Dead/near-dead placement (B-64)", -placement_mobility_penalty)` to `_contributions`.
+- Update all personality JSONs to include new fields.
+
+**Files:**
+- `ai/heuristics.py` — `HeuristicWeights`, `tactical_move_bonus()`
+- `data/personalities/*.json` — add `dead_placement_penalty`, `near_dead_placement_penalty`
+- `tests/test_tactics.py` — regression: at placement 8, d5 scores higher than d1; at placement 6, d2 scores higher than b2
 
 ---
 

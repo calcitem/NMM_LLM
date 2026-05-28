@@ -21,5 +21,7 @@
   "make_mistakes": 0,
   "opening_adherence": 70,
   "loss_exploit": 210,
-  "cycling_capture_unblock": 180
+  "cycling_capture_unblock": 180,
+  "dead_placement_penalty": 600,
+  "near_dead_placement_penalty": 150
 }
