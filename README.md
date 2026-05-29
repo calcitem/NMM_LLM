@@ -1,6 +1,6 @@
 # Nine Men's Morris — AI-Powered Web Game
 
-A browser-based Nine Men's Morris game with a classical minimax engine, an Ollama-powered LLM commentary system, a curated opening book, trajectory-based and endgame position learning, a fully tunable AI personality system, adaptive difficulty, and a 6-opponent Tournament Mode with Elo tracking.
+A browser-based Nine Men's Morris game with a classical minimax engine, an Ollama-powered LLM commentary system, a curated opening book, trajectory-based and endgame position learning, a fully tunable AI personality system, adaptive difficulty, and a 6-opponent Tournament Mode with Elo tracking. An optional self-learning neural AI (PyTorch, self-play RL) is available as a drop-in alternative engine — see [Learned (Neural) AI](#learned-neural-ai).
 
 ![board](https://img.shields.io/badge/game-Nine%20Men's%20Morris-c8a96e?style=flat-square) ![python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square) ![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
@@ -730,6 +730,52 @@ Trains a small MLP (79 inputs → 128 → 64 → 1 output) on completed game rec
 
 
 Recommended: accumulate at least 200 self-play games before training for useful signal.
+
+
+## Learned (Neural) AI
+
+In addition to the classical minimax engine, the repo ships an **opt-in** neural
+AI under `learned_ai/` — a PyTorch policy/value network trained by self-play
+reinforcement learning. It plugs into the game through the same
+`choose_move(board)` contract as the heuristic engine, so it is a drop-in
+replacement selectable by an environment variable. The default run path is
+unchanged and needs no PyTorch.
+
+```
+# Default: heuristic engine (unchanged behaviour)
+python main.py
+
+# Use the trained neural engine instead
+NMM_AI_ENGINE=learned python main.py
+```
+
+If `NMM_AI_ENGINE=learned` but the checkpoint is missing or PyTorch is not
+installed, the game prints a warning and falls back to the heuristic engine so
+play is never blocked.
+
+Install the extra dependencies only if you want to train or run it:
+
+```
+pip install -r requirements_learned_ai.txt
+```
+
+Documentation:
+
+- [`docs/LEARNED_AI_ARCHITECTURE.md`](docs/LEARNED_AI_ARCHITECTURE.md) — state/action
+  encoding, the shared-backbone + 5-phase-head network, training algorithm.
+- [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — install, smoke-test, train,
+  monitor, resume, evaluate, and play against the learned AI.
+- [`docs/MIGRATION_GUIDE.md`](docs/MIGRATION_GUIDE.md) — switching engines, A/B
+  testing, and instant rollback.
+- [`docs/AI_INTERFACE_MAPPING.md`](docs/AI_INTERFACE_MAPPING.md) — the exact engine
+  interface the learned AI implements.
+
+Quick smoke check (no useful model, just proves the pipeline runs):
+
+```
+python scripts/smoke_test.py
+python scripts/train.py --config learned_ai/config/smoke_test_config.yaml
+```
 
 
 ## Board Coordinate System
