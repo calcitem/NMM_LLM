@@ -17,11 +17,18 @@ from ai.game_ai import GameAI
 from ai.mills_llm import MillsLLM
 from ai.memory_manager import MemoryManager
 from ai.opening_book import Opening
-from ai.opening_recognizer import OpeningRecognizer, RecognitionResult, INACTIVE_RESULT
+from ai.opening_recognizer import OpeningRecognizer, INACTIVE_RESULT
 from ai.endgame_recognizer import EndgameRecognizer, INACTIVE_ENDGAME
 from ai.trajectory_db import TrajectoryDB
 from ai.endgame_db import EndgameDB
 from ai.board_symmetry import transform_notation as _transform_book_notation
+from ai.move_guidance import (
+    build_trajectory_hints,
+    compute_force_book_early,
+    format_trajectory_context,
+    pick_target_opening,
+    synthesize_opening_recognition,
+)
 from game.rules import get_all_legal_moves, get_game_phase
 
 
@@ -120,17 +127,13 @@ class Coordinator:
         self._game_sym_idx = 0
         self._last_novel_id = None
         if self.opening_recognizer:
-            candidate = self.opening_recognizer.book.select_opening(
-                ai_color=self.game_ai.color,
+            candidate, sym_idx = pick_target_opening(
+                self.opening_recognizer.book,
+                self.game_ai.color,
             )
-            if candidate and candidate.side in (self.game_ai.color, "both"):
+            if candidate is not None:
                 self._target_opening = candidate
-                # When playing White, pick a random D4 symmetry so the opening
-                # plays out as a different rotation or reflection each game.
-                # The trajectory and endgame DBs use canonical D4 forms, so the
-                # AI's mid-game guidance is unaffected by the chosen orientation.
-                if self.game_ai.color == "W" and self._target_opening.line_moves:
-                    self._game_sym_idx = random.randint(0, 7)
+                self._game_sym_idx = sym_idx
                 first_mv = ""
                 if self._target_opening.line_moves:
                     raw = self._target_opening.line_moves[0]
@@ -371,40 +374,13 @@ class Coordinator:
         # If recognition hasn't found an opening yet but we have a target,
         # synthesise a recognition hint from the target so the AI's opening
         # bonus steers it along the preferred line from the very first move.
-        phase = get_game_phase(board, board.turn)
-        if (
-            phase == "place"
-            and self._target_opening is not None
-            and recognition.status in ("inactive", "novel")
-        ):
-            ply = len(self._game_moves)
-            line = self._target_opening.line_moves
-            # Apply the per-game D4 symmetry so the entire opening plays out
-            # in the chosen rotation/reflection.  Falls back to the raw move
-            # if the transform maps to an off-board square (shouldn't happen
-            # on a valid NMM position but keeps things safe).
-            _raw_mv = line[ply] if ply < len(line) else None
-            _book_mv = (
-                (_transform_book_notation(_raw_mv, self._game_sym_idx) or _raw_mv)
-                if _raw_mv else None
-            )
-            legal_dests = {m["to"] for m in legal}
-            if _book_mv is not None and _book_mv in legal_dests:
-                recognition = RecognitionResult(
-                    opening_id=self._target_opening.opening_id,
-                    name=self._target_opening.name,
-                    family=self._target_opening.family,
-                    confidence=self._target_opening.confidence,
-                    status="probable",
-                    matched_ply=ply,
-                    deviation_ply=None,
-                    deviation_move=None,
-                    book_move=_book_mv,
-                    branch_name=None,
-                    strategic_notes=self._target_opening.strategic_notes,
-                    common_blunders=list(self._target_opening.common_blunders),
-                    tags=list(self._target_opening.tags),
-                )
+        recognition = synthesize_opening_recognition(
+            recognition,
+            self._target_opening,
+            board,
+            self._game_moves,
+            self._game_sym_idx,
+        )
         if self.endgame_recognizer:
             self._endgame_state = self.endgame_recognizer.update(board)
             for msg in self.endgame_recognizer.transition_announcements():
@@ -412,52 +388,15 @@ class Coordinator:
         endgame_state = self._endgame_state
 
         # 2. Query trajectory DB for historical move-outcome hints
-        trajectory_hints: dict | None = None
-        if self.trajectory_db is not None and self._game_moves:
-            notations = [m.get("notation", "") for m in self._game_moves if m.get("notation")]
-            if notations:
-                trajectory_hints = self.trajectory_db.query(notations, board.turn) or None
-
-                # 2a. Merge opponent-loss trajectory hints (B-6).
-                # These score moves by how often the OPPONENT lost from this position,
-                # giving a second signal that is useful when the database has many draws.
-                opp_color = "B" if board.turn == "W" else "W"
-                loss_weight = (
-                    self.game_ai._weights.loss_exploit / 100.0
-                    if hasattr(self.game_ai, "_weights")
-                    else 1.5
-                )
-                if loss_weight > 0:
-                    exploit_hints = self.trajectory_db.query_opponent_loss(
-                        notations, opp_color
-                    )
-                    if exploit_hints:
-                        if trajectory_hints:
-                            for notation, delta in exploit_hints.items():
-                                if notation in trajectory_hints:
-                                    # Blend: win-rate signal weighted 1×, loss-exploit weighted by slider
-                                    trajectory_hints[notation] = (
-                                        trajectory_hints[notation] + loss_weight * delta
-                                    ) / (1 + loss_weight)
-                                else:
-                                    trajectory_hints[notation] = delta * loss_weight / (1 + loss_weight)
-                        else:
-                            trajectory_hints = {
-                                n: d * loss_weight / (1 + loss_weight)
-                                for n, d in exploit_hints.items()
-                            }
-
-        # 2b. Query endgame DB for position-based hints (merged on top of trajectory hints)
-        if self.endgame_db is not None and endgame_state.active:
-            eg_hints = self.endgame_db.query(board, board.turn)
-            if eg_hints:
-                if trajectory_hints:
-                    for notation, delta in eg_hints.items():
-                        trajectory_hints[notation] = (
-                            trajectory_hints.get(notation, 0.0) + delta
-                        ) / 2.0
-                else:
-                    trajectory_hints = eg_hints
+        trajectory_hints = build_trajectory_hints(
+            self.trajectory_db,
+            board,
+            self._game_moves,
+            self.game_ai,
+            endgame_db=self.endgame_db,
+            endgame_state=endgame_state,
+        )
+        trajectory_context = format_trajectory_context(trajectory_hints)
 
         # 3. Tactical pre-screen: log urgency level so the AI and LLM know the context
         tac = self._tactical_situation(board)
@@ -475,11 +414,9 @@ class Coordinator:
         # Force the book move for the AI's first 2 placements so opening variety is
         # visible regardless of adherence slider.  At 100% adherence the book move is
         # forced for any ply where recognition is active.
-        ai_placements_so_far = sum(
-            1 for m in self._game_moves
-            if m.get("color") == self.game_ai.color and m.get("type") == "place"
+        force_book_early = compute_force_book_early(
+            board, self._game_moves, self.game_ai.color,
         )
-        force_book_early = (phase == "place" and ai_placements_so_far < 2)
         ai_move = self.game_ai.choose_move(
             board,
             recognition=recognition,
@@ -499,6 +436,7 @@ class Coordinator:
             board, legal, ai_move, recognition=recognition, endgame_state=endgame_state,
             audience="human" if self.vs_human else "ai",
             move_history=_notations_so_far,
+            trajectory_context=trajectory_context,
         )
 
         # 6. Try to adopt the LLM's recommendation if it scores well enough

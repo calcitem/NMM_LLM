@@ -21,7 +21,7 @@
   "endgame_zugzwang_threshold": 0.4,
   "endgame_pattern_bonus": 0.3,
   "endgame_solved_dir": "/mnt/windows/NMM_DB",
-  "fullgame_db_path": "/mnt/windows/fullgame.bin",
+  "fullgame_db_path": "/mnt/windows/NMM_DB/fullgame.bin",
   "annotate_deviations_on_export": true,
   "auto_open_debrief": false,
   "debrief_analysis_depth": 4,

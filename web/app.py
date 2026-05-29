@@ -47,8 +47,9 @@ from ai.heuristics import HeuristicWeights
 from ai.memory_manager import MemoryManager
 from ai.mills_llm import MillsLLM
 from ai.coordinator import Coordinator
-from ai.opening_book import OpeningBook
+from ai.opening_book import Opening, OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
+from ai.move_guidance import build_choose_move_kwargs, pick_target_opening
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
 from ai.endgame_db import EndgameDB
@@ -204,6 +205,57 @@ async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
         })
     except Exception as exc:
         log.error("Library consolidation failed: %s", exc, exc_info=True)
+
+
+# ── Auto-evolve weights after N games ────────────────────────────────────────
+
+_games_since_evolve: int = 0  # resets on restart — auto-evolve is opportunistic
+_AUTO_EVOLVE_LOG = _ROOT / "data" / "weights" / "auto_evolve.log"
+
+
+async def _maybe_auto_evolve() -> None:
+    global _games_since_evolve
+    threshold = _load_settings().get("auto_evolve_after_games", 0)
+    if threshold <= 0:
+        return
+
+    _games_since_evolve += 1
+    if _games_since_evolve < threshold:
+        return
+    _games_since_evolve = 0
+
+    if _TOOLS_LOCK.locked():
+        log.info("Auto-evolve skipped — tool already running")
+        return
+
+    log.info("Auto-evolve triggered after %d games", threshold)
+
+    async def _run():
+        async with _TOOLS_LOCK:
+            cmd = [
+                sys.executable, "-u",
+                str(_ROOT / "tools" / "evolve_weights_v2.py"),
+                "--gauntlet",
+                "--generations", "15",
+                "--games-per-gen", "20",
+                "--parallel", "4",
+                "--sigma", "0.12",
+            ]
+            log.info("Auto-evolve: %s", " ".join(cmd[2:]))
+            try:
+                _AUTO_EVOLVE_LOG.parent.mkdir(parents=True, exist_ok=True)
+                with open(_AUTO_EVOLVE_LOG, "a") as fh:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=fh, stderr=fh,
+                        cwd=str(_ROOT),
+                    )
+                    await proc.wait()
+                log.info("Auto-evolve finished (rc=%s)", proc.returncode)
+            except Exception as exc:
+                log.error("Auto-evolve failed: %s", exc)
+
+    asyncio.create_task(_run())
 
 
 # ── Adaptive Difficulty Tracker ───────────────────────────────────────────────
@@ -463,6 +515,8 @@ class Session:
         self.is_tournament_game: bool = False
         self._last_game_record: Optional[dict] = None  # stored after game ends for good_game
         self.opening_recognizer: Optional["OpeningRecognizer"] = None  # no-LLM recognition
+        self.target_opening: Optional[Opening] = None
+        self.game_sym_idx: int = 0
         self.opening_active: bool = False  # True while an opening replay is streaming
         # ── AI-vs-AI fields ──────────────────────────────────────────────────────
         self.ai_vs_ai: bool = False
@@ -693,7 +747,30 @@ async def tool_status():
         "opening_book":   {"total": ob_total, "named": ob_named},
         "games":          {"count": games_count, "earliest": games_earliest, "latest": games_latest},
         "busy":           busy,
+        "auto_evolve":    {
+            "after_games": _load_settings().get("auto_evolve_after_games", 0),
+            "games_since": _games_since_evolve,
+        },
     })
+
+
+@app.get("/api/auto_evolve")
+async def get_auto_evolve():
+    settings = _load_settings()
+    return _JSONResponse({
+        "after_games": settings.get("auto_evolve_after_games", 0),
+        "games_since": _games_since_evolve,
+    })
+
+
+@app.post("/api/auto_evolve")
+async def set_auto_evolve(request: Request):
+    body = await request.json()
+    after = int(body.get("after_games", 0))
+    settings = _load_settings()
+    settings["auto_evolve_after_games"] = after
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    return _JSONResponse({"ok": True, "after_games": after})
 
 
 @app.websocket("/ws/tools")
@@ -935,6 +1012,7 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
         await asyncio.to_thread(session.coordinator.on_game_end, record)
         await _commentary(ws, session)
         asyncio.create_task(_maybe_consolidate(ws))
+        asyncio.create_task(_maybe_auto_evolve())
 
         # Prompt user to name a newly saved unnamed opening
         novel_id = session.coordinator._last_novel_id
@@ -1023,6 +1101,7 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
                 })
 
         asyncio.create_task(_maybe_consolidate(ws))
+        asyncio.create_task(_maybe_auto_evolve())
 
 
 def _make_game_ai_for_personality(color: str, personality: str, difficulty: int) -> GameAI:
@@ -1159,6 +1238,27 @@ def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
     return float(estimates.get(difficulty, 5))
 
 
+def _nollm_choose_move(session: Session, board: BoardState) -> dict:
+    """Choose a move on the no-LLM path with opening + trajectory guidance (B-65)."""
+    game_ai = session.game_ai
+    if game_ai is None:
+        return {}
+    game_moves = session.engine.game_record.get("moves", [])
+    kwargs = build_choose_move_kwargs(
+        board,
+        game_ai,
+        game_moves,
+        opening_recognizer=session.opening_recognizer,
+        target_opening=session.target_opening,
+        game_sym_idx=session.game_sym_idx,
+        trajectory_db=_trajectory_db,
+    )
+    trajectory_context = kwargs.pop("trajectory_context", "")
+    if trajectory_context:
+        log.info("No-LLM trajectory: %s", trajectory_context)
+    return game_ai.choose_move(board, **kwargs)
+
+
 async def _ai_turn(ws: WebSocket, session: Session) -> None:
     import time as _time
     board = session.engine.board
@@ -1178,7 +1278,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         if session.coordinator:
             move = await asyncio.to_thread(session.coordinator.deliberate, board)
         else:
-            move = await asyncio.to_thread(session.game_ai.choose_move, board)
+            move = await asyncio.to_thread(_nollm_choose_move, session, board)
     except Exception as exc:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
@@ -1475,6 +1575,15 @@ async def ws_endpoint(websocket: WebSocket):
                     if coord is None and game_ai is not None:
                         _nollm_book = OpeningBook()
                         session.opening_recognizer = OpeningRecognizer(_nollm_book)
+                        target, sym_idx = pick_target_opening(_nollm_book, game_ai.color)
+                        session.target_opening = target
+                        session.game_sym_idx = sym_idx
+                        if target:
+                            log.info(
+                                "No-LLM targeting opening: %s sym=%d score=%.2f",
+                                target.name, sym_idx,
+                                target.opening_score(game_ai.color),
+                            )
                 log.info("New game  human=%s diff=%s vs_human=%s llm=%s tournament=%s",
                          hc, diff, vs_human, use_llm, is_tournament)
                 await _send(websocket, _state(session))
@@ -1557,6 +1666,12 @@ async def ws_endpoint(websocket: WebSocket):
                         await asyncio.to_thread(coord.on_game_start)
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
+                if not vs_human and coord is None and game_ai is not None:
+                    _nollm_book = OpeningBook()
+                    session.opening_recognizer = OpeningRecognizer(_nollm_book)
+                    target, sym_idx = pick_target_opening(_nollm_book, game_ai.color)
+                    session.target_opening = target
+                    session.game_sym_idx = sym_idx
                 log.info(
                     "Setup game  human=%s diff=%s phase=%s turn=%s W=%d B=%d",
                     hc, diff, setup_phase, setup_turn,

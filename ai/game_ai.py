@@ -26,6 +26,15 @@ from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_B
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
 
+def _stm_can_close_mill(board: BoardState, color: str) -> bool:
+    """True if color can close a mill on the next placement or slide."""
+    return any(
+        [board.positions[p] for p in mill].count(color) == 2
+        and [board.positions[p] for p in mill].count("") == 1
+        for mill in MILLS
+    )
+
+
 def _immediate_mill_threats(board: BoardState) -> set[str]:
     """Return empty squares where the opponent can close a mill in exactly 1 move.
 
@@ -34,8 +43,13 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
     adjacent to the empty closing square count.  In placement phase, a fork
     (≥2 simultaneous opponent 2-configs) makes all closing squares mandatory
     blocking targets — a single response cannot stop both.
+
+    Single opponent threat (placement or move): if the side to move can close their
+    own mill this turn, no mandatory block restriction is applied — closing with
+    capture is at least as urgent as occupying the opponent's closing square (B-66).
     """
     opp = "B" if board.turn == "W" else "W"
+    stm = board.turn
     opp_placed = board.pieces_placed.get(opp, 0)
     opp_in_fly = opp_placed >= 9 and board.pieces_on_board[opp] <= 3
 
@@ -50,10 +64,14 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
                 if any(board.positions[nb] == opp for nb in ADJACENCY[empty]):
                     threats.add(empty)
 
+    # Move phase: single threat + own mill available → do not restrict (B-66).
+    if opp_placed >= 9 and not opp_in_fly and len(threats) == 1:
+        if _stm_can_close_mill(board, stm):
+            threats.clear()
+
     # Placement phase: any opponent 2-config is an immediate threat — restrict STM
     # to blocking squares.  Fork (≥2 simultaneous threats) always restricts.
-    # Single threat: carveout allows STM to close their own mill instead (own-mill
-    # closure is at least as strong as blocking one threat in most positions).
+    # Single threat: carveout allows STM to close their own mill instead.
     if opp_placed < 9:
         closing = [
             next(p for p in mill if board.positions[p] == "")
@@ -64,13 +82,7 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
         if len(closing) >= 2:
             threats.update(closing)
         elif closing:
-            stm = board.turn
-            stm_can_close = any(
-                [board.positions[p] for p in mill].count(stm) == 2
-                and [board.positions[p] for p in mill].count("") == 1
-                for mill in MILLS
-            )
-            if not stm_can_close:
+            if not _stm_can_close_mill(board, stm):
                 threats.update(closing)
 
     return threats

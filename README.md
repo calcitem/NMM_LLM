@@ -58,6 +58,20 @@ The launcher (`run\_nmm.sh` / `run\_nmm.bat`) will:
 
 - Open `http://127.0.0.1:8000` in your browser automatically
 
+**Optional — neural AI training** (PyTorch, only needed if you want to train the learned engine):
+
+```bash
+# Linux / macOS
+source .venv/bin/activate
+pip install -r requirements_learned_ai.txt
+
+# Windows
+.venv\Scripts\activate
+pip install -r requirements_learned_ai.txt
+```
+
+See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
+
 
 ## Requirements
 
@@ -753,29 +767,136 @@ If `NMM_AI_ENGINE=learned` but the checkpoint is missing or PyTorch is not
 installed, the game prints a warning and falls back to the heuristic engine so
 play is never blocked.
 
-Install the extra dependencies only if you want to train or run it:
+### Step 1 — Install learning dependencies
 
-```
+These are only needed for training or running the neural engine. The base game
+does not require them.
+
+**Linux / macOS** (run inside the activated venv):
+
+```bash
+source .venv/bin/activate          # activate venv created by install.sh
 pip install -r requirements_learned_ai.txt
 ```
 
-Documentation:
+**Windows** (run inside the activated venv):
+
+```bat
+.venv\Scripts\activate             :: activate venv created by install.bat
+pip install -r requirements_learned_ai.txt
+```
+
+CPU-only PyTorch (smaller download, sufficient for smoke tests and light training):
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements_learned_ai.txt
+```
+
+`requirements_learned_ai.txt` adds: `torch>=2.0`, `numpy`, `pyyaml`,
+`jsonlines`, `tqdm`.
+
+### Step 2 — Smoke test
+
+Verifies encoders, model routing, self-play loop, and checkpoint round-trips.
+All 37 tests should pass in under a minute.
+
+```bash
+python scripts/smoke_test.py
+```
+
+Then run a tiny end-to-end training pass (no useful model produced — just proves
+the pipeline runs without crashing):
+
+```bash
+python scripts/train.py --config learned_ai/config/smoke_test_config.yaml
+```
+
+### Step 3 — Train stage by stage
+
+The curriculum advances through four stages: random → heuristic → self-play →
+(optional) human data. You can start from a specific stage or let it auto-advance:
+
+```bash
+# Full run from stage 1 (slow — may take hours/days depending on hardware)
+python scripts/train.py --config learned_ai/config/default_config.yaml
+
+# Jump directly to a stage
+python scripts/train.py --config learned_ai/config/default_config.yaml --stage 2
+python scripts/train.py --config learned_ai/config/default_config.yaml --stage 3
+python scripts/train.py --config learned_ai/config/default_config.yaml --stage 4
+```
+
+| Stage | Opponent | Target |
+| - | - | - |
+| 1 | self (sanity) | completes without crashes |
+| 2 | random | win rate climbs toward **70%+** |
+| 3 | heuristic | steady improvement; heavy early losses are normal |
+| 4 | self-play | strength improves open-endedly |
+
+### Step 4 — Resume from a checkpoint
+
+Checkpoints embed their architecture, so you do not need to re-specify hidden
+sizes:
+
+```bash
+# Resume from the latest checkpoint
+python scripts/train.py --resume learned_ai/checkpoints/latest.pt
+
+# Resume from a specific checkpoint
+python scripts/train.py \
+  --config learned_ai/config/default_config.yaml \
+  --resume learned_ai/checkpoints/ckpt-010000.pt
+```
+
+### Step 5 — Benchmark vs heuristic
+
+```bash
+python scripts/benchmark_vs_heuristic.py \
+  --checkpoint learned_ai/checkpoints/latest.pt --games 100
+```
+
+Arbitrary head-to-head (e.g. learned vs random):
+
+```bash
+python scripts/evaluate.py --agent1 learned --agent2 random \
+  --games 100 --agent1-checkpoint learned_ai/checkpoints/latest.pt
+```
+
+### Step 6 — Play against the trained AI
+
+```bash
+# Play as Black against the learned engine
+python scripts/human_vs_learned.py \
+  --checkpoint learned_ai/checkpoints/latest.pt --side black
+
+# Play as White
+python scripts/human_vs_learned.py \
+  --checkpoint learned_ai/checkpoints/latest.pt --side white
+```
+
+### Monitor training
+
+Metrics are JSON-Lines, one object per policy update:
+
+```bash
+tail -f learned_ai/logs/metrics.jsonl
+```
+
+Each line includes episode count, stage, win/loss/draw totals, temperature,
+`policy_loss`, `value_loss`, `entropy`, and `mean_reward`. Illegal move attempts
+should always be 0 (action masking guarantees this).
+
+### Full documentation
 
 - [`docs/LEARNED_AI_ARCHITECTURE.md`](docs/LEARNED_AI_ARCHITECTURE.md) — state/action
   encoding, the shared-backbone + 5-phase-head network, training algorithm.
-- [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — install, smoke-test, train,
-  monitor, resume, evaluate, and play against the learned AI.
+- [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — detailed training reference with
+  expected win rates per stage, hyperparameter guide, and troubleshooting.
 - [`docs/MIGRATION_GUIDE.md`](docs/MIGRATION_GUIDE.md) — switching engines, A/B
-  testing, and instant rollback.
+  testing, and instant rollback to the heuristic engine.
 - [`docs/AI_INTERFACE_MAPPING.md`](docs/AI_INTERFACE_MAPPING.md) — the exact engine
   interface the learned AI implements.
-
-Quick smoke check (no useful model, just proves the pipeline runs):
-
-```
-python scripts/smoke_test.py
-python scripts/train.py --config learned_ai/config/smoke_test_config.yaml
-```
 
 
 ## Board Coordinate System

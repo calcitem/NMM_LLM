@@ -54,6 +54,14 @@ async function refreshStatus() {
   setText("ob-total", fmt(ob.total || 0));
   setText("ob-named", fmt(ob.named || 0));
 
+  // Auto-evolve status
+  const ae = data.auto_evolve || {};
+  if (ae.after_games > 0) {
+    document.getElementById("ae-threshold").value = ae.after_games;
+    document.getElementById("ae-status").textContent =
+      `${ae.games_since} / ${ae.after_games} games since last run`;
+  }
+
   // Busy badge
   document.getElementById("busy-badge").style.display = data.busy ? "" : "none";
 
@@ -176,6 +184,10 @@ document.getElementById("btn-selfplay").addEventListener("click", () => {
 
 // ── Evolve Weights ────────────────────────────────────────────────────────────
 
+document.getElementById("ew-gauntlet").addEventListener("change", (e) => {
+  document.getElementById("ew-gauntlet-note").style.display = e.target.checked ? "" : "none";
+});
+
 document.getElementById("btn-evolve").addEventListener("click", () => {
   const args = [
     "--generations", document.getElementById("ew-gens").value,
@@ -184,7 +196,42 @@ document.getElementById("btn-evolve").addEventListener("click", () => {
     "--parallel",  document.getElementById("ew-parallel").value,
     "--sigma",     document.getElementById("ew-sigma").value,
   ];
+  if (document.getElementById("ew-gauntlet").checked) args.push("--gauntlet");
+  const subset = parseInt(document.getElementById("ew-subset").value);
+  if (subset > 0) args.push("--subset-size", subset);
   runTool("evolve_weights_v2", args);
+});
+
+// ── Auto-Evolve setting ───────────────────────────────────────────────────────
+
+async function loadAutoEvolve() {
+  try {
+    const r = await fetch("/api/auto_evolve");
+    const d = await r.json();
+    document.getElementById("ae-threshold").value = d.after_games || 0;
+    const status = d.after_games > 0
+      ? `${d.games_since} / ${d.after_games} games since last run`
+      : "disabled";
+    document.getElementById("ae-status").textContent = status;
+  } catch (e) {
+    console.error("auto_evolve fetch failed", e);
+  }
+}
+
+document.getElementById("btn-ae-save").addEventListener("click", async () => {
+  const after = parseInt(document.getElementById("ae-threshold").value) || 0;
+  try {
+    await fetch("/api/auto_evolve", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({after_games: after}),
+    });
+    document.getElementById("ae-status").textContent = after > 0
+      ? `Set — triggers every ${after} games`
+      : "disabled";
+  } catch (e) {
+    console.error("auto_evolve save failed", e);
+  }
 });
 
 // ── Name Openings ─────────────────────────────────────────────────────────────
@@ -234,5 +281,6 @@ document.getElementById("btn-refresh-status").addEventListener("click", refreshS
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 refreshStatus();
+loadAutoEvolve();
 // Auto-refresh status every 15s
 setInterval(refreshStatus, 15_000);

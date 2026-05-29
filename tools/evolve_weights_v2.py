@@ -1,25 +1,39 @@
-"""tools/evolve_weights_v2.py — Per-personality era-aware (1+1)-ES.
+"""tools/evolve_weights_v2.py — Per-personality and gauntlet era-aware (1+1)-ES.
 
-Evolves each personality's weight overrides independently using the same
-era-aware (1+1)-ES algorithm as evolve_weights.py.
+Two evolution modes
+-------------------
+Per-personality (default)
+  Evolves each personality's weight overrides independently.
+  Personalities are thin overrides on top of best.json:
+      HeuristicWeights defaults  ←  best.json  ←  personality overrides
+  Only the fields already present in a personality's JSON file are mutated.
+  make_mistakes and opening_adherence are never mutated.
 
-Architecture note
------------------
-Personalities are thin overrides on top of best.json (matching the server's
-runtime merge order in web/app.py):
+Gauntlet (--gauntlet)
+  Evolves best.json directly against every personality as opponent.
+  A candidate that achieves --gauntlet-threshold average win rate across all
+  personalities is promoted to best.json.
 
-    HeuristicWeights defaults  ←  best.json  ←  personality overrides
+Rotating field subset (--subset-size N)
+  Each era a random subset of N tunable fields is chosen.  Only those fields
+  are mutated that era; the rest carry forward unchanged.  0 = all fields.
+  The active subset is logged at each era boundary.
 
-Only the fields already present in a personality's JSON file are mutated.
-All other fields inherit from best.json as they would at runtime.
-make_mistakes and opening_adherence are never mutated so each personality
-keeps its behavioural character throughout evolution.
+Sigma adaptation
+  Standard Rechenberg 1/5 rule — but when zero promotions in an era the sigma
+  is *increased* (not decreased) to escape local minima.
 
 Outputs per personality
 -----------------------
   data/personalities/{name}.json          — updated on every promotion
   data/weights/personalities/{name}_log.jsonl
   data/weights/personalities/{name}_checkpoint_gen{N:04d}.json
+
+Gauntlet outputs
+----------------
+  data/weights/best.json                  — updated on every promotion
+  data/weights/gauntlet_log.jsonl
+  data/weights/gauntlet_checkpoint_gen{N:04d}.json
 
 Usage
 -----
@@ -30,8 +44,11 @@ Examples
   # All personalities, 30 gens each, 4 workers
   python tools/evolve_weights_v2.py --generations 30 --parallel 4
 
-  # Selected personalities only
-  python tools/evolve_weights_v2.py --personalities aggressive,defensive --generations 50
+  # Gauntlet mode — tune best.json against all personalities
+  python tools/evolve_weights_v2.py --gauntlet --generations 20 --parallel 4
+
+  # Gauntlet with rotating subset (drop 5 fields each era)
+  python tools/evolve_weights_v2.py --gauntlet --subset-size 48 --generations 30 --parallel 4
 
   # Quick test run
   python tools/evolve_weights_v2.py --generations 10 --games-per-gen 12 --parallel 4
@@ -70,10 +87,11 @@ _WEIGHT_MIN = 1
 _WEIGHT_MAX = 2000
 
 # Rechenberg 1/5 rule multipliers
-_SIGMA_UP   = 1.22
-_SIGMA_DOWN = 0.82
-_SIGMA_MIN  = 0.02
-_SIGMA_MAX  = 0.50
+_SIGMA_UP       = 1.22   # rate > 0.2 → explore more (doing well)
+_SIGMA_UP_STUCK = 1.50   # 0 promotions → expand sigma to escape local min
+_SIGMA_DOWN     = 0.82   # rate < 0.2 but > 0 → exploit neighbourhood
+_SIGMA_MIN      = 0.02
+_SIGMA_MAX      = 0.50
 
 
 # ── Weight helpers ────────────────────────────────────────────────────────────
@@ -186,14 +204,19 @@ def compute_era_bias(
 
 
 def adapt_sigma(sigma: float, success_count: int, era_size: int) -> float:
-    rate = success_count / max(1, era_size)
-    if rate > 0.2:
-        new_sigma = sigma * _SIGMA_UP
-    elif rate < 0.2:
-        new_sigma = sigma * _SIGMA_DOWN
+    if success_count == 0:
+        new_sigma = sigma * _SIGMA_UP_STUCK   # no promotions — escape local min
     else:
-        new_sigma = sigma
+        rate = success_count / max(1, era_size)
+        new_sigma = sigma * (_SIGMA_UP if rate > 0.2 else _SIGMA_DOWN)
     return max(_SIGMA_MIN, min(_SIGMA_MAX, new_sigma))
+
+
+def rotate_subset(tunable: list[str], subset_size: int, rng: random.Random) -> list[str]:
+    """Return a random subset of *subset_size* fields (or all if subset_size <= 0 or >= len)."""
+    if subset_size <= 0 or subset_size >= len(tunable):
+        return tunable
+    return rng.sample(tunable, subset_size)
 
 
 # ── Single game (subprocess-safe) ─────────────────────────────────────────────
@@ -301,9 +324,7 @@ def evolve_personality(
     args: argparse.Namespace,
     rng: random.Random,
 ) -> dict:
-    """
-    Run era-aware (1+1)-ES on one personality.  Returns the best overrides found.
-    """
+    """Run era-aware (1+1)-ES on one personality.  Returns the best overrides found."""
     tunable  = personality_tunable(p_overrides)
     games    = args.games_per_gen + (args.games_per_gen % 2)
     log_path = WEIGHTS_DIR / f"{name}_log.jsonl"
@@ -319,12 +340,14 @@ def evolve_personality(
     era_bias:       dict[str, float] = {}
     era_successes   = 0
     era_number      = 1
+    active_fields   = rotate_subset(tunable, args.subset_size, rng)
 
-    print(f"\n  [{name}] tunable fields: {len(tunable)}  |  games/gen: {games}  |  gens: {args.generations}")
+    print(f"\n  [{name}] tunable={len(tunable)}  active={len(active_fields)}"
+          f"  games/gen={games}  gens={args.generations}")
 
     for gen in range(1, args.generations + 1):
         t0       = time.perf_counter()
-        cand_ov  = mutate(baseline_ov, tunable, sigma, rng,
+        cand_ov  = mutate(baseline_ov, active_fields, sigma, rng,
                           bias=era_bias, bias_strength=args.bias_strength)
 
         base_full = merged_weights(best, baseline_ov)
@@ -343,19 +366,20 @@ def evolve_personality(
 
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
-                "gen":       gen,
-                "era":       era_number,
-                "win_rate":  round(win_rate, 4),
-                "promoted":  promoted,
-                "sigma":     round(sigma, 4),
-                "elapsed_s": round(elapsed, 1),
-                "overrides": cand_ov,
+                "gen":          gen,
+                "era":          era_number,
+                "win_rate":     round(win_rate, 4),
+                "promoted":     promoted,
+                "sigma":        round(sigma, 4),
+                "active_fields": active_fields,
+                "elapsed_s":    round(elapsed, 1),
+                "overrides":    cand_ov,
             }) + "\n")
 
         if promoted:
             promotions  += 1
             baseline_ov  = cand_ov
-            print(f"          ↳ {_delta_summary(cand_ov, best_ov, tunable)}")
+            print(f"          ↳ {_delta_summary(cand_ov, best_ov, active_fields)}")
             save_personality(name, baseline_ov)
             save_checkpoint(name, baseline_ov, gen)
             if win_rate > best_rate:
@@ -368,20 +392,30 @@ def evolve_personality(
             sigma = adapt_sigma(sigma, era_successes, len(era_candidates))
 
             if era_candidates:
-                top_era    = max(era_candidates, key=lambda c: c["win_rate"])
+                top_era     = max(era_candidates, key=lambda c: c["win_rate"])
                 sigma_arrow = "↑" if sigma > old_sigma else ("↓" if sigma < old_sigma else "→")
+                stuck_note  = " [STUCK→↑σ]" if era_successes == 0 else ""
                 print(f"\n    ── Era {era_number} ({len(era_candidates)} gens)  "
                       f"best_wr={top_era['win_rate']:.3f}  "
                       f"promotions={era_successes}  "
-                      f"σ {old_sigma:.3f}→{sigma:.3f}{sigma_arrow}")
+                      f"σ {old_sigma:.3f}→{sigma:.3f}{sigma_arrow}{stuck_note}")
 
                 if era_successes == 0:
                     baseline_ov = warm_restart(
-                        baseline_ov, top_era["overrides"], tunable, blend=args.warm_blend
+                        baseline_ov, top_era["overrides"], active_fields, blend=args.warm_blend
                     )
                     print(f"    warm-restart blend={args.warm_blend:.0%} toward era best")
 
-                era_bias = compute_era_bias(baseline_ov, era_candidates, tunable, top_k=args.era_top_k)
+                era_bias = compute_era_bias(
+                    baseline_ov, era_candidates, active_fields, top_k=args.era_top_k
+                )
+
+                # Rotate field subset for next era
+                active_fields = rotate_subset(tunable, args.subset_size, rng)
+                if args.subset_size > 0 and args.subset_size < len(tunable):
+                    print(f"    next-era fields ({len(active_fields)}): "
+                          f"{', '.join(sorted(active_fields)[:8])}"
+                          f"{'…' if len(active_fields) > 8 else ''}")
                 print()
 
             era_candidates = []
@@ -392,29 +426,188 @@ def evolve_personality(
     return best_ov
 
 
+# ── Gauntlet evaluation ───────────────────────────────────────────────────────
+
+def evaluate_gauntlet(
+    cand_weights: HeuristicWeights,
+    baseline_weights: HeuristicWeights,
+    personality_data: dict[str, dict],
+    games_per_opp: int,
+    difficulty: int,
+    n_workers: int,
+) -> float:
+    """Play candidate against every personality; return average win rate."""
+    total_wins  = 0.0
+    total_games = 0
+    for name, p_overrides in personality_data.items():
+        opp_w = merged_weights(baseline_weights, p_overrides)
+        wr = evaluate(cand_weights, opp_w, games_per_opp, difficulty, n_workers)
+        total_wins  += wr * games_per_opp
+        total_games += games_per_opp
+    return total_wins / total_games if total_games > 0 else 0.5
+
+
+# ── Gauntlet evolution (best.json) ────────────────────────────────────────────
+
+def evolve_gauntlet(
+    best: HeuristicWeights,
+    personality_data: dict[str, dict],
+    args: argparse.Namespace,
+    rng: random.Random,
+) -> HeuristicWeights:
+    """Run era-aware (1+1)-ES tuning best.json against all personalities."""
+    tunable      = [f.name for f in __import__("dataclasses").fields(HeuristicWeights)
+                    if f.name not in _FIXED_FIELDS]
+    n_opp        = len(personality_data)
+    games_per_opp = max(2, (args.games_per_gen // max(1, n_opp)) & ~1)
+    total_games   = games_per_opp * n_opp
+
+    gauntlet_dir = ROOT / "data" / "weights"
+    gauntlet_dir.mkdir(parents=True, exist_ok=True)
+    log_path = gauntlet_dir / "gauntlet_log.jsonl"
+
+    sigma          = args.sigma
+    baseline_w     = best
+    best_w         = deepcopy(best)
+    best_rate      = 0.5
+    promotions     = 0
+
+    era_candidates: list[dict] = []
+    era_bias:       dict[str, float] = {}
+    era_successes   = 0
+    era_number      = 1
+    active_fields   = rotate_subset(tunable, args.subset_size, rng)
+
+    threshold = args.gauntlet_threshold
+
+    print(f"\n  [gauntlet] tunable={len(tunable)}  active={len(active_fields)}")
+    print(f"  opponents: {', '.join(personality_data)}")
+    print(f"  {games_per_opp} games/opponent  ({total_games} total/gen)  "
+          f"threshold={threshold:.2f}")
+
+    for gen in range(1, args.generations + 1):
+        t0 = time.perf_counter()
+
+        # Mutate baseline's dict representation, touching only active_fields
+        base_d = weights_to_dict(baseline_w)
+        cand_d = mutate(base_d, active_fields, sigma, rng,
+                        bias=era_bias, bias_strength=args.bias_strength)
+        cand_w = weights_from_dict(cand_d)
+
+        win_rate = evaluate_gauntlet(
+            cand_w, baseline_w, personality_data,
+            games_per_opp, args.difficulty, args.parallel
+        )
+        elapsed = time.perf_counter() - t0
+
+        promoted = win_rate >= threshold
+        tag      = "PROMOTED" if promoted else "rejected"
+        print(f"    Gen {gen:3d}/{args.generations}  wr={win_rate:.3f}  σ={sigma:.3f}"
+              f"  era={era_number}  [{tag}]  {elapsed:.1f}s")
+
+        era_candidates.append({"gen": gen, "win_rate": win_rate, "overrides": cand_d})
+        if promoted:
+            era_successes += 1
+
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "gen":          gen,
+                "era":          era_number,
+                "win_rate":     round(win_rate, 4),
+                "promoted":     promoted,
+                "sigma":        round(sigma, 4),
+                "active_fields": active_fields,
+                "elapsed_s":    round(elapsed, 1),
+            }) + "\n")
+
+        if promoted:
+            promotions  += 1
+            baseline_w   = cand_w
+            deltas = _delta_summary(cand_d, weights_to_dict(best_w), active_fields)
+            print(f"          ↳ {deltas}")
+            # Save to best.json and checkpoint
+            (gauntlet_dir / "best.json").write_text(
+                json.dumps(weights_to_dict(baseline_w), indent=2)
+            )
+            (gauntlet_dir / f"gauntlet_checkpoint_gen{gen:04d}.json").write_text(
+                json.dumps(weights_to_dict(baseline_w), indent=2)
+            )
+            if win_rate > best_rate:
+                best_rate = win_rate
+                best_w    = deepcopy(cand_w)
+
+        # ── Era boundary ──────────────────────────────────────────────────────
+        if gen % args.era_size == 0 or gen == args.generations:
+            old_sigma = sigma
+            sigma = adapt_sigma(sigma, era_successes, len(era_candidates))
+
+            if era_candidates:
+                top_era     = max(era_candidates, key=lambda c: c["win_rate"])
+                sigma_arrow = "↑" if sigma > old_sigma else ("↓" if sigma < old_sigma else "→")
+                stuck_note  = " [STUCK→↑σ]" if era_successes == 0 else ""
+                print(f"\n    ── Era {era_number} ({len(era_candidates)} gens)  "
+                      f"best_wr={top_era['win_rate']:.3f}  "
+                      f"promotions={era_successes}  "
+                      f"σ {old_sigma:.3f}→{sigma:.3f}{sigma_arrow}{stuck_note}")
+
+                if era_successes == 0:
+                    base_d_now = weights_to_dict(baseline_w)
+                    warm_d = warm_restart(
+                        base_d_now, top_era["overrides"], active_fields, blend=args.warm_blend
+                    )
+                    baseline_w = weights_from_dict(warm_d)
+                    print(f"    warm-restart blend={args.warm_blend:.0%} toward era best")
+
+                era_bias = compute_era_bias(
+                    weights_to_dict(baseline_w), era_candidates,
+                    active_fields, top_k=args.era_top_k
+                )
+
+                active_fields = rotate_subset(tunable, args.subset_size, rng)
+                if args.subset_size > 0 and args.subset_size < len(tunable):
+                    print(f"    next-era fields ({len(active_fields)}): "
+                          f"{', '.join(sorted(active_fields)[:8])}"
+                          f"{'…' if len(active_fields) > 8 else ''}")
+                print()
+
+            era_candidates = []
+            era_successes  = 0
+            era_number    += 1
+
+    print(f"  [gauntlet] done — {promotions}/{args.generations} promotions  best_wr={best_rate:.3f}")
+    return best_w
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Evolve per-personality weights via era-aware (1+1)-ES"
     )
+    # Mode
+    parser.add_argument("--gauntlet",     action="store_true",
+                        help="Gauntlet mode: tune best.json against all personalities")
+    # Personality selection (per-personality and gauntlet opponent list)
     parser.add_argument("--personalities", default="",
-                        help="Comma-separated list of personalities to train "
-                             "(default: all except custom)")
+                        help="Comma-separated list of personalities (default: all except custom)")
     parser.add_argument("--skip",          default="custom",
                         help="Comma-separated personalities to skip (default: custom)")
+    # Core hyperparams
     parser.add_argument("--generations",   type=int,   default=30,
-                        help="Generations per personality (default: 30)")
+                        help="Generations (default: 30)")
     parser.add_argument("--games-per-gen", type=int,   default=20,
-                        help="Games per evaluation, rounded to even (default: 20)")
+                        help="Games per evaluation (default: 20; gauntlet: split across opponents)")
     parser.add_argument("--difficulty",    type=int,   default=5,
                         help="Search difficulty 1–10 (default: 5)")
     parser.add_argument("--sigma",         type=float, default=0.12,
-                        help="Initial Gaussian noise relative to weight value (default: 0.12)")
+                        help="Initial mutation noise relative to weight value (default: 0.12)")
     parser.add_argument("--threshold",     type=float, default=0.55,
-                        help="Win rate required to promote (default: 0.55)")
+                        help="Win rate required to promote in per-personality mode (default: 0.55)")
+    parser.add_argument("--gauntlet-threshold", type=float, default=0.52,
+                        help="Win rate required to promote in gauntlet mode (default: 0.52)")
     parser.add_argument("--parallel",      type=int,   default=4,
                         help="Parallel game workers (default: 4)")
+    # Era controls
     parser.add_argument("--era-size",      type=int,   default=5,
                         help="Generations per era for sigma adaptation (default: 5)")
     parser.add_argument("--era-top-k",     type=int,   default=3,
@@ -423,6 +616,10 @@ def main() -> None:
                         help="Fraction of era bias added to mutations (default: 0.3)")
     parser.add_argument("--warm-blend",    type=float, default=0.25,
                         help="Blend toward era best on failed era (default: 0.25)")
+    # Rotating field subset
+    parser.add_argument("--subset-size",   type=int,   default=0,
+                        help="Fields to tune per era (0 = all; e.g. 48 out of 53 drops 5 randomly)")
+    # Misc
     parser.add_argument("--seed",          type=int,   default=None,
                         help="RNG seed for reproducibility")
     args = parser.parse_args()
@@ -441,10 +638,10 @@ def main() -> None:
         )
 
     if not names:
-        print("No personalities found to evolve.")
+        print("No personalities found.")
         sys.exit(1)
 
-    # Pre-load and validate
+    # Pre-load personalities
     personality_data: dict[str, dict] = {}
     for name in names:
         p = load_personality(name)
@@ -458,11 +655,37 @@ def main() -> None:
         personality_data[name] = p
 
     if not personality_data:
-        print("No valid personalities to evolve.")
+        print("No valid personalities found.")
         sys.exit(1)
 
-    total_gens = args.generations * len(personality_data)
     games_each = args.games_per_gen + (args.games_per_gen % 2)
+    best_exists = (ROOT / "data/weights/best.json").exists()
+
+    # ── Gauntlet mode ─────────────────────────────────────────────────────────
+    if args.gauntlet:
+        print(f"\nNine Men's Morris — Gauntlet Weight Evolution")
+        print(f"  Mode          : gauntlet (tune best.json vs all personalities)")
+        print(f"  Opponents     : {', '.join(personality_data)}")
+        print(f"  Generations   : {args.generations}")
+        print(f"  Games/gen     : {games_each}  ({args.parallel} workers, diff {args.difficulty})")
+        print(f"  Sigma         : {args.sigma:.0%}  |  Gauntlet threshold: {args.gauntlet_threshold:.0%}")
+        print(f"  Era size      : {args.era_size}  |  Top-K: {args.era_top_k}"
+              f"  |  Bias: {args.bias_strength:.0%}  |  Warm blend: {args.warm_blend:.0%}")
+        print(f"  Subset size   : {args.subset_size or 'all (53)'}")
+        print(f"  best.json     : {'loaded' if best_exists else 'not found (using defaults)'}")
+        print()
+
+        best_result = evolve_gauntlet(best, personality_data, args, rng)
+        (ROOT / "data/weights/best.json").write_text(
+            json.dumps(weights_to_dict(best_result), indent=2)
+        )
+        print(f"\n  Saved → data/weights/best.json")
+        print("  Restart the web server to pick up updated weights.")
+        print()
+        return
+
+    # ── Per-personality mode ──────────────────────────────────────────────────
+    total_gens = args.generations * len(personality_data)
 
     print(f"\nNine Men's Morris — Per-Personality Weight Evolution")
     print(f"  Personalities : {', '.join(personality_data)}")
@@ -471,10 +694,11 @@ def main() -> None:
     print(f"  Sigma         : {args.sigma:.0%}  |  Threshold: {args.threshold:.0%}")
     print(f"  Era size      : {args.era_size}  |  Top-K: {args.era_top_k}"
           f"  |  Bias: {args.bias_strength:.0%}  |  Warm blend: {args.warm_blend:.0%}")
-    print(f"  best.json     : {'loaded' if (ROOT / 'data/weights/best.json').exists() else 'not found (using defaults)'}")
+    print(f"  Subset size   : {args.subset_size or 'all'}")
+    print(f"  best.json     : {'loaded' if best_exists else 'not found (using defaults)'}")
     print()
 
-    results: dict[str, tuple[dict, float]] = {}
+    results: dict[str, dict] = {}
 
     for name, p_overrides in personality_data.items():
         print(f"{'='*60}")

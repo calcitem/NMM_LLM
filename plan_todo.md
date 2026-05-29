@@ -6,26 +6,23 @@
 
 ## Implementation Roadmap
 
-Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorities:
+Track 1 (heuristic/phase-control), SE-1 through SE-9, SE-14, and the B-55–B-64 tactical cluster are complete (2026-05-28). **Active priorities:**
 
 | Priority | Item | Key outcome |
 |----------|------|-------------|
-| ★★ | **B-61** | Cycling capture blind spot: close_mill bonus = 0 when mill opens+closes simultaneously ✅ 2026-05-28 |
-| ★★ | **B-62** | own_convergence suppresses cycling mill closure (pivot piece leaves 2-config when mill closes) ✅ 2026-05-28 |
-| ★★ | **B-59** | Sealed 2-config detection in move phase (forced mills, all rings) ✅ 2026-05-28 |
-| ★★ | **B-60** | Cycling-capture unblock awareness (avoid enabling opponent mill on vacated square) ✅ 2026-05-28 |
-| ★★ | **B-55** | Block opponent dual cardinal mill (placement phase) ✅ 2026-05-28 |
-| ★ | **B-63** | Fly-entry position undervalued: opponent mobility inflated after entering fly phase ✅ 2026-05-28 |
-| ★★ | **B-64** | Dead/near-dead placement penalty: pieces placed with 0 or 1 free adjacent squares are strategically trapped ✅ 2026-05-28 |
-| ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
 | ★★ | **B-58** | Multiple LLM provider support (Claude, OpenAI, Perplexity, Null) |
-| ★ | **B-51** | Expand retrograde solver beyond 3v3 |
-| ★ | **B-57** | Direct-to-disk binary writing for endgame DB and fullgame DB (mmap; no large in-memory arrays) ✅ 2026-05-28 |
-| ★ | **B-56** | Add D4 board symmetry to endgame database (8x size/speed reduction) ✅ 2026-05-28 |
-| ★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
+| ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
+| ★ | **B-53** | ChromaDB embedding dimension mismatch when `ollama_model` changes |
+| ★ | **B-54** | Inject `phase_strategy.md` into LLM prompts by game phase |
+| ★ | **B-24** | GUI settings for FullGame / Endgame DB toggles and blend factor |
+| | **B-51** | Build extended endgame WDL tables (code ready — run `--build-all`) |
 | | **SE-11** | Opponent likelihood weighting via TrajectoryDB |
 | | **SE-12** | Incremental evaluation cache (Zobrist-keyed) |
 | | **SE-13** | N-gram opponent move predictor |
+
+### Recently completed (2026-05-28)
+
+B-55, B-59, B-60, B-61, B-62, B-63, B-64, B-56 (D4 endgame symmetry), B-57 (mmap DB writes), SE-14 (FullGameDB inside `_negamax`). Detailed specs remain below for reference; implementations are in `ai/heuristics.py`, `ai/game_ai.py`, `tools/build_endgame_db.py`.
 
 ---
 
@@ -108,7 +105,72 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 
 ---
 
+### Enhancement B-65 — Wire opening guidance + trajectory hints into no-LLM path ✅ 2026-05-29 ★★
+
+*(Implemented: `ai/move_guidance.py` shared helpers; `_nollm_choose_move()` in `web/app.py`; coordinator + `mills_llm` trajectory context string.)*
+
+**Context:** Session interrupted (credits). Implementation was in progress. User confirmed the fix is needed for both no-LLM and coordinator/LLM paths. The learning infrastructure (277 games, 2107 trajectory entries, 21 novel openings) is populated correctly but never consulted during no-LLM move selection.
+
+**Root cause:** `_ai_turn()` in `web/app.py` (line ~1181) calls `choose_move(board)` with no `trajectory_hints`, no `recognition`, and no `force_book_early` in the no-LLM branch. The coordinator path does all of this but was also reportedly not working during LLM games — verify trajectory hint plumbing shifts the chosen move before closing.
+
+**Fix (no-LLM branch in `_ai_turn()`):**
+1. Add `_target_opening: Optional[Opening]` to `Session.__init__`
+2. At game start (line ~1475): after `session.opening_recognizer = OpeningRecognizer(...)`, call `_nollm_book.select_opening(ai_color=game_ai.color)` and store on session; validate `side in (ai_color, "both")`
+3. In `_ai_turn()` else-branch: query `_trajectory_db` using `session.engine.game_record["moves"]` notations (both `query()` and `query_opponent_loss()` with `loss_exploit` weight); synthesise `RecognitionResult` from `_target_opening` when recognition is inactive/novel in place phase (check `book_move in legal_dests` first); compute `force_book_early` (`ai_placements < 2` and phase == "place"); pass all to `choose_move`
+4. Update `session.opening_recognizer` after AI move (currently only updated for human moves at line 1841)
+5. Verify: `choose_move(board, trajectory_hints={"c4": 0.5})` must prefer c4 over baseline call — if not, bug is inside `_apply_trajectory_hints`
+
+**Imports needed:**
+- `RecognitionResult, INACTIVE_RESULT` from `ai.opening_recognizer` (add to existing import)
+- No new imports for `get_game_phase` (already imported) or `get_all_legal_moves` (already imported)
+
+**Advisor notes (pre-implementation):**
+- Check `book_move in legal_dests` before synthesising RecognitionResult (missing in initial draft)
+- `ply = len(notations)` — do not double-assign from placement count
+- Optionally extract shared helper `_build_ai_guidance(board, moves, target, recognizer, trajectory_db, ai_color)` shared by both coordinator and no-LLM paths to avoid future drift
+
+**LLM / external AI integration (forward-compatible design):**
+
+The trajectory hints currently reach `choose_move()` as a numeric dict but are never shown to the LLM opinion layer. To keep B-58 (Claude/OpenAI/external providers) unblocked:
+
+- Format the trajectory query result as a human-readable context string, e.g.:
+  ```
+  "Trajectory DB (depth 6, 14 games): c4 +0.50, g4 +0.50, d5 +0.50, d7 -0.10"
+  ```
+- Pass this string alongside the trajectory hints dict into `Coordinator.deliberate()` so `mills_llm.ask_for_move_opinion()` (or any future external AI call) receives it as part of its prompt context — it already receives `move_history` and `recognition`; trajectory context slots in the same way
+- In the no-LLM path, surface it in the server log so it is visible during debugging
+- When B-58 lands and an external AI (Claude, OpenAI etc.) is wired up, it should receive this context string so it can factor historical win-rate data into its move suggestion — the game AI's numeric hint already nudges search, but the LLM can reason about *why* certain lines win more often and offer a higher-level suggestion that the engine then validates
+
+**Coordinator change (small, can be done now or with B-58):**
+In `deliberate()`, after building `trajectory_hints`, produce `_traj_context_str` and pass it to `ask_for_move_opinion(trajectory_context=_traj_context_str)`. `MillsLLM.ask_for_move_opinion()` currently ignores unknown kwargs — add the parameter and append the string to the system prompt when non-empty.
+
+**Files:**
+- `web/app.py` — Session class, game-start block, `_ai_turn()`
+- `ai/coordinator.py` — build `_traj_context_str`; pass to LLM; optional shared helper
+- `ai/mills_llm.py` — accept `trajectory_context` in `ask_for_move_opinion()`; inject into prompt
+
+---
+
+### Bug B-66 — Black plays passive block instead of closing own mill (move-phase) ✅ 2026-05-29 ★★
+
+**Game:** 1.d2 d6 / 2.d7 g4 / 3.d1 d3 / 4.b4 a1 / 5.a4 c4 / 6.f6 g1 / 7.g7 a7 / 8.f4 f2 / 9.d5 c5 / 10.d2-b2 **d3-c3×** (was d6-b6)
+
+**Symptom (reported):** Black played d6-b6 instead of closing a mill.
+
+**Root cause (investigation):** `d3-d2` does **not** close a mill on this board. The correct mill is **c3-c4-c5** via `d3-c3` (+ capture). Tactical scoring already preferred `d3-c3` (+865). `choose_move` picked `d6-b6` because `_immediate_mill_threats()` returned `{b6}` (White threatens b2-b4-b6), and mandatory-block filtering restricted candidates to moves landing on `b6` only. The placement-phase carveout (“close own mill instead of block”) did not apply in move phase.
+
+**Fix:** Extend the single-threat carveout to move phase in `_immediate_mill_threats()`: when exactly one opponent closing square is threatened and STM can close an own mill, clear the threat set so `choose_move` may close with capture.
+
+**Files changed:**
+- `ai/game_ai.py` — `_stm_can_close_mill()`, move-phase carveout in `_immediate_mill_threats()`
+- `tests/test_b66.py` — regression replay + `choose_move` assertion
+- `tests/test_blocking.py` — move-phase carveout unit test
+
+---
+
 ### Bug B-64 — AI places pieces with 0 or 1 free neighbours (dead/near-dead placement) ✅ 2026-05-28
+
+*(Implemented: `dead_placement_penalty` / `near_dead_placement_penalty` in `HeuristicWeights` + `tactical_move_bonus()`.)*
 
 **Symptom:** White AI (balanced personality) places at b2 (1 free neighbour) on turn 6 and d1 (0 free neighbours) on turn 8, yielding a piece permanently trapped from birth. No penalty exists for creating a piece with no future movement options, so the tactical score prefers positionally strong but mobility-dead squares.
 
@@ -131,6 +193,8 @@ Track 1 (heuristic/phase-control) and SE-1 through SE-9 complete. Active priorit
 ---
 
 ### Bug B-55 — AI allows opponent to build two interconnected cardinal ring mills ✅ 2026-05-28 ★
+
+*(Implemented: `_dual_connected_mill_alert()` + dual-connected block bonus in `ai/heuristics.py`; P1 ordering in `ai/game_ai.py`.)*
 
 **Symptom:** The AI (Black) fails to block White from establishing two cardinal mills through the middle ring in the same game. Once White has two such mills, Black is in a near-losing position because White can oscillate both independently.
 
@@ -165,7 +229,9 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
-### Bug B-56 — Copy button omits placement moves for setup-position games ⬜
+### Bug B-67 — Copy button omits placement moves for setup-position games ⬜
+
+*(Renamed from B-56 to avoid collision with D4 endgame symmetry B-56.)*
 
 **Symptom:** When using the "Copy" button to export a game position, the copied output only includes move-phase moves, not the placement moves that led to the current position.
 
@@ -293,7 +359,7 @@ White's last placement at `g1` reduces mobility, creates no immediate threat, an
 
 ---
 
-### Bug B-35 — Final placements: prefer dual-purpose block-and-build over passive 2-config ⬜ *(implementation covered by B-28)*
+### Bug B-35 — Final placements: prefer dual-purpose block-and-build over passive 2-config ✅ 2026-05-28 *(implemented via B-28 `dual_purpose_final_bonus` in `ai/heuristics.py`)*
 
 **Symptom:** On the last placement the AI creates a 2-piece setup that ignores an opponent mobile mill, when a dual-purpose square would both block and create own pressure.
 
@@ -361,6 +427,8 @@ Placing at `a4` instead would both block `a4-b4-c4` and create a 2-config approa
 ---
 
 ### Bug B-59 — AI misses forced mills in move phase (sealed 2-config) ✅ 2026-05-28 ★★
+
+*(Implemented: `_sealed_two_configs()`, static eval term, P0.5 move ordering, `sealed_setup_bonus`.)*
 
 **Symptom:** In the move phase, the AI fails to recognise and pursue a forced mill where both empty closing squares are accessible only to its own pieces (no opponent can reach either square to block). The AI drifts to known-good oscillation or cardinal-node mobility moves instead.
 
@@ -473,6 +541,8 @@ This root-only bonus supplements the static eval term. Together they ensure the 
 
 ### Bug B-60 — Cycling-capture unblock: AI ignores opponent threats enabled by vacating the mill ✅ 2026-05-28 ★★
 
+*(Implemented: `cycling_capture_unblock` penalty in `tactical_move_bonus()`.)*
+
 **Symptom:** When the AI closes a cycling mill (a mill it intends to oscillate by repeatedly moving the same piece in and out), it selects the highest-value capture by standard heuristics. It does not consider that its *next* oscillation move will vacate a square currently blocking an opponent 2-config, enabling an immediate opponent mill.
 
 **Motivating game** (continuation of the B-59 game, White = Scholar):
@@ -549,7 +619,9 @@ For each candidate capture `cap`, compute `_cycling_unblock_penalty(board_after_
 
 ---
 
-### Bug B-61 — Cycling capture receives zero close_mill bonus (gross vs net mill delta) ⬜ ★★ High Priority
+### Bug B-61 — Cycling capture receives zero close_mill bonus (gross vs net mill delta) ✅ 2026-05-28 ★★
+
+*(Implemented: gross `mills_delta = len(_after_closed_set - _before_closed_set)` in `tactical_move_bonus()`.)*
 
 **Symptom:** During the move phase, the AI refuses to execute winning cycling-mill captures. When a move simultaneously opens one closed mill and closes another (the cycling pattern), `tactical_move_bonus()` computes `mills_delta = max(0, _closed_mills(after) - _closed_mills(before)) = 0` because the net change is zero. The move receives no `close_mill_contribution` bonus (~500 pts) despite enabling a capture. The resulting ~400-point scoring gap causes the AI to prefer idle positional shuffles indefinitely.
 
@@ -596,13 +668,15 @@ This mirrors the existing `mill_opened` variable (line 1924) which already count
 **Files:**
 - `ai/heuristics.py` — `tactical_move_bonus()`: replace net `mills_delta` with gross `mills_delta = len(after_closed_set - before_closed_set)`; `_mill_threats()`: exclude pieces already in the same counted mill from the adjacency check
 
-**Tests:**
+**Tests (still open):**
 - Unit test: construct the turn-17 board; assert `tactical_move_bonus(board, "W", move_a7_d7_xb4)` ≥ 450 (close_mill_contribution fires)
 - Regression: AI (White, any difficulty) at the turn-17 position selects `a7→d7`, not `f2→f4`
 
 ---
 
-### Bug B-62 — `own_convergence` suppresses execution of cycling mills that share a pivot ⬜ ★★ High Priority
+### Bug B-62 — `own_convergence` suppresses execution of cycling mills that share a pivot ✅ 2026-05-28 ★★
+
+*(Implemented: `convergence_restoration = weights.own_convergence * mills_delta` in `tactical_move_bonus()`.)*
 
 **Symptom:** When White's two active 2-configs share a pivot piece (e.g., d6 is pivot for both `b6-d6-f6` and `d5-d6-d7`), the `own_convergence` bonus (+250) rewards White for keeping d6 as a convergence pivot. When White cycles a mill and a piece lands at d7 (closing `d5-d6-d7`), the 2-config becomes a closed mill — d6 is no longer a 2-config pivot. The convergence bonus drops from +250 to 0. This ~250-point static-eval loss partially offsets the close_mill bonus restored by B-61, and can still tip the scale against the cycling capture in some positions.
 
@@ -628,13 +702,15 @@ This is applied once per newly-closed mill, matching the scale of the convergenc
 **Files:**
 - `ai/heuristics.py` — `tactical_move_bonus()`: add `own_convergence * mills_gross_closed` restoration when `mills_gross_closed > 0`
 
-**Tests:**
+**Tests (still open):**
 - Unit test: own_convergence restoration fires correctly when move closes a mill that shared a pivot in a convergence pair
 - Regression: turn-17 move selection is correct after B-61; add B-62 only if gap persists
 
 ---
 
-### Bug B-63 — Fly-entry position undervalued: opponent mobility over-counted on entering fly phase ⬜ ★ Medium Priority
+### Bug B-63 — Fly-entry position undervalued: opponent mobility over-counted on entering fly phase ✅ 2026-05-28 ★ Medium Priority
+
+*(Implemented: `_FLY_MOBILITY_CAP = 5` in `_mobility()`.)*
 
 **Symptom:** Immediately after White captures an opponent piece that drops Black to 3 pieces (fly phase), `_mobility(B)` returns the number of empty squares on the board (~13–15). This makes Black appear highly mobile. In `evaluate()`, the `(own_mob - opp_mob) × 8` term becomes strongly negative (`8 × (4 - 13) = -72`), penalising the position White just achieved. The AI systematically undervalues captures that send the opponent into fly phase — the very captures that are winning.
 
@@ -679,16 +755,17 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 
 ---
 
-### Evolve weights v2 — cross-personality master tuning
+### Evolve weights v2 — cross-personality master tuning ✅ DONE
 
-**Task:**
-- [ ] Extend `tools/evolve_weights_v2.py` so it can evolve **one additional Master personality's weight set** while evaluating it against the other personalities.
-
-**Recommendation:**
-- Add `--target-personality <name>` mode that selects one Master personality as the mutable candidate.
-- Keep other personalities fixed during each evaluation batch; rotate opponents so candidate isn't overfitting.
-- Save outputs separately per personality: `data/weights/master_<name>_best.json`.
-- Log which opponent personalities were faced in each generation.
+**Implemented 2026-05-30:**
+- `--gauntlet` mode: tunes `best.json` against all personalities as opponents (averaged win rate, threshold 0.52)
+- `--gauntlet-threshold` arg (default 0.52 vs 0.55 per-personality)
+- `--subset-size N`: rotate random subset of N tunable fields per era (0 = all 53 fields)
+- Sigma fix: 0 promotions in era → sigma × 1.50 (UP) instead of shrinking (escape local minima)
+- Per-era subset logged; `[STUCK→↑σ]` note on boundary log line
+- `web/app.py`: `_maybe_auto_evolve()` triggers gauntlet after N human games (0 = disabled)
+- `/api/auto_evolve` GET/POST endpoints; `auto_evolve_after_games` stored in settings.json
+- Tools page: gauntlet checkbox, subset-size input, auto-evolve N input + save button
 
 ---
 
@@ -735,29 +812,15 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 
 ---
 
-### SE-14 — DB-Guided Horizon Search (FullGameDB + Negamax Hybrid) ⬜ ★ High Impact
+### SE-14 — DB-Guided Horizon Search (FullGameDB + Negamax Hybrid) ✅ 2026-05-26
 
-**Why:** Currently `_negamax` rebuilds the full search tree from scratch on every move decision — even for positions already exactly solved in `FullGameDB`. Moving the DB lookup inside `_negamax` lets the search consume DB coverage as perfect depth-∞ oracle calls. When the DB covers the first K plies of the game tree, the AI only spends its time budget searching from the *frontier* of known territory.
-
-**How it works:**
-1. At every internal `_negamax` node (not just root), query `FullGameDB` for the current position.
-2. If an exact outcome is found (`outcome ∈ {WIN, LOSS, DRAW}`) → return `±(INF − depth)` immediately.
-3. If the DB knows a best move but no definitive outcome → promote that move to the front of the move list (same as TT-best-move promotion from SE-1), then continue normal search.
-4. If no DB match → continue normal negamax.
-
-**Legal-move safety:** Validate DB best move against `get_all_legal_moves(board)` before promoting; fall through silently on mismatch.
-
-**Evaluation order inside `_negamax`:** terminal check → SE-4 endgame probe → SE-14 FullGameDB probe → SE-8 extension → depth-0 / SE-9 quiescence → TT probe → search loop.
-
-**Build prerequisite:** B-52 (frequency-weighted build from human games) ensures the DB is dense in positions that actually occur, maximising SE-14's hit rate. SE-14 degrades gracefully to full negamax when the DB is absent or the position is not covered.
-
-**Deliverables:**
-- `ai/game_ai.py` — DB probe at top of `_negamax`, after SE-4, before SE-8; exact outcomes short-circuit search; best-move hints promote front-of-list (with legality check); guarded by `self._fullgame_db is not None`
-- `ai/fullgame_db.py` — `best_move_validated(board)` helper that maps canonical move back to actual orientation AND verifies against legal moves
+*(Archived — see plan_done.md. Implemented in `ai/game_ai.py` `_negamax` FullGameDB probe.)*
 
 ---
 
-## B-51 — Early-Endgame DB: expand retrograde solver beyond 3v3 ⬜ ★ High Impact
+## B-51 — Early-Endgame DB: expand retrograde solver beyond 3v3 ✅ 2026-05-28 ★ (code complete; tables need building)
+
+**Status:** Builder (`tools/build_endgame_db.py`) supports `--nW`/`--nB`, mixed fly/move successors, mmap writes, and `--build-all`. Runtime query dispatch in `ai/endgame_solved_db.py` loads all `endgame_{nW}_{nB}.wdl` files. **Remaining work is operational:** run builds to populate tables beyond 3v3.
 
 **Goal:** Build a family of WDL tables covering piece counts from 4v3 through 7v4 (and symmetric reverses). These cover the critical **early endgame transition** — positions where one or both sides have just lost pieces but haven't reached fly phase yet.
 
@@ -984,7 +1047,7 @@ When `key_present` is false, the badge is amber with text "Set `ANTHROPIC_API_KE
 
 - **Immutable board state** — `BoardState.apply_move()` always returns a new object.
 - **Coordinator owns the narrative** — All commentary and LLM calls flow through `Coordinator`. `GameAI` is pure search.
-- **No cloud dependency** — All LLM inference runs locally via Ollama.
+- **No cloud dependency** — LLM inference runs locally via Ollama by default; B-58 will add optional cloud providers.
 - **Progressive enhancement** — Every stage adds capability without breaking the previous one.
 - **Weight-injectable heuristics** — All evaluation weights injectable via `HeuristicWeights`.
 - **Tactical before positional** — AI urgency hierarchy (close mill → block mill → disrupt structures → position) is a first-class design constraint.

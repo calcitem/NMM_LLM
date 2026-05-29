@@ -122,15 +122,29 @@
     <!-- ── Evolve Weights ─────────────────────────────────────────────── -->
     <section class="tools-section">
       <h2>Evolve Heuristic Weights</h2>
-      <p class="tool-desc">Runs a CMA-ES / evolutionary search to find better heuristic weights. Uses <code>tools/evolve_weights_v2.py</code>. Saves to <code>data/weights/best.json</code>.</p>
+      <p class="tool-desc">Runs an era-aware (1+1)-ES to find better heuristic weights. Uses <code>tools/evolve_weights_v2.py</code>.</p>
       <div class="tool-form">
+        <label><input type="checkbox" id="ew-gauntlet"> Gauntlet mode — tune <code>best.json</code> against all personalities</label>
         <label>Generations <input type="number" id="ew-gens" value="30" min="1" max="200" style="width:5em"></label>
         <label>Games/gen <input type="number" id="ew-gpg" value="20" min="1" max="100" style="width:5em"></label>
         <label>Difficulty <input type="number" id="ew-diff" value="5" min="1" max="10" style="width:4em"></label>
         <label>Parallel <input type="number" id="ew-parallel" value="4" min="1" max="8" style="width:4em"></label>
         <label>Sigma <input type="number" id="ew-sigma" value="0.12" min="0.01" max="1" step="0.01" style="width:5em"></label>
+        <label title="Fields to tune per era (0 = all 53 fields; e.g. 48 drops 5 at random each era)">Subset size <input type="number" id="ew-subset" value="0" min="0" max="53" style="width:4em"></label>
       </div>
+      <p class="tool-desc" id="ew-gauntlet-note" style="display:none">Gauntlet mode evaluates against all personalities and saves to <code>data/weights/best.json</code>. Threshold is 0.52 (vs 0.55 per-personality).</p>
       <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
+    </section>
+
+    <!-- ── Auto-Evolve ────────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Auto-Evolve After N Games</h2>
+      <p class="tool-desc">Server automatically runs gauntlet evolution after every N saved human games. Set to 0 to disable. Log goes to <code>data/weights/auto_evolve.log</code>.</p>
+      <div class="tool-form">
+        <label>Trigger after <input type="number" id="ae-threshold" value="0" min="0" max="1000" style="width:5em"> games (0 = disabled)</label>
+        <span id="ae-status" style="margin-left:1em; color:#888">—</span>
+      </div>
+      <button id="btn-ae-save" class="btn-refresh">&#x2714; Save Auto-Evolve Setting</button>
     </section>
 
     <!-- ── Name Openings ──────────────────────────────────────────────── -->

@@ -468,6 +468,7 @@ class MillsLLM:
         endgame_state=None,
         audience: str = "human",  # "human" or "ai"
         move_history: list[str] | None = None,
+        trajectory_context: str = "",
     ) -> tuple[str, str | None]:
         notations = [_move_to_notation(m) for m in legal_moves]
         ai_notation = _move_to_notation(game_ai_suggestion)
@@ -497,6 +498,9 @@ class MillsLLM:
 
         if endgame_state and endgame_state.active:
             user_parts.append(_endgame_context_block(endgame_state))
+
+        if trajectory_context:
+            user_parts.extend(["", "TRAJECTORY HISTORY:", trajectory_context])
 
         if strategy:
             user_parts.extend(["", "STRATEGIC MEMORY:", strategy])

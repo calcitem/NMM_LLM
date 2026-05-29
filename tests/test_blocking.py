@@ -92,6 +92,19 @@ class TestImmediateMillThreatsPlacement(unittest.TestCase):
         threats = _immediate_mill_threats(b)
         self.assertIn("g7", threats)
 
+    def test_move_phase_single_threat_carveout_when_stm_closes_mill(self):
+        # White threatens b6 (b2-b4-b6).  Black can close c3-c4-c5 — no block-only filter.
+        b = BoardState.from_setup(
+            {
+                "a7": "B", "g4": "B", "g1": "B", "a1": "B", "d6": "B",
+                "f2": "B", "c5": "B", "d3": "B", "c4": "B",
+                "d7": "W", "g7": "W", "d1": "W", "a4": "W", "f6": "W",
+                "f4": "W", "b2": "W", "b4": "W", "d5": "W",
+            },
+            turn="B", phase="move",
+        )
+        self.assertEqual(_immediate_mill_threats(b), set())
+
     # ── choose_move integration ────────────────────────────────────────────────
 
     def test_choose_move_restricted_to_closing_squares_on_fork(self):
