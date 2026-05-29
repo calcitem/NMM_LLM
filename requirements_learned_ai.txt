@@ -1,0 +1,12 @@
+# Dependencies for the learned (neural) AI subsystem under learned_ai/.
+# The base game does not require these; install only to train or run the
+# learned engine (NMM_AI_ENGINE=learned). See docs/TRAINING_GUIDE.md.
+#
+# CPU-only torch:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.0
+numpy
+pyyaml
+jsonlines
+tqdm

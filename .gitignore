@@ -24,6 +24,14 @@ env/
 # ChromaDB data (generated at runtime)
 data/chroma/
 
+# Learned AI artifacts (keep dirs via .gitkeep)
+learned_ai/checkpoints/*
+!learned_ai/checkpoints/.gitkeep
+learned_ai/logs/*
+!learned_ai/logs/.gitkeep
+learned_ai/self_play_games/*
+!learned_ai/self_play_games/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

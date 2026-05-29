@@ -27,6 +27,43 @@ from ai.opening_book import OpeningBook
 from ai.opening_recognizer import OpeningRecognizer
 from ai.endgame_recognizer import EndgameRecognizer
 
+# ── AI engine selection ────────────────────────────────────────────────────────
+# Default is the heuristic minimax engine (unchanged behaviour). Set
+# NMM_AI_ENGINE=learned to use the trained neural agent instead.
+# See docs/MIGRATION_GUIDE.md.
+AI_ENGINE = os.environ.get("NMM_AI_ENGINE", "heuristic")
+LEARNED_CHECKPOINT = os.environ.get(
+    "NMM_LEARNED_CHECKPOINT", "learned_ai/checkpoints/latest.pt"
+)
+
+
+def _make_learned_ai(ai_color: str):
+    """Build a LearnedAgent, or return None (with a warning) on any failure.
+
+    Falls back to the heuristic engine if PyTorch is missing or the checkpoint
+    cannot be loaded, so play is never blocked.
+    """
+    try:
+        from learned_ai.agents.learned_agent import LearnedAgent
+    except Exception as exc:  # torch not installed, etc.
+        print(f"[NMM] Learned AI unavailable ({exc}); using heuristic engine.")
+        return None
+    if not os.path.exists(LEARNED_CHECKPOINT):
+        print(
+            f"[NMM] Checkpoint {LEARNED_CHECKPOINT} not found; "
+            "using heuristic engine."
+        )
+        return None
+    try:
+        return LearnedAgent(
+            color=ai_color,
+            checkpoint_path=LEARNED_CHECKPOINT,
+            mode="argmax",
+        )
+    except Exception as exc:
+        print(f"[NMM] Failed to load learned AI ({exc}); using heuristic engine.")
+        return None
+
 
 def _load_settings(path: str = "data/settings.json") -> dict:
     try:
@@ -109,13 +146,22 @@ def run_game(
     game_ai: GameAI | None = None
     coordinator: Coordinator | None = None
 
+    # Engine selection: heuristic (default) or learned. See docs/MIGRATION_GUIDE.md.
     if not vs_human:
-        game_ai = GameAI(
-            color=ai_color,
-            difficulty=difficulty,
-            blunder_probability=blunder_probability,
-        )
-        if use_llm:
+        learned_ai = _make_learned_ai(ai_color) if AI_ENGINE == "learned" else None
+        if learned_ai is not None:
+            # The learned agent exposes choose_move(board) / last_was_blunder,
+            # so it is a drop-in for GameAI. LLM commentary (which depends on
+            # GameAI internals) is disabled when the learned engine is active.
+            game_ai = learned_ai
+            print(f"[NMM] Using learned AI engine ({LEARNED_CHECKPOINT})")
+        else:
+            game_ai = GameAI(
+                color=ai_color,
+                difficulty=difficulty,
+                blunder_probability=blunder_probability,
+            )
+        if use_llm and learned_ai is None:
             memory = MemoryManager(
                 ollama_url=ollama_url,
                 ollama_model=ollama_model,

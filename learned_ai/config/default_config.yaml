@@ -1,0 +1,43 @@
+model:
+  backbone_hidden: [256, 256, 128]
+  head_hidden: [64]
+  dropout: 0.1
+
+training:
+  algorithm: reinforce      # reinforce | ppo
+  lr: 0.0003
+  gamma: 0.99
+  episodes_per_batch: 32
+  max_episodes: 50000
+  checkpoint_every: 1000
+  eval_every: 500
+  eval_games: 50
+  temperature: 1.0
+  temperature_decay: 0.9995
+  min_temperature: 0.1
+  value_coef: 0.5
+  entropy_coef: 0.01
+  ppo_clip: 0.2
+  ppo_epochs: 4
+  seed: 42
+
+curriculum:
+  stage1_episodes: 10
+  stage2_episodes: 5000
+  stage3_episodes: 15000
+  stage4_episodes: 30000
+  stage5_episodes: 0
+
+replay_buffer:
+  capacity: 50000
+  min_fill_before_train: 1000
+
+paths:
+  checkpoint_dir: learned_ai/checkpoints
+  log_dir: learned_ai/logs
+  game_log_dir: learned_ai/self_play_games
+
+opponents:
+  use_heuristic_pool: true
+  pool_checkpoint_every: 2000
+  pool_max_size: 5

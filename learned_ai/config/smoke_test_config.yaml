@@ -1,0 +1,43 @@
+model:
+  backbone_hidden: [64, 64, 32]
+  head_hidden: [32]
+  dropout: 0.0
+
+training:
+  algorithm: reinforce
+  lr: 0.001
+  gamma: 0.99
+  episodes_per_batch: 4
+  max_episodes: 20
+  checkpoint_every: 10
+  eval_every: 10
+  eval_games: 5
+  temperature: 1.0
+  temperature_decay: 0.99
+  min_temperature: 0.1
+  value_coef: 0.5
+  entropy_coef: 0.01
+  ppo_clip: 0.2
+  ppo_epochs: 2
+  seed: 0
+
+curriculum:
+  stage1_episodes: 2
+  stage2_episodes: 8
+  stage3_episodes: 10
+  stage4_episodes: 20
+  stage5_episodes: 0
+
+replay_buffer:
+  capacity: 2000
+  min_fill_before_train: 0
+
+paths:
+  checkpoint_dir: learned_ai/checkpoints/smoke
+  log_dir: learned_ai/logs/smoke
+  game_log_dir: learned_ai/self_play_games/smoke
+
+opponents:
+  use_heuristic_pool: false
+  pool_checkpoint_every: 5
+  pool_max_size: 2
