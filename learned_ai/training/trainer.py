@@ -79,12 +79,19 @@ class Trainer:
         random.seed(self.seed)
         torch.manual_seed(self.seed)
 
+        # Auto-select CUDA if available; allow override via config "device" key.
+        requested = str(train_cfg.get("device", "auto")).lower()
+        if requested == "auto":
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(requested)
+
         model_cfg = config.get("model", {})
         self.model = NMMNet(
             backbone_hidden=tuple(model_cfg.get("backbone_hidden", (256, 256, 128))),
             head_hidden=tuple(model_cfg.get("head_hidden", (64,))),
             dropout=float(model_cfg.get("dropout", 0.0)),
-        )
+        ).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         paths = config.get("paths", {})
@@ -117,6 +124,7 @@ class Trainer:
             model=self.model,
             mode="sample" if sample else "argmax",
             temperature=self.temperature,
+            device=str(self.device),
         )
         return agent
 
@@ -189,25 +197,26 @@ class Trainer:
         if not batch:
             return {"loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
 
-        states = torch.stack([t.state for t in batch])
-        masks = torch.stack([t.legal_mask for t in batch])
-        rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32)
-        primary_idx = torch.tensor([t.primary_index for t in batch], dtype=torch.long)
+        dev = self.device
+        states = torch.stack([t.state for t in batch]).to(dev)
+        masks = torch.stack([t.legal_mask for t in batch]).to(dev)
+        rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32).to(dev)
+        primary_idx = torch.tensor([t.primary_index for t in batch], dtype=torch.long).to(dev)
         cap_idx = torch.tensor(
             [
                 t.capture_index if t.capture_index is not None else -1
                 for t in batch
             ],
             dtype=torch.long,
-        )
+        ).to(dev)
         phases = [t.phase_id for t in batch]
 
         # Forward pass — group by phase so we hit each head exactly once.
-        primary_log_probs = torch.zeros(len(batch))
-        capture_log_probs = torch.zeros(len(batch))
-        capture_present = torch.zeros(len(batch), dtype=torch.bool)
-        values = torch.zeros(len(batch))
-        entropies = torch.zeros(len(batch))
+        primary_log_probs = torch.zeros(len(batch), device=dev)
+        capture_log_probs = torch.zeros(len(batch), device=dev)
+        capture_present = torch.zeros(len(batch), dtype=torch.bool, device=dev)
+        values = torch.zeros(len(batch), device=dev)
+        entropies = torch.zeros(len(batch), device=dev)
 
         unique_phases = sorted(set(phases))
         for phase in unique_phases:
@@ -319,7 +328,7 @@ class Trainer:
         return str(out_path)
 
     def load_checkpoint(self, path: str) -> None:
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
         if isinstance(ckpt, dict) and "model" in ckpt:
             self.model.load_state_dict(ckpt["model"])
             if "optimizer" in ckpt:
@@ -331,6 +340,7 @@ class Trainer:
                 self.temperature = float(ckpt["temperature"])
         else:
             self.model.load_state_dict(ckpt)
+        self.model.to(self.device)
 
     # ------------------------------------------------------------------
 
@@ -346,9 +356,13 @@ class Trainer:
 
         if verbose:
             n_params = sum(p.numel() for p in self.model.parameters())
+            dev_str = str(self.device)
+            if self.device.type == "cuda":
+                dev_str += f" ({torch.cuda.get_device_name(self.device)})"
             print(f"\n{'─'*60}")
             print(f"  NMM Learned AI — Training")
             print(f"{'─'*60}")
+            print(f"  Device      : {dev_str}")
             print(f"  Algorithm   : {self.algorithm.upper()}")
             print(f"  Max episodes: {max_episodes:,}")
             print(f"  Batch size  : {self.episodes_per_batch}")

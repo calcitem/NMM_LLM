@@ -55,7 +55,7 @@ class LearnedAgent:
         color: str = "B",
         model: Optional[NMMNet] = None,
         checkpoint_path: Optional[str] = None,
-        device: str = "cpu",
+        device: str = "auto",
         mode: str = "sample",
         temperature: float = 1.0,
         seed: Optional[int] = None,
@@ -64,7 +64,10 @@ class LearnedAgent:
         dropout: float = 0.0,
     ) -> None:
         self.color = color
-        self.device = torch.device(device)
+        if device == "auto":
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
         self.mode = mode
         self.temperature = float(temperature)
         self.last_was_blunder = False
