@@ -7,9 +7,11 @@ beyond ``board`` are forwarded to the underlying ``GameAI.choose_move``.
 
 from __future__ import annotations
 
+import random
 from typing import Optional
 
 from game.board import BoardState
+from game.rules import get_all_legal_moves
 
 
 def _load_game_ai():
@@ -64,15 +66,27 @@ class HeuristicAgent:
         game_ai: Optional[GameAI] = None,
     ) -> None:
         self.color = color
+        self._blunder_probability = float(blunder_probability)
+        # Always construct the inner GameAI with blunder_probability=0 so that
+        # choose_move() never calls the expensive _pick_blunder() minimax scorer.
+        # We intercept blunders here and return a random legal move instead,
+        # which is effectively instantaneous and sufficient for training.
         self._inner: GameAI = game_ai or GameAI(
             color=color,
             difficulty=difficulty,
-            blunder_probability=blunder_probability,
+            blunder_probability=0.0,
         )
+        self._last_was_blunder: bool = False
 
     def choose_move(self, board: BoardState, **kwargs: object) -> dict:
-        # The wrapped GameAI silently ignores unknown kwargs by accepting
-        # named params; we forward only the ones it understands.
+        # Intercept blunder moves here: pick a random legal move rather than
+        # running the inner AI's expensive depth-3 minimax blunder scorer.
+        if self._blunder_probability > 0.0 and random.random() < self._blunder_probability:
+            moves = get_all_legal_moves(board)
+            self._last_was_blunder = True
+            return random.choice(moves) if moves else {}
+
+        self._last_was_blunder = False
         accepted = {
             k: v
             for k, v in kwargs.items()
@@ -91,7 +105,7 @@ class HeuristicAgent:
 
     @property
     def last_was_blunder(self) -> bool:
-        return self._inner.last_was_blunder
+        return self._last_was_blunder
 
     @property
     def last_thinking(self) -> str:
