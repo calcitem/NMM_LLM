@@ -373,11 +373,24 @@ class Trainer:
                   f"{'─'*5}  {'─'*8}  {'─'*7}  {'─'*5}")
 
         while episode < max_episodes and not self.curriculum.finished():
+            t0 = time.time()
             transitions, meta = self.play_episode()
             self.replay.extend(transitions)
             batch.extend(transitions)
             episode += 1
             self.curriculum.step()
+
+            if verbose:
+                elapsed = time.time() - t0
+                print(
+                    f"  [game {self.stats.episodes}] plies={meta['plies']} "
+                    f"winner={meta['winner'] or 'draw'} "
+                    f"opp={meta['opponent']} "
+                    f"replay={len(self.replay)} "
+                    f"batch={len(batch)}/{self.episodes_per_batch} "
+                    f"({elapsed:.1f}s)",
+                    flush=True,
+                )
 
             new_stage = self.curriculum.state.current_stage
             event = self.curriculum.state.last_event or ""

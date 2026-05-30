@@ -45,7 +45,7 @@ curriculum:
 
 replay_buffer:
   capacity: 50000
-  min_fill_before_train: 1000
+  min_fill_before_train: 100
 
 paths:
   checkpoint_dir: learned_ai/checkpoints
