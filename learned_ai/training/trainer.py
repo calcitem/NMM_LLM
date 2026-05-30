@@ -465,7 +465,8 @@ class Trainer:
                           f"{loss_val:>8.4f}  {entropy:>7.4f}  {eps_s:>5.1f}")
                     last_print_ep = ep
 
-            self.temperature = max(self.min_temperature, self.temperature * self.temperature_decay)
+            decay = self.temperature_decay ** (3 if self.curriculum.state.current_stage == 3 else 1)
+            self.temperature = max(self.min_temperature, self.temperature * decay)
 
             if self.checkpoint_every and self.stats.episodes % self.checkpoint_every == 0:
                 ckpt = self.save_checkpoint()
