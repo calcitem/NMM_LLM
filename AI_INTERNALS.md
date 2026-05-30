@@ -654,3 +654,27 @@ Added to fill the assembly gap where no 2-config yet exists. The four existing a
 - Step-2 (+1): free piece is one hop away from such an empty square (adjacent to the step-1 halo).
 
 Pieces already in a closed mill, a 2-config, or another 1-config are excluded from counting (they are already contributing to a formation). Weight: `×12` in `evaluate()` move-phase assembly block. Does not apply in fly phase.
+
+---
+
+## 6. Learned (Neural) AI
+
+The classical heuristic engine documented above has an opt-in self-learning counterpart under `learned_ai/` — a PyTorch policy/value network trained by self-play reinforcement learning using the REINFORCE algorithm. It is selected via the `NMM_AI_ENGINE=learned` environment variable and exposes the same `choose_move(board)` interface as the heuristic engine.
+
+The learned AI does **not** share any code with the heuristic engine. It learns purely from game-outcome rewards and never consults the hand-crafted evaluation weights, tactical bonuses, or alpha-beta search stack described above.
+
+**Training curriculum** (win-rate gated):
+
+| Stage | Opponent | Exit condition |
+|-------|----------|----------------|
+| 1 | self (sanity) | episode budget |
+| 2 | random agent | ≥ 60 % rolling win rate (200-game window) |
+| 3 | heuristic difficulty 1 → 10 | ≥ 55 % win rate at each level; graduate at difficulty 10 |
+| 4 | self-play pool | episode budget |
+
+Temperature resets to 1.0 at every stage advance and every difficulty bump so the model enters each new challenge with full exploration headroom.
+
+Full documentation:
+
+- [`docs/LEARNED_AI_ARCHITECTURE.md`](docs/LEARNED_AI_ARCHITECTURE.md) — state/action encoding, NMMNet architecture, training algorithm, curriculum.
+- [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — step-by-step training walkthrough, hardware requirements, hyperparameter reference.

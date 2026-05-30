@@ -814,8 +814,7 @@ python scripts/train.py --config learned_ai/config/smoke_test_config.yaml
 
 ### Step 3 — Train stage by stage
 
-The curriculum advances through four stages: random → heuristic → self-play →
-(optional) human data. You can start from a specific stage or let it auto-advance:
+The curriculum advances automatically through four active stages. Stages 2 and 3 are **win-rate gated** — the model must hold a threshold win rate over a rolling 200-game window before advancing; episode budgets are safety caps only.
 
 ```bash
 # Full run from stage 1 (slow — may take hours/days depending on hardware)
@@ -827,12 +826,14 @@ python scripts/train.py --config learned_ai/config/default_config.yaml --stage 3
 python scripts/train.py --config learned_ai/config/default_config.yaml --stage 4
 ```
 
-| Stage | Opponent | Target |
+| Stage | Opponent | Exit condition |
 | - | - | - |
 | 1 | self (sanity) | completes without crashes |
-| 2 | random | win rate climbs toward **70%+** |
-| 3 | heuristic | steady improvement; heavy early losses are normal |
-| 4 | self-play | strength improves open-endedly |
+| 2 | random | ≥ 60 % rolling win rate over 200 games (30 k safety cap) |
+| 3 | heuristic difficulty 1 → 10 | ≥ 55 % at each difficulty level; graduates when threshold held at difficulty 10 (120 k safety cap) |
+| 4 | self-play | 70 k episode budget |
+
+Temperature resets to 1.0 at each stage advance and difficulty bump so the model explores freely on the new challenge.
 
 ### Step 4 — Resume from a checkpoint
 
@@ -883,9 +884,7 @@ Metrics are JSON-Lines, one object per policy update:
 tail -f learned_ai/logs/metrics.jsonl
 ```
 
-Each line includes episode count, stage, win/loss/draw totals, temperature,
-`policy_loss`, `value_loss`, `entropy`, and `mean_reward`. Illegal move attempts
-should always be 0 (action masking guarantees this).
+Each line includes episode count, stage name, `heuristic_difficulty` (stage 3 only), win/loss/draw totals, `rolling_win_rate` (over the last 200 games), temperature, `policy_loss`, `value_loss`, `entropy`, and `mean_reward`. The live output also prints a banner when difficulty increases or a stage advances, including the measured win rate and confirming the temperature reset.
 
 ### Full documentation
 

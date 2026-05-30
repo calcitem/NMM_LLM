@@ -114,16 +114,20 @@ Batches are grouped by phase so each head's forward pass runs once per update.
 
 ### Curriculum (`learned\_ai/training/curriculum.py`)
 
-| Stage | Name | Opponent | Goal |
+| Stage | Name | Opponent | Exit condition |
 | - | - | - | - |
-| 1 | sanity | self | encoding/runtime sanity, no crash |
-| 2 | vs\_random | random agent | learn basic legal, winning play |
-| 3 | vs\_heuristic | heuristic minimax | learn against a strong baseline |
-| 4 | self\_play | self / pool | open-ended improvement |
+| 1 | sanity | self | episode budget exhausted (10 games) |
+| 2 | vs\_random | random agent | rolling win rate ≥ 60 % over 200 games (30 k safety cap) |
+| 3 | vs\_heuristic | heuristic difficulty 1 → 10 | ≥ 55 % win rate at each level; graduate when threshold held at difficulty 10 (120 k safety cap) |
+| 4 | self\_play | self / pool | episode budget exhausted (70 k games) |
 | 5 | human\_finetune | human game data | optional; stub until data exists |
 
 
-Stage lengths are configured in YAML (`stageN\_episodes`). The controller advances automatically when a stage's episode budget is exhausted.
+Stage budgets (`stageN\_episodes`) are **safety caps** — stages 2 and 3 exit when the win-rate threshold is held over a rolling 200-game window, not when the budget expires. A model that plateaus is force-advanced by the cap so training never stalls permanently.
+
+**Stage 3 difficulty ramp**: the heuristic opponent starts at `difficulty=1`. Each time the model holds ≥ 55 % win rate over a full 200-game window the difficulty increases by 1 and the window is cleared. A fresh 200-game window must fill at the harder level before the next bump. The model graduates to stage 4 when the threshold is held at `difficulty=10`.
+
+**Temperature resets**: at every stage advance and every difficulty bump within stage 3, temperature is reset to its initial value (default 1.0) so the model enters each new challenge with full exploration headroom. Trained weights are unchanged — only the sampling distribution widens temporarily.
 
 ## Replay buffer
 
@@ -143,8 +147,11 @@ All three agents in `learned\_ai/agents/` expose `choose\_move(board, \*\*kwargs
 
 Checkpoints embed the model architecture (`model\_config`) alongside the weights, so `LearnedAgent(checkpoint\_path=...)` rebuilds the correctly-sized network without being told the hidden dimensions. `latest.pt` is refreshed on every save and is the default served checkpoint.
 
-To restart training, run the following commands;
+To restart training from scratch:
 
-rm learned\_ai/checkpoints/\*.pt   
-rm -f learned\_ai/logs/metrics.jsonl python scripts/train.py --config learned\_ai/config/default\_config.yaml
+```bash
+rm learned_ai/checkpoints/*.pt
+rm -f learned_ai/logs/metrics.jsonl
+python scripts/train.py --config learned_ai/config/default_config.yaml
+```
 
