@@ -35,7 +35,8 @@ class TestCheckpointSaveLoad(unittest.TestCase):
     def test_inference_unchanged_after_reload(self):
         torch.manual_seed(0)
         agent = LearnedAgent(
-            color="W", backbone_hidden=(32, 32, 16), head_hidden=(16,), mode="argmax", seed=0
+            color="W", backbone_hidden=(32, 32, 16), head_hidden=(16,), mode="argmax", seed=0,
+            device="cpu",
         )
         board = BoardState.new_game()
         state = encode_state(board)
@@ -55,6 +56,7 @@ class TestCheckpointSaveLoad(unittest.TestCase):
                 mode="argmax",
                 checkpoint_path=path,
                 seed=0,
+                device="cpu",
             )
             after = agent2.model.forward(state, phase_id=0, legal_mask=mask)
             self.assertTrue(torch.equal(before_logits, after["logits"]))
