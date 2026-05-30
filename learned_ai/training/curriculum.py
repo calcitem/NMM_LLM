@@ -3,9 +3,10 @@
 Stages (configurable lengths per config YAML):
     1: encoding sanity (1-2 self-play games, no learning)
     2: train vs random opponent — graduates when rolling win rate >= stage2_win_threshold
-    3: train vs heuristic, difficulty 1 → difficulty_max — each level gated at
-       stage3_difficulty_threshold; graduates to stage 4 when the threshold is
-       held at the maximum difficulty
+    3: train vs heuristic through a series of levels:
+         - blunder sub-levels: difficulty_start at 80 / 60 / 40 / 20 % blunder rate
+         - then full-strength difficulty ramp: difficulty_start → difficulty_max
+       each level is gated by stage3_difficulty_threshold; temperature resets on every bump
     4: self-play with checkpoint opponent pool
     5: human-data fine-tuning (no-op stub when no human data present)
 
@@ -17,8 +18,8 @@ cannot stay stuck forever.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 
 STAGE_NAMES = [
@@ -35,8 +36,8 @@ class CurriculumState:
     current_stage: int = 1
     episodes_in_stage: int = 0
     stage_budgets: Dict[int, int] = None  # type: ignore[assignment]
-    heuristic_difficulty: int = 1
-    last_event: Optional[str] = None  # set by step(); read by trainer for display
+    heuristic_level_idx: int = 0          # index into Curriculum._levels
+    last_event: Optional[str] = None      # set by step(); read by trainer for display
 
     def episodes_left(self) -> int:
         budget = self.stage_budgets.get(self.current_stage, 0)
@@ -48,13 +49,25 @@ class CurriculumState:
 
 
 class Curriculum:
-    """Track which stage we are in and advance when the conditions are met."""
+    """Track which stage we are in and advance when the conditions are met.
+
+    Stage 3 level list (built from config):
+        (difficulty_start, 0.80)  ← blunder sub-levels
+        (difficulty_start, 0.60)
+        (difficulty_start, 0.40)
+        (difficulty_start, 0.20)
+        (difficulty_start, 0.00)  ← full-strength difficulty ramp begins
+        (difficulty_start+1, 0.00)
+        ...
+        (difficulty_max, 0.00)    ← must hold threshold here to graduate
+    """
 
     def __init__(
         self,
         stage_budgets: Dict[int, int],
         start_stage: int = 1,
         stage2_win_threshold: float = 0.60,
+        stage3_blunder_rates: Optional[List[float]] = None,
         stage3_difficulty_start: int = 1,
         stage3_difficulty_max: int = 10,
         stage3_difficulty_threshold: float = 0.55,
@@ -64,14 +77,22 @@ class Curriculum:
             raise ValueError(
                 f"start_stage {start_stage} not in budgets {list(stage_budgets)}"
             )
+
+        # Build the ordered level list for stage 3.
+        blunder_rates = stage3_blunder_rates if stage3_blunder_rates is not None else [0.80, 0.60, 0.40, 0.20]
+        self._levels: List[Tuple[int, float]] = []
+        for rate in blunder_rates:
+            self._levels.append((int(stage3_difficulty_start), float(rate)))
+        for d in range(int(stage3_difficulty_start), int(stage3_difficulty_max) + 1):
+            self._levels.append((d, 0.0))
+
         self.state = CurriculumState(
             current_stage=start_stage,
             episodes_in_stage=0,
             stage_budgets=dict(stage_budgets),
-            heuristic_difficulty=stage3_difficulty_start,
+            heuristic_level_idx=0,
         )
         self._stage2_win_threshold = float(stage2_win_threshold)
-        self._stage3_difficulty_max = max(1, int(stage3_difficulty_max))
         self._stage3_difficulty_threshold = float(stage3_difficulty_threshold)
         self._eval_window = int(eval_window)
         self._recent_results: deque = deque(maxlen=self._eval_window)
@@ -92,6 +113,26 @@ class Curriculum:
         return len(self._recent_results) >= self._eval_window
 
     # ------------------------------------------------------------------
+    # Current heuristic opponent parameters
+
+    def heuristic_params(self) -> Tuple[int, float]:
+        """Return (difficulty, blunder_probability) for the current stage 3 level."""
+        if not self._levels:
+            return (1, 0.0)
+        idx = min(self.state.heuristic_level_idx, len(self._levels) - 1)
+        return self._levels[idx]
+
+    def heuristic_difficulty(self) -> int:
+        return self.heuristic_params()[0]
+
+    def level_label(self) -> str:
+        """Short label for display: 'b80', 'b60', 'd1', 'd5', etc."""
+        diff, blunder = self.heuristic_params()
+        if blunder > 0:
+            return f"b{int(round(blunder * 100))}"
+        return f"d{diff}"
+
+    # ------------------------------------------------------------------
     # Core advance logic
 
     def step(self) -> None:
@@ -106,7 +147,6 @@ class Curriculum:
         budget_exhausted = self.state.episodes_left() <= 0
 
         if stage <= 1:
-            # Stage 1: pure budget
             if budget_exhausted:
                 self._advance_stage()
             return
@@ -124,18 +164,17 @@ class Curriculum:
             win_rate = self.rolling_win_rate()
             threshold_met = self.window_full() and win_rate >= self._stage3_difficulty_threshold
             if threshold_met:
-                if self.state.heuristic_difficulty < self._stage3_difficulty_max:
-                    self.state.heuristic_difficulty += 1
+                at_last_level = self.state.heuristic_level_idx >= len(self._levels) - 1
+                if not at_last_level:
+                    self.state.heuristic_level_idx += 1
                     self._recent_results.clear()
                     self.state.last_event = (
-                        f"difficulty_bump:{self.state.heuristic_difficulty}:{win_rate:.3f}"
+                        f"difficulty_bump:{self.level_label()}:{win_rate:.3f}"
                     )
                 else:
-                    # At max difficulty and threshold held — graduate to stage 4.
                     self._advance_stage()
                     self.state.last_event = f"stage_advance:threshold:{win_rate:.3f}"
             elif budget_exhausted:
-                # Safety cap: force-advance without meeting threshold.
                 self._advance_stage()
                 self.state.last_event = f"stage_advance:budget:{win_rate:.3f}"
             return
@@ -160,10 +199,6 @@ class Curriculum:
             return "heuristic"
         return "self"
 
-    def heuristic_difficulty(self) -> int:
-        """Current difficulty level for stage 3 heuristic opponent."""
-        return self.state.heuristic_difficulty
-
     def finished(self) -> bool:
         return (
             self.state.current_stage == max(self.state.stage_budgets)
@@ -175,14 +210,16 @@ class Curriculum:
         budgets = {
             1: int(cfg.get("stage1_episodes", 10)),
             2: int(cfg.get("stage2_episodes", 30000)),
-            3: int(cfg.get("stage3_episodes", 60000)),
+            3: int(cfg.get("stage3_episodes", 120000)),
             4: int(cfg.get("stage4_episodes", 70000)),
             5: int(cfg.get("stage5_episodes", 0)),
         }
+        blunder_rates = cfg.get("stage3_blunder_rates", [0.80, 0.60, 0.40, 0.20])
         return cls(
             stage_budgets=budgets,
             start_stage=start_stage,
             stage2_win_threshold=float(cfg.get("stage2_win_threshold", 0.60)),
+            stage3_blunder_rates=[float(r) for r in blunder_rates],
             stage3_difficulty_start=int(cfg.get("stage3_difficulty_start", 1)),
             stage3_difficulty_max=int(cfg.get("stage3_difficulty_max", 10)),
             stage3_difficulty_threshold=float(cfg.get("stage3_difficulty_threshold", 0.55)),

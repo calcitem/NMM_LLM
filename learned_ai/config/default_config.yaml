@@ -8,6 +8,7 @@ training:
   lr: 0.0003
   gamma: 0.99
   episodes_per_batch: 32
+  n_workers: 4               # parallel games per batch (tune up if GPU is underutilised)
   max_episodes: 220010        # must be >= sum of all stage budgets
   checkpoint_every: 1000
   eval_every: 500
@@ -31,7 +32,11 @@ curriculum:
   # Stage 2: graduate to stage 3 only after hitting this rolling win rate vs random
   stage2_win_threshold: 0.60
 
-  # Stage 3: start at difficulty 1, require this win rate at each level before bumping
+  # Stage 3: blunder sub-levels before the full-strength difficulty ramp
+  # Each rate is played at difficulty_start; model must hold threshold at each before bumping
+  stage3_blunder_rates: [0.80, 0.60, 0.40, 0.20]  # 80%→60%→40%→20% blunder, then 0%
+
+  # Stage 3: full-strength difficulty ramp after blunder levels clear
   stage3_difficulty_start: 1
   stage3_difficulty_max: 10   # must hold threshold at difficulty 10 to graduate to stage 4
   stage3_difficulty_threshold: 0.55
