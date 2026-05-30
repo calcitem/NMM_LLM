@@ -29,7 +29,8 @@ def main() -> int:
         default="learned_ai/config/default_config.yaml",
         help="Path to YAML config",
     )
-    p.add_argument("--resume", default=None, help="Path to checkpoint to resume from")
+    p.add_argument("--resume", nargs="?", const="learned_ai/checkpoints/latest.pt",
+                   default=None, help="Resume from checkpoint (default: latest.pt)")
     p.add_argument(
         "--stage",
         type=int,
