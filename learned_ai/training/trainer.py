@@ -131,23 +131,37 @@ class Trainer:
         )
         return agent
 
-    # ------------------------------------------------------------------
-
     def _play_game_worker(
         self,
         opp_kind: str,
         heuristic_diff: int,
         heuristic_blunder: float,
+        cpu_weights: dict,
     ) -> Tuple[List[Transition], dict]:
         """Play one complete game in a worker thread.
 
-        Thread-safe: reads model weights (no writes), creates its own agent
-        and opponent instances. All stats/curriculum updates happen on the
-        main thread after the batch completes.
+        Each worker receives a pre-snapshotted CPU weight dict and builds its
+        own NMMNet instance — fully thread-safe, no CUDA context sharing.
+        All stats/curriculum updates happen on the main thread after the batch.
         """
+        model_cfg = self.config.get("model", {})
+        worker_model = NMMNet(
+            backbone_hidden=tuple(model_cfg.get("backbone_hidden", (256, 256, 128))),
+            head_hidden=tuple(model_cfg.get("head_hidden", (64,))),
+            dropout=float(model_cfg.get("dropout", 0.0)),
+        ).cpu()
+        worker_model.load_state_dict(cpu_weights)
+        worker_model.eval()
+
         learned_color = "W" if random.random() < 0.5 else "B"
         opp_color = "B" if learned_color == "W" else "W"
-        learned = self._make_learned_agent(color=learned_color, sample=True)
+        learned = LearnedAgent(
+            color=learned_color,
+            model=worker_model,
+            mode="sample",
+            temperature=self.temperature,
+            device="cpu",
+        )
 
         if opp_kind == "random":
             opponent = RandomAgent(color=opp_color, seed=random.randint(0, 1 << 31))
@@ -158,8 +172,21 @@ class Trainer:
                 blunder_probability=heuristic_blunder,
             )
         else:
-            # self-play: fresh agent sharing the same model weights
-            opponent = self._make_learned_agent(color=opp_color, sample=True)
+            # self-play: fresh agent on CPU with the same snapshotted weights
+            opp_model = NMMNet(
+                backbone_hidden=tuple(model_cfg.get("backbone_hidden", (256, 256, 128))),
+                head_hidden=tuple(model_cfg.get("head_hidden", (64,))),
+                dropout=float(model_cfg.get("dropout", 0.0)),
+            ).cpu()
+            opp_model.load_state_dict(cpu_weights)
+            opp_model.eval()
+            opponent = LearnedAgent(
+                color=opp_color,
+                model=opp_model,
+                mode="sample",
+                temperature=self.temperature,
+                device="cpu",
+            )
 
         if learned_color == "W":
             result = play_game(learned, opponent)
@@ -378,10 +405,17 @@ class Trainer:
                 opp_kind = self.curriculum.opponent_kind()
                 heuristic_diff, heuristic_blunder = self.curriculum.heuristic_params()
 
+                # Snapshot weights to CPU once per batch — workers each get their
+                # own NMMNet instance built from this dict, no CUDA sharing.
+                cpu_weights = {
+                    k: v.detach().cpu() for k, v in self.model.state_dict().items()
+                }
+
                 # Submit the full batch of games in parallel.
                 futures = [
                     executor.submit(
-                        self._play_game_worker, opp_kind, heuristic_diff, heuristic_blunder
+                        self._play_game_worker,
+                        opp_kind, heuristic_diff, heuristic_blunder, cpu_weights,
                     )
                     for _ in range(self.episodes_per_batch)
                 ]
