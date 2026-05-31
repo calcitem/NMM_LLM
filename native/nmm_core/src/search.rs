@@ -7,12 +7,12 @@
 
 use std::time::Instant;
 
-use crate::board::{make_move, terminal_winner};
+use crate::board::{make_move, terminal_winner, ADJACENCY, get_phase};
 use crate::heuristics::{evaluate_base, INF};
 use crate::hash::{TranspositionTable, TtEntry, Zobrist, EXACT, LOWER_BOUND, UPPER_BOUND};
 use crate::movegen::legal_moves;
 use crate::tactics::move_forms_mill;
-use crate::types::{Board, Color, Move};
+use crate::types::{Board, Color, Move, Phase, FULL_MASK};
 
 pub struct SearchResult {
     pub best_move: Option<Move>,
@@ -56,7 +56,10 @@ impl Searcher {
         moves
     }
 
-    fn negamax(&mut self, board: &Board, depth: u8, mut alpha: i64, beta: i64) -> i64 {
+    // SE-11: extend by 1 ply for moves that form a mill at the first opponent ply.
+    // `first_opp_ply` is true only when called directly from root(); all recursive
+    // calls pass false, so the extension applies at most once per root move.
+    fn negamax(&mut self, board: &Board, depth: u8, mut alpha: i64, beta: i64, first_opp_ply: bool) -> i64 {
         if self.aborted {
             return ABORT_SCORE;
         }
@@ -107,7 +110,13 @@ impl Searcher {
         let mut best_idx: u16 = u16::MAX;
         for (i, mv) in moves.iter().enumerate() {
             let nb = make_move(board, mv);
-            let score = -self.negamax(&nb, depth - 1, -beta, -alpha);
+            // SE-11: extend by 1 for mill-forming moves at first opponent ply.
+            let se11_ext: u8 = if first_opp_ply && move_forms_mill(board, color, mv.from, mv.to) {
+                1
+            } else {
+                0
+            };
+            let score = -self.negamax(&nb, depth - 1 + se11_ext, -beta, -alpha, false);
             if self.aborted {
                 return ABORT_SCORE;
             }
@@ -145,12 +154,34 @@ impl Searcher {
         if moves.is_empty() {
             return (None, -INF);
         }
+        let color = board.side_to_move;
+        let in_placement = get_phase(board, color) == Phase::Place;
         let mut alpha = -INF * 4;
         let beta = INF * 4;
         let mut best_move = Some(moves[0]);
         for mv in moves.iter() {
             let nb = make_move(board, mv);
-            let score = -self.negamax(&nb, depth - 1, -beta, -alpha);
+            // B-64: dead/near-dead placement penalty (mirrors Python tactical_move_bonus).
+            // Only penalise non-mill placements with 0 or 1 free adjacent squares.
+            let b64_penalty: i64 = if in_placement
+                && mv.from.is_none()
+                && !move_forms_mill(board, color, mv.from, mv.to)
+            {
+                let sq = mv.to as usize;
+                let occupied_after = nb.white | nb.black;
+                let free_after = (ADJACENCY[sq] & !occupied_after & FULL_MASK).count_ones();
+                if free_after == 0 {
+                    1500
+                } else if free_after == 1 {
+                    400
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            // SE-11: first_opp_ply=true so negamax extends mill-forming opponent replies.
+            let score = -self.negamax(&nb, depth - 1, -beta, -alpha, true) - b64_penalty;
             if self.aborted {
                 break;
             }

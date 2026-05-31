@@ -397,32 +397,11 @@ Placing at `a4` instead would both block `a4-b4-c4` and create a 2-config approa
 
 ---
 
-### Tactical bug — Black failed to close its own mill and missed White's immediate threat
+### Tactical bug — Black failed to close its own mill and missed White's immediate threat ✅ 2026-05-31
 
-**Game sequence (regression test needed):**
-```
-1.d6 d2  
-2.f4 b4  
-3.c4 e4  
-4.d3 d5  
-5.a4 d7  
-6.d1 e5  
-7.e3 c3  
-8.c5 a7  
-9.g7 b6  
-10.d1-g1 b4-b2
-```
+**Root cause:** Resolved by B-66's move-phase carveout. `_immediate_mill_threats()` returns `{g4}` (White threatens g1-g4-g7 via f4), but the single-threat + `_stm_can_close_mill` guard clears it — Black has b4+b6 with b2 empty and d2 adjacent to b2. Unrestricted `choose_move` then scores d2-b2 (closes b2-b4-b6 + capture) far above b4-b2 (no mill, no capture).
 
-**Reported issue:** At Black's move 10, the AI played `b4-b2`. It should have either:
-1. Closed its own mill via `d2-b2` (closing the b-line mill with `b6`).
-2. Blocked White's imminent mill threat (`f4-g4`).
-
-**What to check:**
-- [ ] Reconstruct position after move 10; verify `d2-b2` is legal and recognized by move generator.
-- [ ] Check whether immediate mill-closing bonus is insufficient vs positional reshuffling.
-- [ ] Check whether opponent immediate mill threats are underweighted in move phase.
-- [ ] Check whether dual-purpose value of `d2-b2` is recognised.
-- [ ] Add regression test asserting Black strongly prefers `d2-b2` over `b4-b2`.
+**Regression tests added:** `tests/test_b66.py::TestMillCloseVsPassiveSlide` (2 tests).
 
 ---
 

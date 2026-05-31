@@ -340,6 +340,10 @@ class GameAI:
         # the move was marked bad; if any piece moves or is captured the position
         # key changes and the move becomes legal again.
         self._pos_bans: dict[str, set[str]] = {}
+        # SE-11: trajectory DB + game notations for opponent-frequency-based extension.
+        # Set by choose_move each call; used in _root_search and _score_all.
+        self._trajectory_db = None
+        self._game_notations: list = []
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -372,6 +376,8 @@ class GameAI:
         fast_early_game: bool = False,  # skip the 4s early-game budget (self-play mode)
         force_book_early: bool = False, # force book move for first 2 AI placements
         fullgame_db=None,           # ai.fullgame_db.FullGameDB | None — overrides self._fullgame_db
+        trajectory_db=None,         # TrajectoryDB | None — SE-11 opponent freq lookup
+        game_notations=None,        # list[str] | None — current game move notations (SE-11)
     ) -> dict:
         """Return the best (or deliberately bad) legal move dict for self.color.
 
@@ -386,6 +392,8 @@ class GameAI:
         self._tt.clear()
         self._killers = [[None, None] for _ in range(32)]
         self._history = {}
+        self._trajectory_db = trajectory_db            # SE-11
+        self._game_notations = list(game_notations) if game_notations else []  # SE-11
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -792,8 +800,17 @@ class GameAI:
         scored_any = False
         for move in moves:
             nb = board.apply_move(move)
+            # SE-11: per-root-move opponent reply frequency from trajectory DB.
+            _opp_freq_here = None
+            if self._trajectory_db is not None and self._game_notations:
+                _root_mn = self._move_notation(move)
+                _opp_freq_here = (
+                    self._trajectory_db.query_all_frequencies(
+                        self._game_notations + [_root_mn], min_samples=3
+                    ) or None
+                )
             try:
-                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2)
+                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _opp_freq_here)
             except _SearchAbort:
                 if not scored_any:
                     raise  # no moves fully evaluated — propagate so _iterative_deepen keeps previous depth
@@ -823,6 +840,7 @@ class GameAI:
         beta: int,
         endgame_state=None,
         ext_budget: int = 0,
+        opp_freq=None,  # SE-11: dict[str, float] | None — only set at first opponent ply
     ) -> int:
         """
         Negamax with alpha-beta pruning and transposition table.
@@ -961,6 +979,17 @@ class GameAI:
         for move_idx, move in enumerate(moves):
             nb = board.apply_move(move)
 
+            # SE-11: extend by 1 for high-frequency opponent moves at first opponent ply.
+            # opp_freq is only non-None on the first call from _root_search/_score_all;
+            # all recursive calls receive None so the extension applies once only.
+            _se11_ext = 0
+            if opp_freq is not None:
+                _mv_s = (f"{move['from']}-{move['to']}" if move.get("from") else move.get("to", ""))
+                if move.get("capture"):
+                    _mv_s += f"x{move['capture']}"
+                if opp_freq.get(_mv_s, 0.0) >= 0.5:
+                    _se11_ext = 1
+
             use_lmr = (
                 depth >= 4
                 and not is_first
@@ -970,22 +999,22 @@ class GameAI:
             )
 
             if is_first:
-                score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
                 is_first = False
             elif use_lmr:
                 # LMR: reduced-depth zero-window scout
-                score = -self._negamax(nb, depth - 2, -alpha - 1, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 2 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
                 if score > alpha:
                     # Failed high — re-search at full depth with PVS zero-window
-                    score = -self._negamax(nb, depth - 1, -alpha - 1, -alpha, endgame_state, ext_budget)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
                     if alpha < score < beta:
                         # PVS also failed high — full window re-search
-                        score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state, ext_budget)
+                        score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
             else:
                 # Standard PVS zero-window scout
-                score = -self._negamax(nb, depth - 1, -alpha - 1, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
                 if alpha < score < beta:
-                    score = -self._negamax(nb, depth - 1, -beta, -alpha, endgame_state, ext_budget)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
 
             if score > value:
                 value = score
@@ -1058,8 +1087,17 @@ class GameAI:
         results = []
         for i, move in enumerate(moves):
             nb = board.apply_move(move)
+            # SE-11: per-root-move opponent reply frequency from trajectory DB.
+            _opp_freq_here = None
+            if self._trajectory_db is not None and self._game_notations:
+                _root_mn = self._move_notation(move)
+                _opp_freq_here = (
+                    self._trajectory_db.query_all_frequencies(
+                        self._game_notations + [_root_mn], min_samples=3
+                    ) or None
+                )
             try:
-                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2)
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _opp_freq_here)
                 score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
                 results.append((move, score))
             except _SearchAbort:

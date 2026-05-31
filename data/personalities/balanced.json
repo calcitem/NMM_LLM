@@ -20,5 +20,7 @@
   "block_cycling_priority": 0,
   "make_mistakes": 0,
   "opening_adherence": 70,
-  "loss_exploit": 210
+  "loss_exploit": 210,
+  "dead_placement_penalty": 1500,
+  "near_dead_placement_penalty": 400
 }

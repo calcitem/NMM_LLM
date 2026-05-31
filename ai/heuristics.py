@@ -80,8 +80,8 @@ class HeuristicWeights:
     # ── B-60: Cycling-capture unblock ────────────────────────────────────────
     cycling_capture_unblock: int = 180  # penalty when capture leaves own piece blocking opp pending mill
     # ── B-64: Dead/near-dead placement penalty ───────────────────────────────
-    dead_placement_penalty: int = 600   # penalty for placing a piece with 0 free adjacent squares
-    near_dead_placement_penalty: int = 150  # penalty for 1 free adjacent square (scales with placement index)
+    dead_placement_penalty: int = 1500  # penalty for placing a piece with 0 free adjacent squares
+    near_dead_placement_penalty: int = 400  # penalty for 1 free adjacent square
     # ── B-40: Self-cycle-lost penalty ────────────────────────────────────────
     # Uses cycling_mill weight — no separate field needed (mirrors cycling_gain).
     # ── B-33: Forcing placement quality ──────────────────────────────────────
@@ -2291,9 +2291,7 @@ def tactical_move_bonus(
             if free_nb == 0:
                 placement_mobility_penalty = weights.dead_placement_penalty
             elif free_nb == 1:
-                placement_mobility_penalty = int(
-                    weights.near_dead_placement_penalty * (placement_index / 8)
-                )
+                placement_mobility_penalty = weights.near_dead_placement_penalty
 
     # Placement busy-opponent chain scan.
     # Rewards forcing sequences where every placement compels an opp response

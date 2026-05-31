@@ -287,6 +287,50 @@ class TrajectoryDB:
 
         return {}
 
+    def query_all_frequencies(
+        self,
+        move_notations: list[str],
+        min_samples: int = 5,
+    ) -> dict[str, float]:
+        """Return per-move relative frequency (0.0–1.0) for the next move at this prefix.
+
+        SE-11: used to identify commonly-played opponent replies so the search
+        can extend by 1 ply for high-frequency (≥ 0.5) opponent moves.
+        Returns {} when no data match or fewer than min_samples total moves.
+        Tries the longest matching prefix first, falls back to shorter ones.
+        """
+        normed = [_norm(n) for n in move_notations]
+
+        for depth in reversed(_DEPTHS):
+            if len(normed) < depth:
+                continue
+
+            merged: dict[str, int] = {}
+            found_any = False
+
+            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
+                candidates = self._index.get(canon_prefix_key)
+                if not candidates:
+                    continue
+                found_any = True
+                inv = _SYM_INVERSE[sym_idx]
+                for canon_notation, stats in candidates.items():
+                    actual_notation = _transform_notation(canon_notation, inv)
+                    if actual_notation is None:
+                        continue
+                    merged[actual_notation] = merged.get(actual_notation, 0) + stats["total"]
+
+            if not found_any:
+                continue
+
+            total_all = sum(merged.values())
+            if total_all < min_samples:
+                continue
+
+            return {n: c / total_all for n, c in merged.items() if c > 0}
+
+        return {}
+
     # ── Bad move bans ─────────────────────────────────────────────────────────
 
     def mark_bad_move(self, prior_notations: list[str], bad_notation: str) -> None:

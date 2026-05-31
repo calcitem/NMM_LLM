@@ -22,6 +22,6 @@
   "opening_adherence": 0,
   "loss_exploit": 90,
   "cycling_capture_unblock": 180,
-  "dead_placement_penalty": 600,
-  "near_dead_placement_penalty": 150
+  "dead_placement_penalty": 1500,
+  "near_dead_placement_penalty": 400
 }
