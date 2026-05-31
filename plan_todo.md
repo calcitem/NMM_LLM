@@ -243,6 +243,31 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
+### Bug B-68 — Opening book bonus overrides B-64 dead-placement penalty ✅ 2026-05-31
+
+**Symptom (game 1):** In an AI-vs-AI game (both Scholar personality), White places at g7 on turn 8 despite g7 having 0–1 free neighbours. The B-64 penalty (-1500 or -400) is overwhelmed by the opening-book bonus applied in `_apply_opening_adjustments()`:
+- Scholar adherence = 75 → `book_bonus_abs = int(3000 * 75/100) = 2250`
+- Net for dead square with book bonus: -1500 + 2250 = +750 (net positive; beats other moves)
+- Also possible: blunder penalties on other moves widen the gap further
+
+**Symptom (game 2):** Forced block at a dead square (human vs balanced AI, turn 7: g7). Opponent threatens a7-d7-g7; g7 is the only block AND has 0 free neighbours. The AI correctly blocks but `_populate_thinking` labels the chosen move "Dead/near-dead placement (B-64)" — misleading, since the move was mandatory, not a strategic error.
+
+**Root cause (game 1):** `_apply_opening_adjustments()` adds `book_bonus_abs` unconditionally, even when the book-recommended square is a dead/near-dead placement. B-64's penalty was sized to beat tactical noise but not opening-book bonuses.
+
+**Fix options (pick one or both):**
+
+1. **Skip book bonus for dead squares (recommended):** In `_apply_opening_adjustments()`, before applying `book_bonus_abs`, check whether the destination is a dead/near-dead placement (0 or 1 free neighbours after placing). If so, skip (or halve) the book bonus so B-64 can override. Only applies during placement phase.
+
+2. **Scale B-64 penalty above book bonus:** Raise `dead_placement_penalty` from 1500 → 3500 and `near_dead_placement_penalty` from 400 → 2500 so they exceed even 100%-adherence book bonuses (3000). Risk: may over-penalise correct early placement on slightly constrained squares.
+
+**Fix (game 2 label):** In `_populate_thinking()` (in `ai/game_ai.py`), detect when the chosen move is a mandatory block (`is_forced_block`): when the chosen move's `to` square was in the `_immediate_mill_threats()` set, label it "Forced block (dead square — unavoidable)" instead of "Dead/near-dead placement (B-64)".
+
+**Files:**
+- `ai/game_ai.py` — `_apply_opening_adjustments()`: skip book bonus when dest is dead during placement; `_populate_thinking()`: detect forced block → update label
+- `ai/heuristics.py` — optionally raise penalty constants if fix-option 2 chosen
+
+---
+
 ### Bug B-21 — Windows installer: improve model pull failure guidance ⬜
 
 **Symptom:** After a failed `ollama pull`, the only feedback is a terse warning with no alternatives or guidance about how to change the model.

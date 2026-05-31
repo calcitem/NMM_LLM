@@ -564,7 +564,7 @@ class GameAI:
                 top_n=top_n, moves=moves,
                 max_depth=early_max,
             )
-            self._populate_thinking(board, move)
+            self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
 
         if self.difficulty in _TIME_LIMIT:
@@ -579,7 +579,7 @@ class GameAI:
                 recognition=recognition, trajectory_hints=trajectory_hints,
                 top_n=top_n, moves=moves,
             )
-            self._populate_thinking(board, move)
+            self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
 
         depth = _DEPTH_TABLE[self.difficulty]
@@ -599,7 +599,7 @@ class GameAI:
         if use_adjustments:
             scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
             if recognition is not None:
-                scored = self._apply_opening_adjustments(scored, recognition)
+                scored = self._apply_opening_adjustments(scored, recognition, board)
             if trajectory_hints:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
             if top_n > 1:
@@ -607,14 +607,16 @@ class GameAI:
                 move = random.choice(scored_sorted[:top_n])[0]
             else:
                 move = max(scored, key=lambda x: x[1])[0]
-            self._populate_thinking(board, move)
+            self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
 
         move, _ = self._root_search(board, depth, top_n=top_n, moves=moves)
-        self._populate_thinking(board, move)
+        self._populate_thinking(board, move, _forced_block=bool(threats))
         return move
 
-    def _populate_thinking(self, board: BoardState, move: dict) -> None:
+    def _populate_thinking(
+        self, board: BoardState, move: dict, _forced_block: bool = False
+    ) -> None:
         """Compute and store a plain-English thinking label for the chosen move.
 
         Calls tactical_move_bonus with return_breakdown=True to identify the top
@@ -637,6 +639,10 @@ class GameAI:
                 self.last_thinking = f"{top[0][0]} + {top[1][0].lower()}"
             else:
                 self.last_thinking = top[0][0]
+            # When a mandatory block happens to land on a dead square, the B-64
+            # label is misleading — relabel to show the move was unavoidable.
+            if _forced_block and "Dead" in self.last_thinking and "placement" in self.last_thinking:
+                self.last_thinking = "Forced block (dead square — unavoidable)"
             # Trim to ≤ 8 words
             words = self.last_thinking.split()
             if len(words) > 8:
@@ -732,11 +738,16 @@ class GameAI:
         self,
         scored: list[tuple[dict, int]],
         recognition,
+        board: "BoardState | None" = None,
     ) -> list[tuple[dict, int]]:
         """Apply opening-book bonus/penalty to a scored move list.
 
         Uses absolute bonuses proportional to the opening_adherence slider so
         the book preference always outweighs tactical noise at high adherence.
+        The book bonus is suppressed for placement-phase moves landing on dead
+        or near-dead squares (0–1 free neighbours) that don't close a mill —
+        mirroring B-64 so a book recommendation can't override the dead-
+        placement penalty.
         """
         if recognition.status in ("novel", "inactive"):
             return scored
@@ -758,12 +769,31 @@ class GameAI:
         for b in (recognition.common_blunders or []):
             blunder_dests.add(b.split("-")[-1].split("x")[0])
 
+        # Pre-compute dead suppression for the book dest (placement phase only).
+        _book_dest_dead = False
+        if board is not None and book_dest:
+            # A placement has no "from" key — detect via board context.
+            # Dead = 0 or 1 free neighbour after placing; exempt if the placement
+            # closes a mill (the piece has tactical value regardless of mobility).
+            free_nb = sum(1 for nb in ADJACENCY.get(book_dest, []) if board.positions.get(nb) == "")
+            if free_nb <= 1:
+                stm = board.turn
+                _closes_mill = any(
+                    book_dest in mill
+                    and all(board.positions.get(sq) == stm or sq == book_dest for sq in mill)
+                    for mill in MILLS
+                )
+                _book_dest_dead = not _closes_mill
+
         adjusted = []
         for move, raw in scored:
             dest = move.get("to", "")
             delta = 0
             if book_dest and dest == book_dest:
-                delta += book_bonus_abs
+                # Suppress bonus when landing on a dead square during placement.
+                is_placement = not move.get("from")
+                if not (is_placement and _book_dest_dead):
+                    delta += book_bonus_abs
             if dest in blunder_dests:
                 delta -= blunder_penalty_abs
             adjusted.append((move, raw + delta))
@@ -1182,7 +1212,7 @@ class GameAI:
                 if use_adjustments:
                     scored = self._score_all(board, moves, depth)
                     if recognition is not None:
-                        scored = self._apply_opening_adjustments(scored, recognition)
+                        scored = self._apply_opening_adjustments(scored, recognition, board)
                     if trajectory_hints:
                         scored = self._apply_trajectory_hints(scored, trajectory_hints)
                     if top_n > 1:
