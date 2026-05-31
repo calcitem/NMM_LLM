@@ -284,6 +284,56 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
+### Bug B-70 — AI vacates sole blocker of opponent 2-config (movement-phase pin) ✅ 2026-05-31
+
+**Symptom:** White (balanced, difficulty 4) plays a4→a1 on move 11, vacating the sole blocker of Black's a4-b4-c4 2-config. Black immediately slides a7→a4, closes the mill, and captures b6. Creates a double cycling mill at lines 4 and 6.
+
+**Game record:** 1.d1 d6 / 2.f2 b4 / 3.f4 f6 / 4.b6 d3 / 5.d5 g4 / 6.a4 a7 / 7.g7 e5 / 8.e3 c5 / 9.d2 c4 / 10.d2-b2 d3-d2 / **11.a4-a1** ← failing move
+
+**Root cause:** `_immediate_mill_threats()` only flags EMPTY squares where the opponent can slide to close a mill. When White's piece IS at the blocking square (a4=W), the function returns [] — the threat is latent (only materialises after White vacates). Mandatory-block filter never fires. The deep search (difficulty 4, depth 7-8+) finds a speculative counter-attack (a1-d1-g1) that evaluates falsely positive at the leaf node (horizon effect).
+
+**Fix:** Add `_pinned_move_squares(board, color)` — analogous to `_pinned_fly_squares` but with an additional adjacency check: opponent must have a piece adjacent to the pinned square to slide in immediately (move-phase only; fly phase can jump from anywhere). Apply as a hard filter in `choose_move` after the fly-phase pin rule.
+
+**Files:**
+- `ai/game_ai.py` — `_pinned_move_squares()` helper (lines ~109-126); movement-phase pin filter in `choose_move` (after fly-phase pin block)
+- `tests/test_b70.py` — 13 regression tests (unit tests for helper; integration tests for game-record position and minimal 3-piece case)
+
+---
+
+### Bug B-71 — AI captures suboptimal opponent piece after closing a mill ⬜
+
+**Symptom:** Black AI closes a mill and removes White's f4 instead of f2. White can re-form a mill in 2 moves via g4-f4 + d6-f6, meaning Black's mill advantage is quickly neutralised. Removing f2 instead would prevent White from doing this before Black can open its own mill.
+
+**Game record:** 1.d6 d2 / 2.c4 b4 / 3.g4 d5 / 4.e3 d1 / 5.d3 c3 / 6.f4 e4 / 7.f6 b6 / 8.f2xb6 b6 / 9.b2 a7 / 10.d6-d7 b4-a4 / 11.f6-d6 d1-a1×f4 ← should capture f2
+
+**Root cause:** Capture selection (`_best_capture()` in `ai/game_ai.py`) evaluates captured pieces by their positional value but does not model the opponent's "time to re-form a mill" after the capture. A piece adjacent to two existing 2-configs is harder to replace; a piece with both adjacent mill slots occupied by own pieces is nearly irreplaceable.
+
+**Proposed fix:** In `_best_capture()`, add a "mill re-formation speed" heuristic: for each capturable opponent piece, count the minimum moves needed for the opponent to replace that piece in a mill (e.g., how many pieces adjacent to that square, how many 2-configs the opponent has that the piece is NOT part of). Prefer captures that maximise this re-formation time. This is a scoring delta on top of the existing positional-value score.
+
+**Files:**
+- `ai/game_ai.py` — `_best_capture()`: add mill re-formation delay heuristic
+- `tests/` — regression test: in the f4/f2 position, `_best_capture()` must prefer f2 over f4
+
+---
+
+### Enhancement B-72 — Pure AI button: disable personality weight customisations ⬜
+
+**Request:** A GUI button that resets all personality sliders and weight adjustments to the bare evolved weights (best.json), with no user customisations on top. Useful for diagnosing whether a bug is caused by personality overlays or the base AI.
+
+**Context:** "balanced" personality already maps to empty `{}` overlay → base evolved weights. The button would clear any slider-adjusted `ai_weights` in `data/settings.json` back to `{}`, equivalent to selecting "balanced" with all sliders at default.
+
+**Proposed implementation:**
+- Add a "Pure AI" button in the AI Tuning panel (web UI)
+- On click: POST `/api/reset_weights` which sets `ai_weights: {}` in settings.json and reloads
+- Or: add a "Reset to defaults" action to the existing personality selector
+
+**Files:**
+- `web/templates/index.html` — add Pure AI / Reset button in AI Tuning panel
+- `web/static/game.js` — click handler: POST reset; reload slider display
+- `web/app.py` — `/api/reset_weights` endpoint
+
+---
+
 ### Bug B-21 — Windows installer: improve model pull failure guidance ⬜
 
 **Symptom:** After a failed `ollama pull`, the only feedback is a terse warning with no alternatives or guidance about how to change the model.

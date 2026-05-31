@@ -106,6 +106,25 @@ def _pinned_fly_squares(board: BoardState, color: str) -> frozenset:
     return frozenset(pinned)
 
 
+def _pinned_move_squares(board: BoardState, color: str) -> frozenset:
+    """Own squares that are the sole blocker of an opponent 2-config AND have an
+    adjacent opponent piece ready to slide in immediately (move-phase pin rule).
+
+    Unlike _pinned_fly_squares (which fires whenever opp has a 2-config), this
+    requires an adjacent opp piece so the threat is *immediately* cashable in
+    move phase (opp must be able to slide one step into the vacated square).
+    """
+    opp = "B" if color == "W" else "W"
+    pinned: set[str] = set()
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(opp) == 2 and vals.count(color) == 1:
+            our_sq = next(p for p in mill if board.positions[p] == color)
+            if any(board.positions.get(nb, "") == opp for nb in ADJACENCY.get(our_sq, [])):
+                pinned.add(our_sq)
+    return frozenset(pinned)
+
+
 def _squeeze_targets(board: BoardState) -> set[str]:
     """Return empty squares that are the last escape route of an opponent piece.
 
@@ -535,6 +554,17 @@ class GameAI:
         from game.rules import get_game_phase
         if get_game_phase(board, self.color) == "fly":
             pinned = _pinned_fly_squares(board, self.color)
+            if pinned:
+                unpinned = [m for m in moves if m.get("from") not in pinned]
+                if unpinned:
+                    moves = unpinned
+
+        # Movement-phase pin rule: don't vacate the sole blocker of an opponent
+        # 2-config when the opponent has an adjacent piece ready to slide in.
+        # Harder constraint than fly-phase (adjacency required) but same spirit:
+        # vacating the square hands the opponent an immediate mill closure.
+        if get_game_phase(board, self.color) == "move":
+            pinned = _pinned_move_squares(board, self.color)
             if pinned:
                 unpinned = [m for m in moves if m.get("from") not in pinned]
                 if unpinned:
