@@ -301,6 +301,8 @@ class GameAI:
         value_net=None,
         fullgame_db=None,           # ai.fullgame_db.FullGameDB | None
         endgame_solved_db=None,     # ai.endgame_solved_db.EndgameSolvedDB | None
+        neural_evaluator=None,      # ai.neural_evaluator.NeuralEvaluator | None
+        override_time_budget: float | None = None,  # seconds; overrides _TIME_LIMIT for training
     ) -> None:
         self.color = color
         self.difficulty = max(1, min(10, difficulty))
@@ -344,6 +346,10 @@ class GameAI:
         # Set by choose_move each call; used in _root_search and _score_all.
         self._trajectory_db = None
         self._game_notations: list = []
+        # Neural leaf evaluator (replaces heuristic evaluate() at depth-0 leaves).
+        self._neural_evaluator = neural_evaluator
+        # Per-instance time-budget override (used during training to keep games fast).
+        self._override_time_budget = override_time_budget
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -543,12 +549,14 @@ class GameAI:
         if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
                 and _in_placement
                 and not fast_early_game
-                and self.difficulty in _TIME_LIMIT):
+                and self.difficulty in _TIME_LIMIT
+                and self._override_time_budget is None):
             # Cap search depth for the very first placements: on a near-empty board,
             # deep iterative deepening produces horizon effects where corner-based
             # mill-fork patterns score artificially high, overriding the structural
             # preference for high-mobility cardinal/cross nodes.  Depth 6 gives 3 plies
             # per side — enough for tactical awareness without the distortion.
+            # Skipped when override_time_budget is set (training fast-mode).
             early_max = 6 if total_on_board < 4 else 19
             move = self._iterative_deepen(
                 board, _EARLY_GAME_TIME,
@@ -560,7 +568,12 @@ class GameAI:
             return move
 
         if self.difficulty in _TIME_LIMIT:
-            time_budget = 2.0 if fast_early_game else _TIME_LIMIT[self.difficulty]
+            _base_budget = (
+                self._override_time_budget
+                if self._override_time_budget is not None
+                else _TIME_LIMIT[self.difficulty]
+            )
+            time_budget = 2.0 if fast_early_game else _base_budget
             move = self._iterative_deepen(
                 board, time_budget,
                 recognition=recognition, trajectory_hints=trajectory_hints,
@@ -910,6 +923,8 @@ class GameAI:
                 ext_budget -= 1
 
         if depth == 0:
+            if self._neural_evaluator is not None:
+                return self._neural_evaluator.evaluate(board)
             _q_moves = get_all_legal_moves(board)
             if any(m.get("capture") for m in _q_moves):
                 return self._qsearch(board, self._Q_DEPTH, alpha, beta, endgame_state, _q_moves)

@@ -114,12 +114,38 @@ class Trainer:
         self.metrics_path = self.log_dir / "metrics.jsonl"
         self.game_logger = GameLogger(str(self.game_log_dir))
 
+        # C: reward shaping — heuristic eval delta as intermediate signal.
+        self.shaping_scale = float(train_cfg.get("shaping_scale", 0.0))
+        self.shaping_norm = float(train_cfg.get("shaping_norm", 500.0))
+        self._shaping_eval_fn = None
+        if self.shaping_scale > 0.0:
+            try:
+                from learned_ai.agents.heuristic_agent import get_heuristic_evaluate
+                self._shaping_eval_fn = get_heuristic_evaluate()
+            except Exception:
+                pass  # gracefully skip shaping if heuristics can't be loaded
+
+        # B: Stage 4 net+negamax config.
+        self.stage4_difficulty = int(train_cfg.get("stage4_difficulty", 1))
+        self.stage4_time_budget_s = float(train_cfg.get("stage4_time_budget_s", 0.05))
+
         if resume_path:
             self.load_checkpoint(resume_path)
 
     # ------------------------------------------------------------------
 
-    def _make_learned_agent(self, color: str, sample: bool = True) -> LearnedAgent:
+    def _make_learned_agent(self, color: str, sample: bool = True):
+        # Stage 4: wrap the net inside a shallow GameAI negamax search.
+        if self.curriculum.state.current_stage == 4:
+            from learned_ai.agents.neural_game_ai_agent import NeuralGameAIAgent
+            return NeuralGameAIAgent(
+                color=color,
+                model=self.model,
+                device=str(self.device),
+                difficulty=self.stage4_difficulty,
+                time_budget_s=self.stage4_time_budget_s,
+                temperature=self.temperature,
+            )
         agent = LearnedAgent(
             color=color,
             model=self.model,
@@ -149,11 +175,16 @@ class Trainer:
         opponent = self._make_opponent(color=opp_color, kind=opp_kind)
 
         if learned_color == "W":
-            result = play_game(learned, opponent)
+            result = play_game(learned, opponent, shaping_eval_fn=self._shaping_eval_fn)
         else:
-            result = play_game(opponent, learned)
+            result = play_game(opponent, learned, shaping_eval_fn=self._shaping_eval_fn)
 
-        all_transitions = assign_rewards(result, gamma=self.gamma)
+        all_transitions = assign_rewards(
+            result,
+            gamma=self.gamma,
+            shaping_scale=self.shaping_scale,
+            shaping_norm=self.shaping_norm,
+        )
         learned_transitions = [
             t for t in all_transitions if t.side_to_move == learned_color and t.primary_index >= 0
         ]

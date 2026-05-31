@@ -57,6 +57,16 @@ def _load_game_ai():
 GameAI = _load_game_ai()
 
 
+def get_heuristic_evaluate():
+    """Return ai.heuristics.evaluate without triggering heavy ai/__init__ imports.
+
+    Safe to call after _load_game_ai() has already registered ai.heuristics in
+    sys.modules (which happens at import time of this module).
+    """
+    import sys
+    return sys.modules["ai.heuristics"].evaluate
+
+
 class HeuristicAgent:
     def __init__(
         self,

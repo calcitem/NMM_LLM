@@ -21,6 +21,19 @@ training:
   ppo_epochs: 4
   seed: 42
 
+  # C: reward shaping — heuristic eval delta as intermediate signal.
+  # Set shaping_scale: 0.0 to disable.  shaping_norm scales the tanh input
+  # (typical midgame eval delta in heuristic units ≈ 200–800).
+  shaping_scale: 0.1
+  shaping_norm: 500.0
+
+  # B: Stage 4 net+negamax settings.
+  # stage4_difficulty=1 uses ~0.3s/move by default; override_time_budget cuts it to
+  # stage4_time_budget_s for training speed.  Increase difficulty for stronger play
+  # at the cost of slower episodes.
+  stage4_difficulty: 1
+  stage4_time_budget_s: 0.05   # seconds per move in Stage 4; 0.05 ≈ 50ms
+
 curriculum:
   stage1_episodes: 10
   stage2_episodes: 30000      # safety cap; actual exit is win-rate gated
