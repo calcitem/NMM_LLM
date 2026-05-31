@@ -250,6 +250,28 @@ _EARLY_GAME_TIME            = 2.0  # seconds — SE-8 extensions can push effect
                                    # deeper than nominal, so the budget must be tighter
 
 
+def _is_dead_placement(board: BoardState, move: dict) -> bool:
+    """True when *move* places a piece on a square with no free (empty) neighbours.
+
+    Such a square is permanently immobile: the piece can never slide away or
+    form a mill by approach.  Mill-closing placements are exempted because
+    they deliver immediate tactical value regardless of mobility.
+    Movement moves (have a 'from' key) are never dead placements.
+    """
+    if move.get("from"):
+        return False
+    to = move["to"]
+    free_nb = sum(1 for nb in ADJACENCY.get(to, []) if board.positions.get(nb) == "")
+    if free_nb > 0:
+        return False
+    # Mill-closing exemption: placing here closes a mill right now.
+    stm = board.turn
+    for mill in MILLS:
+        if to in mill and all(board.positions.get(sq) == stm or sq == to for sq in mill):
+            return False
+    return True
+
+
 def _parse_book_move(book_move_str: str, legal_moves: list) -> dict | None:
     """Return the legal move dict that matches the book move notation, or None."""
     if not book_move_str:
@@ -489,6 +511,16 @@ class GameAI:
             blocking = [m for m in moves if m["to"] in threats]
             if blocking:
                 moves = blocking
+
+        # Dead-placement filter: remove placements on squares with 0 free
+        # neighbours (permanently immobile) unless they close a mill.
+        # Applied AFTER mandatory-block so a forced dead block is kept.
+        # The mill-closing exemption inside _is_dead_placement preserves
+        # any move that delivers an immediate mill.
+        if board.phase == "place":
+            non_dead = [m for m in moves if not _is_dead_placement(board, m)]
+            if non_dead:
+                moves = non_dead
 
         # Position-specific move bans (set via bad-move button): filter AFTER mandatory
         # block so a banned blocking move can still be played if it's the only way to block.

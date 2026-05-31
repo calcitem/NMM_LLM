@@ -268,6 +268,22 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
+### Bug B-69 — Deep search overrides B-64 dead-placement penalty ✅ 2026-05-31
+
+**Symptom:** AI (difficulty 4, 6-second budget) still plays to squares with 0 free neighbours during placement. Confirmed live in two games: Black plays to a4 (a1=B, a7=W, b4=W → 0 free) and b6 (b4=W, d6=W → 0 free). B-64 root penalty (-1500) is overcome by iterative deepening reaching depth 7-8+ where convergence-disruption bonuses (+325) and chain-disruption (+240) offset the penalty.
+
+**Root cause:** B-64 is a root-only tactical bonus applied once in `_score_all`. The negamax search at deeper plies evaluates the resulting position without "remembering" the permanent immobility. Horizon effect: at depth 7-8, b6 appears favorable because it disrupts White's convergence cluster.
+
+**Fix:** Hard-filter dead placements from the move list BEFORE any search — same pattern as mandatory-block filter (lines 509-513). Add `_is_dead_placement(board, move)` module-level helper that returns True when a placement has 0 free neighbours and doesn't close a mill. Apply the filter during placement phase only; preserve mill-closing exemption.
+
+**Safety fallback:** `if non_dead: moves = non_dead` — if ALL remaining moves are dead (e.g., the only mandatory block is a dead square), the filter no-ops.
+
+**Files:**
+- `ai/game_ai.py` — add `_is_dead_placement()` helper; add filter block after mandatory-block in `choose_move`
+- `tests/test_b69.py` — 7 regression tests (unit tests for helper + integration tests for the a4-game and b6-last-piece positions)
+
+---
+
 ### Bug B-21 — Windows installer: improve model pull failure guidance ⬜
 
 **Symptom:** After a failed `ollama pull`, the only feedback is a terse warning with no alternatives or guidance about how to change the model.
