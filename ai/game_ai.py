@@ -25,6 +25,12 @@ from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactic
 from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
+# B-73: value network scale — maps VN output (-1, 1) to heuristic score range.
+# A VN score of +1.0 (certain win) maps to ±3000, comparable to a large positional advantage.
+_VN_SCALE = 3000
+# SE-11b/11c: how many opponent plies from root receive trajectory extension and VN ordering.
+_MAX_OPP_PLIES = 2
+
 
 def _stm_can_close_mill(board: BoardState, color: str) -> bool:
     """True if color can close a mill on the next placement or slide."""
@@ -387,6 +393,7 @@ class GameAI:
         # Set by choose_move each call; used in _root_search and _score_all.
         self._trajectory_db = None
         self._game_notations: list = []
+        self._move_path_buf: list = []  # SE-11b: shared push/pop path buffer for _negamax recursion
         # Neural leaf evaluator (replaces heuristic evaluate() at depth-0 leaves).
         self._neural_evaluator = neural_evaluator
         # Per-instance time-budget override (used during training to keep games fast).
@@ -902,25 +909,26 @@ class GameAI:
         # later moves with small bonuses appear spuriously competitive.
         alpha_raw = -INF
 
+        # SE-11b: init path buffer with game history; root moves pushed/popped below.
+        self._move_path_buf = list(self._game_notations)
+
         scored_any = False
         for move in moves:
             nb = board.apply_move(move)
-            # SE-11: per-root-move opponent reply frequency from trajectory DB.
-            _opp_freq_here = None
-            if self._trajectory_db is not None and self._game_notations:
-                _root_mn = self._move_notation(move)
-                _opp_freq_here = (
-                    self._trajectory_db.query_all_frequencies(
-                        self._game_notations + [_root_mn], min_samples=3
-                    ) or None
-                )
+            _root_mn = self._move_notation(move)
+            self._move_path_buf.append(_root_mn)
             try:
-                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _opp_freq_here)
+                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _MAX_OPP_PLIES)
             except _SearchAbort:
+                self._move_path_buf.pop()
                 if not scored_any:
                     raise  # no moves fully evaluated — propagate so _iterative_deepen keeps previous depth
                 break
+            self._move_path_buf.pop()
             scored_any = True
+            # Deadline check before expensive tactical bonus: abort between root moves if time is up.
+            if time.time() >= self._deadline:
+                break
             score = score_raw + tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
             if top_n > 1:
                 all_scored.append((move, score))
@@ -945,7 +953,7 @@ class GameAI:
         beta: int,
         endgame_state=None,
         ext_budget: int = 0,
-        opp_freq=None,  # SE-11: dict[str, float] | None — only set at first opponent ply
+        opp_plies_left: int = 0,  # SE-11b/11c: opponent plies remaining for trajectory/VN extension
     ) -> int:
         """
         Negamax with alpha-beta pruning and transposition table.
@@ -1019,8 +1027,16 @@ class GameAI:
                 return self._neural_evaluator.evaluate(board)
             _q_moves = get_all_legal_moves(board)
             if any(m.get("capture") for m in _q_moves):
-                return self._qsearch(board, self._Q_DEPTH, alpha, beta, endgame_state, _q_moves)
-            return evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
+                heur = self._qsearch(board, self._Q_DEPTH, alpha, beta, endgame_state, _q_moves)
+            else:
+                heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
+            # B-73: blend in value network score when loaded and blend > 0
+            if self._value_net is not None and self._weights.value_net_blend > 0:
+                vn_raw = self._value_net.predict(board, board.turn)  # (-1, 1)
+                vn_score = int(vn_raw * _VN_SCALE)
+                blend = self._weights.value_net_blend / 100.0
+                return int(blend * vn_score + (1.0 - blend) * heur)
+            return heur
 
         # ── Transposition table probe ─────────────────────────────────────────
         alpha_orig = alpha
@@ -1045,6 +1061,19 @@ class GameAI:
             killers = self._killers[depth] if depth < 32 else None
             moves = _order_moves(board, moves, killers, self._history)
 
+        # SE-11b/11c: classify node and prepare trajectory/VN extension state.
+        is_opp_node = (board.turn != self.color)
+        _do_path = opp_plies_left > 0
+        _next_opp_plies = max(0, opp_plies_left - 1) if is_opp_node else opp_plies_left
+
+        # SE-11b: query trajectory frequency dict at first opponent ply only (307µs/call — too
+        # expensive at ply 2 where ~27k nodes × 307µs ≈ 8 s overhead).
+        _opp_freq = None
+        if is_opp_node and opp_plies_left == _MAX_OPP_PLIES and self._trajectory_db is not None and self._move_path_buf:
+            _opp_freq = self._trajectory_db.query_all_frequencies(
+                self._move_path_buf, min_samples=3
+            ) or None
+
         # SE-14: Promote DB hint to front (done before TT so TT gets final priority).
         if _db14_best_move is not None:
             for i, m in enumerate(moves):
@@ -1064,6 +1093,19 @@ class GameAI:
                     if i > 0:
                         moves.insert(0, moves.pop(i))
                     break
+
+        # SE-11c: at first opponent ply, re-sort the non-priority (p2) tail by VN score
+        # so LMR reduces the moves the opponent is least likely to play strongly.
+        # Gated to first opponent ply only (opp_plies_left == _MAX_OPP_PLIES) to contain overhead.
+        if (is_opp_node and opp_plies_left == _MAX_OPP_PLIES
+                and self._value_net is not None and depth >= 3 and len(moves) > 2):
+            _vn_n = len(moves)
+            _vn_lmr_s = _vn_n - int(_vn_n * 0.6)
+            if _vn_n - _vn_lmr_s > 1:
+                _tail = moves[_vn_lmr_s:]
+                _vn_sc = [self._value_net.predict(board.apply_move(m), board.turn)
+                          for m in _tail]
+                moves[_vn_lmr_s:] = [m for _, m in sorted(zip(_vn_sc, _tail), reverse=True)]
 
         # SE-6: LMR — pre-compute opponent blocking squares so they are never reduced.
         _opp_color = "B" if board.turn == "W" else "W"
@@ -1086,16 +1128,17 @@ class GameAI:
         for move_idx, move in enumerate(moves):
             nb = board.apply_move(move)
 
-            # SE-11: extend by 1 for high-frequency opponent moves at first opponent ply.
-            # opp_freq is only non-None on the first call from _root_search/_score_all;
-            # all recursive calls receive None so the extension applies once only.
+            _mv_notation = self._move_notation(move)
+
+            # SE-11b: extend by 1 for high-frequency opponent moves (first 2 opponent plies).
             _se11_ext = 0
-            if opp_freq is not None:
-                _mv_s = (f"{move['from']}-{move['to']}" if move.get("from") else move.get("to", ""))
-                if move.get("capture"):
-                    _mv_s += f"x{move['capture']}"
-                if opp_freq.get(_mv_s, 0.0) >= 0.5:
+            if is_opp_node and _opp_freq is not None:
+                if _opp_freq.get(_mv_notation, 0.0) >= 0.5:
                     _se11_ext = 1
+
+            # SE-11b: push move to shared path buffer so deeper trajectory/VN nodes see full history.
+            if _do_path:
+                self._move_path_buf.append(_mv_notation)
 
             use_lmr = (
                 depth >= 4
@@ -1106,22 +1149,26 @@ class GameAI:
             )
 
             if is_first:
-                score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
                 is_first = False
             elif use_lmr:
                 # LMR: reduced-depth zero-window scout
-                score = -self._negamax(nb, depth - 2 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 2 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
                 if score > alpha:
                     # Failed high — re-search at full depth with PVS zero-window
-                    score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
                     if alpha < score < beta:
                         # PVS also failed high — full window re-search
-                        score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
+                        score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
             else:
                 # Standard PVS zero-window scout
-                score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
                 if alpha < score < beta:
-                    score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
+
+            # SE-11b: restore path buffer after exploring this branch.
+            if _do_path:
+                self._move_path_buf.pop()
 
             if score > value:
                 value = score
@@ -1191,23 +1238,20 @@ class GameAI:
         receive the worst score seen so far so max() still picks the best partial result.
         """
         self._nodes = 0
+        # SE-11b: init path buffer with game history; root moves pushed/popped below.
+        self._move_path_buf = list(self._game_notations)
         results = []
         for i, move in enumerate(moves):
             nb = board.apply_move(move)
-            # SE-11: per-root-move opponent reply frequency from trajectory DB.
-            _opp_freq_here = None
-            if self._trajectory_db is not None and self._game_notations:
-                _root_mn = self._move_notation(move)
-                _opp_freq_here = (
-                    self._trajectory_db.query_all_frequencies(
-                        self._game_notations + [_root_mn], min_samples=3
-                    ) or None
-                )
+            _root_mn = self._move_notation(move)
+            self._move_path_buf.append(_root_mn)
             try:
-                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _opp_freq_here)
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _MAX_OPP_PLIES)
                 score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+                self._move_path_buf.pop()
                 results.append((move, score))
             except _SearchAbort:
+                self._move_path_buf.pop()
                 worst = min(s for _, s in results) if results else -INF
                 for remaining in moves[i:]:
                     results.append((remaining, worst))

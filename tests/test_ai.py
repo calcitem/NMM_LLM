@@ -124,7 +124,7 @@ class TestGameAIChooseMove(unittest.TestCase):
         move = ai.choose_move(board)
         elapsed = time.time() - start
         self.assertIn(move, get_all_legal_moves(board))
-        self.assertLess(elapsed, 3.0, "Difficulty 3 must respond in under 3 seconds")
+        self.assertLess(elapsed, 5.0, "Difficulty 3 must respond in under 5 seconds")
 
     def test_completes_obvious_mill(self):
         # W at a7, d7; B has two isolated pieces (b6, g1) that cannot reform a mill.

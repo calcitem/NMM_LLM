@@ -15,8 +15,11 @@ Track 1 (heuristic/phase-control), SE-1 through SE-9, SE-14, and the B-55–B-64
 | ★ | **B-53** | ChromaDB embedding dimension mismatch when `ollama_model` changes |
 | ★ | **B-54** | Inject `phase_strategy.md` into LLM prompts by game phase |
 | ★ | **B-24** | GUI settings for FullGame / Endgame DB toggles and blend factor |
+| | **B-73** ✅ | Wire value network into negamax leaf evaluation |
+| | **B-74** ✅ | Cross-mill cycling fork: static eval bonus for two-mill pivot positions |
+| | **SE-11** ✅ | Opponent likelihood weighting + VN reordering (SE-11b/11c) via TrajectoryDB |
+| | **B-75** ✅ | Background pondering during opponent's turn |
 | | **B-51** | Build extended endgame WDL tables (code ready — run `--build-all`) |
-| | **SE-11** | Opponent likelihood weighting via TrajectoryDB |
 | | **SE-12** | Incremental evaluation cache (Zobrist-keyed) |
 | | **SE-13** | N-gram opponent move predictor |
 
@@ -300,7 +303,7 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
-### Bug B-71 — AI captures suboptimal opponent piece after closing a mill ⬜
+### Bug B-71 — AI captures suboptimal opponent piece after closing a mill ✅ 2026-05-31
 
 **Symptom:** Black AI closes a mill and removes White's f4 instead of f2. White can re-form a mill in 2 moves via g4-f4 + d6-f6, meaning Black's mill advantage is quickly neutralised. Removing f2 instead would prevent White from doing this before Black can open its own mill.
 
@@ -316,7 +319,7 @@ White plays b6xf2 (closes b6-d6-f6, captures f2). Black plays g7 instead of f2. 
 
 ---
 
-### Enhancement B-72 — Pure AI button: disable personality weight customisations ⬜
+### Enhancement B-72 — Pure AI button: disable personality weight customisations ✅ 2026-05-31
 
 **Request:** A GUI button that resets all personality sliders and weight adjustments to the bare evolved weights (best.json), with no user customisations on top. Useful for diagnosing whether a bug is caused by personality overlays or the base AI.
 
@@ -852,17 +855,86 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 
 ---
 
-### SE-11 — Opponent Likelihood Weighting (Asymmetric Depth via TrajectoryDB) ⬜ ★ Medium Impact
+### SE-11 / SE-11b / SE-11c — Opponent Likelihood Weighting + VN Reordering ✅ 2026-06-01
 
-**Why:** Standard alpha-beta allocates equal depth to all opponent responses regardless of how likely they are. Use existing `TrajectoryDB` move frequency to drive +1 extension for high-frequency opponent moves and −1 LMR for rare ones.
+**SE-11 (original):** +1 extension for high-frequency opponent moves at first opponent ply using `query_all_frequencies`.
 
-**Deliverables:**
-- `ai/trajectory_db.py` — `query_move_frequency(prefix, notation)` method returning normalised frequency [0.0, 1.0]
-- `ai/game_ai.py` — apply frequency-based depth delta at opponent nodes inside `_negamax`
+**SE-11b:** Shared `_move_path_buf` push/pop path buffer through `_negamax` recursion; query gated to first opponent ply only (307µs/call too expensive at deeper plies).
+
+**SE-11c:** At first opponent ply, VN re-sorts the LMR tail (last 60% of ordered moves) by `value_net.predict()` score descending so the strongest opponent moves are searched first. Gated to `depth >= 3` and VN available.
+
+**`_MAX_OPP_PLIES = 2`** constant controls reach; path tracking preserved for future extension.
+
+**Files changed:** `ai/game_ai.py`
+
+---
+
+### Enhancement B-73 — Wire Value Network into Negamax Leaf Evaluation ✅ 2026-05-31
+
+**Goal:** Make the trained `data/value_net.npz` actually affect game play. Currently `ValueNet` trains fine and the hook exists in `game_ai.py` / `mcts.py`, but `app.py` never loads the file or passes it to `GameAI`, so it has zero effect.
+
+**What to do:**
+
+1. In `web/app.py` at server startup, attempt to load `ValueNet.load_if_exists(ROOT / "data" / "value_net.npz")` and store as `_value_net` (similar to how `_fullgame_db` and `_endgame_solved_db` are loaded).
+
+2. Pass `value_net=_value_net` wherever `GameAI(...)` is constructed — in `_make_game_ai_for_personality()`, the handoff branch, and the AvsA block.
+
+3. In `ai/game_ai.py` `_negamax()`, at leaf nodes (depth == 0 or quiescence cutoff), if `self._value_net` is not None, blend the value net output with the heuristic score:
+   - Get `vn_score = self._value_net.predict(board, color) * SCALE` (scale to match heuristic range, e.g. × 500)
+   - Return `blend * vn_score + (1 - blend) * heuristic_score` where `blend` starts at 0.25 and can be tuned
+   - Only activate after the placement phase (reduces noise in phase where network has less data)
+
+4. Add `value_net_blend: float = 0.25` to `HeuristicWeights` so it's tunable from the AI Tuning panel or via evolution.
+
+5. Add a `vn-status` status line to the game header or AI Tuning panel showing "Value net: loaded (33 KB)" or "Value net: not found".
+
+**Note:** The value network quality depends entirely on how many self-play games have been run and trained on. With <200 games expect noise; with 2000+ expect genuine signal. Start with `blend=0.1` and raise only after verifying it doesn't hurt play.
+
+**Files:**
+- `web/app.py` — load `_value_net` at startup; pass to `GameAI`
+- `ai/game_ai.py` — blend `_value_net.predict()` at leaf nodes in `_negamax`
+- `ai/heuristics.py` — add `value_net_blend` field to `HeuristicWeights`
+- `web/templates/index.html` / `web/static/game.js` — optional status display
 
 ---
 
 ### TIER 4 — Infrastructure / Long-Term
+
+### Enhancement B-74 — Cross-Mill Cycling Fork Static Bonus ✅ 2026-06-01
+
+**Problem:** When White holds a completed mill M1 and a near-complete mill M2 where a piece of M1 is one step from M2's closing square, the AI undervalues the position. The existing `_mill_cycle_ready` in `evaluate()` treats this the same as any cycle-ready mill. The more powerful "two-mill fork" (alternating captures every two turns, opponent cannot simultaneously block both) only received a delta bonus in `score_move()` via `cycling_close_bonus` and `cycling_gain` — never in the leaf static eval.
+
+**Fix:** `_cross_mill_cycling(board, color)` counts (closed mill, near-mill) pairs where a piece in the closed mill is adjacent to the empty closing square of the near-mill. Wired into `evaluate()` in move and fly phases with `cross_mill_cycling` weight (default 300).
+
+**Key scenario:** After 11.f4→f6×d5 in the user's demonstration game:
+- White has closed mill b6-d6-f6
+- White has near-mill c5-?-e5 (d5 just captured, now empty)
+- d6 (in the closed mill) is adjacent to d5 (the closing square)
+- `_cross_mill_cycling` = 1 for White; Black cannot block both mills simultaneously
+
+**Files changed:**
+- `ai/heuristics.py` — `cross_mill_cycling` field in `HeuristicWeights`, `_cross_mill_cycling()` function, wired into `evaluate()`
+- `web/app.py` — all 4 `HeuristicWeights(...)` constructors include `cross_mill_cycling`
+- `data/weights/best.json` — `"cross_mill_cycling": 300`
+- `tests/test_b74.py` — unit test with the post-move-11 board
+
+---
+
+### B-75 — Background Pondering During Opponent's Turn ✅ 2026-06-01
+
+**What:** After the AI makes a move, predict the most likely opponent reply and begin a full-depth search of the response in a daemon thread. If the human plays the predicted move, the cached result is used immediately (ponder hit); otherwise it is discarded.
+
+**Prediction:** `_order_moves` priority ordering of opponent moves, optionally refined by VN re-score of top-3 candidates.
+
+**Shadow AI:** Identical config to main AI (`difficulty`, `weights`, `value_net`, `fullgame_db`, `endgame_solved_db`, `neural_evaluator`), fresh transposition table (avoids TT contamination).
+
+**Integration:** `PonderManager.start()` called after each AI move (difficulty ≥ 3, no coordinator, no vs_human). `stop()` + `get_result()` called at start of the next AI turn. Cancelled on any human capture action.
+
+**Files changed:**
+- `ai/ponder.py` — new `PonderManager` class
+- `web/app.py` — `Session.ponder_manager`; start/stop hooks in `_ai_turn` and move/capture handlers
+
+---
 
 ### SE-12 — Incremental Evaluation Cache (Zobrist-Keyed Sub-Functions) ⬜
 
