@@ -1185,6 +1185,94 @@ When `key_present` is false, the badge is amber with text "Set `ANTHROPIC_API_KE
 
 ---
 
+### B-76 — train_value_net.py: use AI vs AI games for assessment ⬜ ★
+
+**Problem:** `train_value_net.py` currently draws training/assessment data only from human game records. Human games have uneven quality and sparse tactical situations. AI vs AI games at high difficulty generate much denser tactical content and more reliable signal for value-net calibration.
+
+**Goal:** Extend `train_value_net.py` to also load AI vs AI game logs (from `data/logs/` or a dedicated directory) and include those positions in the assessment/training pipeline alongside human games.
+
+**Scope:**
+- Detect AI vs AI game files (e.g. by header metadata or filename pattern).
+- Feed their positions into the same feature extraction + label pipeline already used for human games.
+- No change to the net architecture or training loop — purely a data source extension.
+
+---
+
+### B-77 — Multi-step mill setup detection (2-ply pin rule) ⬜ ★★
+
+**Problem:** The move-phase pin rule (B-70) blocks moves where the AI's own piece is the *sole blocker* of an opponent 2-config AND an opponent piece is *adjacent* to the pinned square. This looks exactly 1 ply ahead. A 2-step setup (e.g. Black d2→d1 then a4→a1) is not detected, so the AI vacates g1 allowing Black to form the a1-d1-g1 mill two moves later.
+
+**Example game (observed 2026-06-01):** Turn 18 — White played g1→g4. Black subsequently formed a1-d1-g1 over the next 2 moves.
+
+**Goal:** Extend the pin-detection logic to look 2 plies ahead: after removing the AI's piece from square S, simulate all opponent moves from the resulting position and check whether any opponent move then creates a new direct mill threat (i.e. completes a 2-config where S is now undefended). Flag S as a 2-ply pin and hard-filter or penalise moves that vacate it.
+
+**Files:**
+- `ai/game_ai.py` — `_pinned_move_squares()` or new `_pinned_move_squares_2ply()` helper
+
+---
+
+### B-78 — Trajectory DB turn-4 interference investigation ⬜ ★
+
+**Problem:** In the same game as B-77, White played b2 (placement) on turn 4 instead of completing the mill at g7 (a7 and d7 already placed). This is a B-22-class error but occurs during the placement phase. Suspected cause: trajectory DB promoting b2 as a frequent human move, overriding the tactical mill-close priority.
+
+**Goal:** Audit whether the trajectory DB or FullGameDB hint is interfering with mill-close detection during placement. Add a diagnostic log entry when a DB-suggested move ranks lower than a mill-closing move, to make future regressions visible.
+
+**Files:**
+- `ai/game_ai.py` — SE-14 FullGameDB probe and `_score_all` DB hint blending
+- `ai/trajectory_db.py` — `score_delta` call site in `_root_search`
+
+---
+
+### B-79 — Dead placement filter regression at a7 ✅ 2026-06-01 ★★
+
+**Problem:** B-69 hard-filters placements on squares with 0 free neighbours (unless they close a mill). In an AI vs AI level-3 game, the AI placed on a7 despite a7's neighbours being d7=W and a4=B (0 free adjacent squares), meaning a7 was dead on arrival.
+
+**Observed:** Game notation provided 2026-06-01. B-69 filter (`_is_dead_placement`) did not prevent this.
+
+**Likely causes to investigate:**
+1. `board.phase != "place"` test is wrong at the relevant turn (e.g. phase already flipped to "move").
+2. The placement move dict has a `"from"` key in some code path, causing the `if mv.get("from") is None` guard to pass it through as a movement rather than a placement.
+3. A mandatory-block or mill-close exemption is incorrectly firing.
+4. `_is_dead_placement` neighbour lookup uses a stale board state.
+
+**Goal:** Write a regression test reproducing the exact board position, confirm the filter fires correctly, and fix whichever guard is leaking.
+
+**Files:**
+- `ai/game_ai.py` — `_is_dead_placement()` (~line 278), placement filter (~line 546-549)
+- `tests/test_blocking.py` or new `tests/test_b79.py`
+
+---
+
+### SE-15 — Audit SE-11b/c effectiveness and effective search depth ⬜ ★
+
+**Problem:** In AI vs AI games at difficulty 5–6, moves appear to be made very quickly, suggesting the search may not be reaching the expected effective depth. SE-11b/c (trajectory path buffer + VN reordering at opponent plies) was intended to prune bad human trajectories and deepen effective search. The user requests confirmation that this pruning is actually firing and improving depth.
+
+**Goal:**
+1. Add a debug/diagnostic mode that logs: effective depth reached per move, TT hit rate, SE-11 prune count (how many opponent moves were dropped by VN reordering).
+2. Verify that `_MAX_OPP_PLIES = 2` is correct and that the VN reordering is actually reordering (not a no-op due to all moves scoring 0).
+3. If SE-11 is not firing effectively, investigate and fix.
+
+**Files:**
+- `ai/game_ai.py` — `_negamax` SE-11b/c block, `_opp_plies_left` usage
+
+---
+
+### B-80 — Mill abandonment and non-closure detection ⬜ ★★
+
+**Problem:** In a difficulty-6 AI vs AI game (2026-06-01), Black played f4→f6, abandoning an open mill threat at f4. White then failed to capitalise by playing f2→f4 to take the vacated mill square. Both failures suggest that:
+1. The AI is not penalising self-mill abandonment (moving off a 2-config square that could close a mill next turn).
+2. The AI is not rewarding opportunistic mill capture (moving into a square vacated by the opponent that completes a mill).
+
+**Goal:** 
+1. Add a penalty in `tactical_move_bonus()` or the heuristic for abandoning a square that was part of a live 2-config (i.e. one more piece would close it).
+2. Add a reward for occupying a square that completes a mill when the opponent has just vacated it (currently covered by mill-close detection but apparently insufficient).
+
+**Files:**
+- `ai/game_ai.py` — `tactical_move_bonus()`, `_order_moves()`
+- `ai/heuristics.py` — `evaluate()` positional terms
+
+---
+
 ## Architecture Principles
 
 - **Immutable board state** — `BoardState.apply_move()` always returns a new object.

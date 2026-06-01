@@ -297,6 +297,22 @@ def _is_dead_placement(board: BoardState, move: dict) -> bool:
     return True
 
 
+def _dead_has_mill_potential(board: BoardState, to: str) -> bool:
+    """True when `to` belongs to at least one mill line not already opponent-blocked.
+
+    Used as a tiebreaker when all remaining placements are dead: prefer squares
+    that still have a plausible mill to aim for (opponent has not yet occupied
+    another square in every containing mill).
+    """
+    opp = "B" if board.turn == "W" else "W"
+    for mill in MILLS:
+        if to not in mill:
+            continue
+        if not any(board.positions.get(sq) == opp for sq in mill if sq != to):
+            return True
+    return False
+
+
 def _parse_book_move(book_move_str: str, legal_moves: list) -> dict | None:
     """Return the legal move dict that matches the book move notation, or None."""
     if not book_move_str:
@@ -547,6 +563,20 @@ class GameAI:
             non_dead = [m for m in moves if not _is_dead_placement(board, m)]
             if non_dead:
                 moves = non_dead
+            else:
+                # All placements are dead (late placement phase, board is packed).
+                # Secondary filter: prefer squares with surviving mill potential —
+                # at least one containing mill line not already blocked by an
+                # opponent piece.  Squares like a7 (both lines blocked by opponent)
+                # are discarded in favour of b6, f6, etc. that still have
+                # plausible mill formations.
+                with_potential = [
+                    m for m in moves
+                    if m.get("from") is None
+                    and _dead_has_mill_potential(board, m["to"])
+                ]
+                if with_potential:
+                    moves = with_potential
 
         # Position-specific move bans (set via bad-move button): filter AFTER mandatory
         # block so a banned blocking move can still be played if it's the only way to block.

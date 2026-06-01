@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import unittest
 
-from game.board import ADJACENCY, BoardState
-from ai.game_ai import GameAI, _is_dead_placement
+from game.board import ADJACENCY, BoardState, POSITIONS
+from ai.game_ai import GameAI, _is_dead_placement, _dead_has_mill_potential
 
 
 def _free_neighbors(board: BoardState, sq: str) -> int:
@@ -177,6 +177,85 @@ class TestDeadPlacementHardFilter(unittest.TestCase):
             move["to"], "g7",
             f"Forced block at dead square should still be played; got {move}",
         )
+
+
+def _b79_board() -> BoardState:
+    """Board from the B-79 regression game (AI vs AI level 3, 2026-06-01).
+
+    After: 1.d6 f4, 2.g4 d2, 3.d7 d5, 4.d3 c4, 5.b4 a4, 6.g1 g7, 7.a1 d1, 8.e5 e4
+    White to place 9th piece; all 8 remaining empty squares are dead.
+    """
+    pos = {p: "" for p in POSITIONS}
+    for p in ["d6", "g4", "d7", "d3", "b4", "g1", "a1", "e5"]:
+        pos[p] = "W"
+    for p in ["f4", "d2", "d5", "c4", "a4", "g7", "d1", "e4"]:
+        pos[p] = "B"
+    from game.board import hash_board
+    b = BoardState(
+        positions=pos,
+        turn="W",
+        pieces_on_board={"W": 8, "B": 8},
+        pieces_placed={"W": 8, "B": 8},
+        pieces_captured={"W": 0, "B": 0},
+        hash_key=0,
+    )
+    return b.__class__(
+        positions=pos,
+        turn="W",
+        pieces_on_board={"W": 8, "B": 8},
+        pieces_placed={"W": 8, "B": 8},
+        pieces_captured={"W": 0, "B": 0},
+        hash_key=hash_board(b),
+    )
+
+
+class TestDeadMillPotential(unittest.TestCase):
+    """Unit tests for _dead_has_mill_potential (B-79 secondary filter)."""
+
+    def test_a7_has_no_mill_potential(self):
+        """a7: (a7,d7,g7) blocked by g7=B; (a1,a4,a7) blocked by a4=B → no potential."""
+        board = _b79_board()
+        self.assertFalse(_dead_has_mill_potential(board, "a7"))
+
+    def test_f2_has_no_mill_potential(self):
+        """f2: (f6,f4,f2) blocked by f4=B; (f2,d2,b2) blocked by d2=B → no potential."""
+        board = _b79_board()
+        self.assertFalse(_dead_has_mill_potential(board, "f2"))
+
+    def test_c5_has_no_mill_potential(self):
+        """c5: (c5,d5,e5) blocked by d5=B; (c3,c4,c5) blocked by c4=B → no potential."""
+        board = _b79_board()
+        self.assertFalse(_dead_has_mill_potential(board, "c5"))
+
+    def test_b6_has_mill_potential(self):
+        """b6: (b6,d6,f6) has d6=W, f6=empty (no opponent) → has potential."""
+        board = _b79_board()
+        self.assertTrue(_dead_has_mill_potential(board, "b6"))
+
+    def test_e3_has_mill_potential(self):
+        """e3: (e3,d3,c3) has d3=W, c3=empty (no opponent) → has potential."""
+        board = _b79_board()
+        self.assertTrue(_dead_has_mill_potential(board, "e3"))
+
+
+class TestAllDeadFallback(unittest.TestCase):
+    """Integration: when all placements are dead the AI must not choose a square
+    with zero surviving mill potential (B-79 regression — 2026-06-01 AI vs AI game)."""
+
+    def test_ai_avoids_fully_blocked_dead_squares(self):
+        """AI must not place on a7, f2, or c5 — all opponent-blocked on every mill line."""
+        board = _b79_board()
+        zero_potential = {"a7", "f2", "c5"}
+
+        for diff in (1, 2, 3):
+            ai = GameAI(color="W", difficulty=diff)
+            move = ai.choose_move(board)
+            self.assertIsNotNone(move)
+            self.assertNotIn(
+                move["to"],
+                zero_potential,
+                f"difficulty={diff}: AI chose fully-blocked dead square {move['to']}",
+            )
 
 
 if __name__ == "__main__":
