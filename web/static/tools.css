@@ -1,10 +1,16 @@
 /* tools.css — Tools management page styles */
 
 #tools-app {
-  max-width: 960px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 0 1rem 3rem;
   font-family: var(--font, monospace);
+}
+
+/* Override the game page's 3-column main grid so tool sections stack vertically. */
+#tools-app main {
+  display: block;
+  padding: 0;
 }
 
 #tools-app header {

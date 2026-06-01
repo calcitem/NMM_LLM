@@ -285,7 +285,7 @@ class ExpandFromGamesBuilder:
     The temp DB is deleted automatically after ``write_binary`` completes.
 
 Example;
-python tools/build_fullgame_db.py --expand-from-games data/games --min-seed-frequency 3 --early-expand-depth 4 --expand-depth 6 --output /mnt/windows/NMM_DB/fullgame.bin --temp-db /mnt/windows/NMM_DB/ --max-db-gb 100
+python tools/build_fullgame_db.py --expand-from-games data/games --min-seed-frequency 3 --early-expand-depth 4 --expand-depth 6 --output /mnt/windows/NMM_DB/fullgame.bin --temp-db /mnt/windows/NMM_DB/ --max-db-gb 40
 
 for 269 games → 5168 unique canonical positions; temp size = 4.7 GB, final DB size = 545 MB
 

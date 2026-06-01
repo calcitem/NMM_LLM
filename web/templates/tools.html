@@ -17,7 +17,230 @@
 
   <main>
 
-    <!-- ── Status Cards ───────────────────────────────────────────────── -->
+    <!-- ── Build FullGame DB ──────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Build FullGame DB</h2>
+      <p class="tool-desc">Scans human-played games to find common positions, then BFS-expands around them to cover opponent responses. Output is a sorted binary (.bin) file. Script: <code>tools/build_fullgame_db.py</code></p>
+      <div class="tool-form">
+        <label title="--expand-from-games: Directory of human JSONL games">Games dir
+          <input type="text" id="fg-gamesdir" value="data/games" style="width:14em"></label>
+        <label title="--output / --db-dir: Output binary file path">Output file
+          <input type="text" id="fg-dbdir" value="data/fullgame.bin" style="width:16em"></label>
+        <label title="--min-seed-frequency: Min times a position must appear to be used as BFS seed">Min seed freq
+          <input type="number" id="fg-minseed" value="2" min="1" max="100" style="width:5em"></label>
+        <label title="--early-expand-depth: BFS depth for early-game positions">Early expand depth
+          <input type="number" id="fg-expdepth-early" value="8" min="1" max="20" style="width:4em"></label>
+        <label title="--expand-depth: BFS depth for late-game (all pieces placed)">Late expand depth
+          <input type="number" id="fg-expdepth" value="4" min="1" max="12" style="width:4em"></label>
+        <label title="--max-expand-positions: Hard cap on total BFS-expanded positions">Max expand positions
+          <input type="number" id="fg-maxexpand" value="200000" min="1000" style="width:8em"></label>
+        <label title="--passes: Backpropagation passes for position labelling">Backprop passes
+          <input type="number" id="fg-passes" value="6" min="1" max="20" style="width:4em"></label>
+        <label title="--max-gb: Process RSS memory limit in GB">Max RAM (GB)
+          <input type="number" id="fg-maxgb" value="6.0" min="1" max="64" step="0.5" style="width:5em"></label>
+        <label title="--max-db-gb: Temp SQLite build database size limit in GB">Max temp DB (GB)
+          <input type="number" id="fg-maxdbgb" value="10.0" min="1" max="100" step="0.5" style="width:5em"></label>
+        <label title="--quiet: Suppress progress logging"><input type="checkbox" id="fg-quiet"> Quiet</label>
+        <label title="--dry-run: Build from tiny synthetic game set (test only)"><input type="checkbox" id="fg-dryrun"> Dry run</label>
+      </div>
+      <button class="btn-run" id="btn-build-fg" data-tool="build_fullgame_db">&#9654; Build FullGame DB</button>
+    </section>
+
+    <!-- ── Build Endgame Solved DB ───────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Build Endgame Solved DB</h2>
+      <p class="tool-desc">Retrograde-solve all positions with ≤5 pieces per side. Produces <code>endgame_{nW}_{nB}.wdl</code> files. Takes minutes to hours. Script: <code>tools/build_endgame_db.py</code></p>
+      <div class="tool-form">
+        <label title="--out-dir: Output directory for endgame .wdl files">Output dir
+          <input type="text" id="eg-outdir" value="data/endgame" style="width:16em"></label>
+        <label title="--build-all: Build all tables in dependency order"><input type="checkbox" id="eg-buildall" checked> Build all tables</label>
+        <label title="--max-sum: Max nW+nB when using --build-all (controls scope)">Max piece sum
+          <input type="number" id="eg-maxsum" value="11" min="2" max="14" style="width:4em"></label>
+        <label title="--nW: White piece count for single table (leave 0 for --build-all)">nW (single)
+          <input type="number" id="eg-nw" value="0" min="0" max="9" style="width:4em"></label>
+        <label title="--nB: Black piece count for single table (leave 0 for --build-all)">nB (single)
+          <input type="number" id="eg-nb" value="0" min="0" max="9" style="width:4em"></label>
+        <label title="--skip-existing: Skip .wdl tables already on disk"><input type="checkbox" id="eg-skip" checked> Skip existing</label>
+        <label title="--quiet: Suppress per-pass logging"><input type="checkbox" id="eg-quiet"> Quiet</label>
+      </div>
+      <button class="btn-run" id="btn-build-eg" data-tool="build_endgame_db">&#9654; Build Endgame DB</button>
+    </section>
+
+    <!-- ── Endgame Self-Play ─────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Endgame Self-Play</h2>
+      <p class="tool-desc">AI vs AI games starting from random endgame positions, for rapid EndgameDB enrichment. Script: <code>tools/endgame_play.py</code></p>
+      <div class="tool-form">
+        <label title="--positions: Number of endgame positions to play">Positions
+          <input type="number" id="ep-positions" value="100" min="1" max="10000" style="width:6em"></label>
+        <label title="--difficulty: AI search difficulty (1–10)">Difficulty
+          <input type="number" id="ep-diff" value="5" min="1" max="10" style="width:4em"></label>
+        <label title="--parallel: Parallel game workers">Parallel
+          <input type="number" id="ep-parallel" value="1" min="1" max="8" style="width:4em"></label>
+        <label title="--min-pieces: Minimum total pieces on board">Min pieces
+          <input type="number" id="ep-minpc" value="6" min="3" max="18" style="width:4em"></label>
+        <label title="--max-pieces: Maximum total pieces on board">Max pieces
+          <input type="number" id="ep-maxpc" value="11" min="3" max="18" style="width:4em"></label>
+        <label title="--personalities: Comma-separated pool (blank = all except chaos)">Personalities
+          <input type="text" id="ep-personalities" value="" placeholder="all" style="width:20em"></label>
+        <label title="--seed-from-games: Extract start positions from existing JSONL instead of random"><input type="checkbox" id="ep-seedgames"> Seed from games</label>
+      </div>
+      <button class="btn-run" id="btn-endgame-play" data-tool="endgame_play">&#9654; Run Endgame Play</button>
+    </section>
+
+    <!-- ── Self-Play ──────────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Self-Play</h2>
+      <p class="tool-desc">Run AI vs AI games to accumulate training data. Saves game records to <code>data/games/</code>. Script: <code>tools/self_play.py</code></p>
+      <div class="tool-form">
+        <label title="--games / -n: Number of games to play">Games
+          <input type="number" id="sp-games" value="20" min="1" max="500" style="width:5em"></label>
+        <label title="--white: White AI difficulty (1–10)">White difficulty
+          <input type="number" id="sp-white" value="5" min="1" max="10" style="width:4em"></label>
+        <label title="--black: Black AI difficulty (1–10)">Black difficulty
+          <input type="number" id="sp-black" value="5" min="1" max="10" style="width:4em"></label>
+        <label title="--parallel / -p: Parallel game workers (fast mode only)">Parallel
+          <input type="number" id="sp-parallel" value="2" min="1" max="8" style="width:4em"></label>
+        <label title="--blunder: Blunder probability 0–1 (0 = never)">Blunder prob
+          <input type="number" id="sp-blunder" value="0.0" min="0" max="1" step="0.05" style="width:5em"></label>
+        <label title="--white-personality: Fix White to this personality (blank = random from pool)">White personality
+          <select id="sp-white-pers">
+            <option value="">random</option>
+            <option value="balanced">balanced</option>
+            <option value="aggressive">aggressive</option>
+            <option value="defensive">defensive</option>
+            <option value="positional">positional</option>
+            <option value="scholar">scholar</option>
+            <option value="chaos">chaos</option>
+          </select></label>
+        <label title="--black-personality: Fix Black to this personality (blank = random from pool)">Black personality
+          <select id="sp-black-pers">
+            <option value="">random</option>
+            <option value="balanced">balanced</option>
+            <option value="aggressive">aggressive</option>
+            <option value="defensive">defensive</option>
+            <option value="positional">positional</option>
+            <option value="scholar">scholar</option>
+            <option value="chaos">chaos</option>
+          </select></label>
+        <label title="--personalities: Comma-separated personality pool (blank = default pool)">Personality pool
+          <input type="text" id="sp-personalities" value="" placeholder="balanced,aggressive,defensive,positional,scholar" style="width:28em"></label>
+        <label title="--no-llm: Skip LLM calls for faster execution"><input type="checkbox" id="sp-nollm" checked> Skip LLM (faster)</label>
+        <label title="--swap: Alternate which AI plays White each game"><input type="checkbox" id="sp-swap" checked> Swap colors</label>
+        <label title="--name-openings: Use LLM to name novel openings discovered"><input type="checkbox" id="sp-nameopenings"> Name openings</label>
+      </div>
+      <button class="btn-run" id="btn-selfplay" data-tool="self_play">&#9654; Run Self-Play</button>
+    </section>
+
+    <!-- ── Train Value Network ───────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Train Value Network</h2>
+      <p class="tool-desc">Train an MLP value network from JSONL game records. Requires PyTorch. Output is a <code>.npz</code> weight file used by the neural leaf evaluator. Script: <code>tools/train_value_net.py</code></p>
+      <div class="tool-form">
+        <label title="--games-dir: Source directory of JSONL game records">Games dir
+          <input type="text" id="vn-gamesdir" value="data/games" style="width:14em"></label>
+        <label title="--output: Output .npz file path">Output file
+          <input type="text" id="vn-output" value="data/value_net.npz" style="width:18em"></label>
+        <label title="--epochs: Training epochs">Epochs
+          <input type="number" id="vn-epochs" value="30" min="1" max="500" style="width:5em"></label>
+        <label title="--lr: Learning rate">Learning rate
+          <input type="number" id="vn-lr" value="0.001" min="0.0001" max="0.1" step="0.0001" style="width:7em"></label>
+        <label title="--batch-size: Mini-batch size">Batch size
+          <input type="number" id="vn-batch" value="256" min="16" max="4096" style="width:5em"></label>
+      </div>
+      <button class="btn-run" id="btn-train-vnet" data-tool="train_value_net">&#9654; Train Value Network</button>
+    </section>
+
+    <!-- ── Evolve Weights ─────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Evolve Heuristic Weights</h2>
+      <p class="tool-desc">Era-aware (1+1)-ES to find better heuristic weights. Per-personality or gauntlet mode (all personalities). Script: <code>tools/evolve_weights_v2.py</code></p>
+      <div class="tool-form">
+        <label title="--gauntlet: Tune best.json against all personalities (saves to data/weights/best.json)"><input type="checkbox" id="ew-gauntlet"> Gauntlet mode (tune best.json)</label>
+        <label title="--personalities: Comma-separated list (non-gauntlet); blank = all except custom">Personalities
+          <input type="text" id="ew-personalities" value="" placeholder="all except custom" style="width:24em"></label>
+        <label title="--generations: Generations per personality">Generations
+          <input type="number" id="ew-gens" value="30" min="1" max="200" style="width:5em"></label>
+        <label title="--games-per-gen: Games per evaluation generation">Games/gen
+          <input type="number" id="ew-gpg" value="20" min="1" max="100" style="width:5em"></label>
+        <label title="--difficulty: AI search difficulty (1–10)">Difficulty
+          <input type="number" id="ew-diff" value="5" min="1" max="10" style="width:4em"></label>
+        <label title="--parallel: Parallel game workers">Parallel
+          <input type="number" id="ew-parallel" value="4" min="1" max="8" style="width:4em"></label>
+        <label title="--sigma: Mutation noise magnitude (0–1)">Sigma
+          <input type="number" id="ew-sigma" value="0.12" min="0.01" max="1" step="0.01" style="width:5em"></label>
+        <label title="--threshold: Win rate to promote per-personality weights (default 0.55)">Win threshold
+          <input type="number" id="ew-threshold" value="0.55" min="0.5" max="0.9" step="0.01" style="width:5em"></label>
+        <label title="--gauntlet-threshold: Win rate to promote in gauntlet mode (default 0.52)">Gauntlet threshold
+          <input type="number" id="ew-g-threshold" value="0.52" min="0.5" max="0.9" step="0.01" style="width:5em"></label>
+        <label title="--era-size: Generations per era for sigma adaptation">Era size
+          <input type="number" id="ew-erasize" value="5" min="1" max="20" style="width:4em"></label>
+        <label title="--era-top-k: Top-K candidates for directional bias">Era top-K
+          <input type="number" id="ew-topk" value="3" min="1" max="10" style="width:4em"></label>
+        <label title="--bias-strength: Fraction of mutation to bias toward era best (0–1)">Bias strength
+          <input type="number" id="ew-bias" value="0.3" min="0" max="1" step="0.05" style="width:5em"></label>
+        <label title="--warm-blend: Blend toward era best on failure (0–1)">Warm blend
+          <input type="number" id="ew-warmblend" value="0.25" min="0" max="1" step="0.05" style="width:5em"></label>
+        <label title="--subset-size: Fields to tune per era (0 = all ~53 fields)">Subset size
+          <input type="number" id="ew-subset" value="0" min="0" max="53" style="width:4em"></label>
+        <label title="--seed: RNG seed (blank = random)">RNG seed
+          <input type="number" id="ew-seed" value="" placeholder="random" style="width:7em"></label>
+      </div>
+      <p class="tool-desc" id="ew-gauntlet-note" style="display:none">Gauntlet mode: evaluates each candidate against all personalities; threshold is 0.52. Saves to <code>data/weights/best.json</code>.</p>
+      <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
+    </section>
+
+    <!-- ── Auto-Evolve ────────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Auto-Evolve After N Games</h2>
+      <p class="tool-desc">Server automatically runs gauntlet evolution after every N saved human games. 0 = disabled. Log: <code>data/weights/auto_evolve.log</code></p>
+      <div class="tool-form">
+        <label>Trigger after
+          <input type="number" id="ae-threshold" value="0" min="0" max="1000" style="width:5em"> games (0 = disabled)</label>
+        <span id="ae-status" style="margin-left:1em; color:#888">—</span>
+      </div>
+      <button id="btn-ae-save" class="btn-refresh">&#x2714; Save Auto-Evolve Setting</button>
+    </section>
+
+    <!-- ── Name Openings ──────────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Name Openings</h2>
+      <p class="tool-desc">Merges duplicate openings and names unnamed ones via the LLM. Deduplication always runs; LLM naming requires Ollama. Script: <code>tools/name_openings.py</code></p>
+      <div class="tool-form">
+        <label title="--ollama-url: Ollama endpoint URL">Ollama URL
+          <input type="text" id="no-ollamaurl" value="http://localhost:11434" style="width:20em"></label>
+        <label title="--model: LLM model name to use for naming">Model
+          <input type="text" id="no-model" value="llama3.1:8b" style="width:14em"></label>
+        <label title="--min-common: Minimum shared leading moves to treat as duplicate">Min common moves
+          <input type="number" id="no-mincommon" value="4" min="1" max="12" style="width:4em"></label>
+        <label title="--dry-run: Report only, no saves"><input type="checkbox" id="no-dryrun"> Dry run</label>
+        <label title="--merge-only: Deduplicate but skip LLM naming"><input type="checkbox" id="no-mergeonly"> Merge only (skip LLM)</label>
+      </div>
+      <button class="btn-run" id="btn-nameopenings" data-tool="name_openings">&#9654; Name Openings</button>
+    </section>
+
+    <!-- ── Purge AI Learning ──────────────────────────────────────────── -->
+    <section class="tools-section tools-section-danger">
+      <h2>&#9888; Purge AI Self-Play Learning</h2>
+      <p class="tool-desc">Removes AI-generated openings and self-play game records. Keeps human games and book-imported openings. Writes a backup to <code>data/backups/</code> before making changes.</p>
+      <div class="tool-form">
+        <label title="--dry-run: Preview what would be removed without making changes"><input type="checkbox" id="purge-dryrun" checked> Dry run first (preview only)</label>
+      </div>
+      <button class="btn-run btn-danger" id="btn-purge" data-tool="purge_ai_learning">&#x1F5D1; Purge AI Learning</button>
+    </section>
+
+    <!-- ── Output Log ─────────────────────────────────────────────────── -->
+    <section class="tools-section" id="section-log">
+      <h2>Output <span id="log-tool-label"></span></h2>
+      <div id="log-output"></div>
+      <div class="log-controls">
+        <button id="btn-stop" style="display:none" class="btn-danger">&#x23F9; Stop</button>
+        <button id="btn-clear-log">&#x2715; Clear</button>
+        <label><input type="checkbox" id="chk-autoscroll" checked> Auto-scroll</label>
+      </div>
+    </section>
+
+    <!-- ── Database Status ───────────────────────────────────────────── -->
     <section class="tools-section" id="section-status">
       <h2>Database Status</h2>
       <div class="status-grid">
@@ -37,9 +260,17 @@
           <div class="card-title">Endgame Solved DB</div>
           <div class="card-body">
             <div class="stat-row"><span>Status</span><span id="es-status">—</span></div>
+            <div class="stat-row"><span>Tables built</span><span id="es-tablecount">—</span></div>
             <div class="stat-row"><span>Positions</span><span id="es-positions">—</span></div>
             <div class="stat-row"><span>Size</span><span id="es-size">—</span></div>
             <div class="stat-row"><span>Modified</span><span id="es-mtime">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-endgame-tables">
+          <div class="card-title">WDL Tables</div>
+          <div class="card-body" id="es-tables-body">
+            <div class="stat-row"><span style="color:var(--text-dim)">No tables built yet</span></div>
           </div>
         </div>
 
@@ -69,6 +300,15 @@
           </div>
         </div>
 
+        <div class="status-card" id="card-vnet">
+          <div class="card-title">Value Network</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Status</span><span id="vn-status">—</span></div>
+            <div class="stat-row"><span>Size</span><span id="vn-size">—</span></div>
+            <div class="stat-row"><span>Modified</span><span id="vn-mtime">—</span></div>
+          </div>
+        </div>
+
         <div class="status-card" id="card-openings">
           <div class="card-title">Opening Book</div>
           <div class="card-body">
@@ -81,105 +321,6 @@
       <button class="btn-refresh" id="btn-refresh-status">&#x21BB; Refresh Status</button>
     </section>
 
-    <!-- ── Build FullGame DB ──────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Build FullGame DB</h2>
-      <p class="tool-desc">Scans human-played games to find common positions, then BFS-expands around them to cover opponent responses not seen in the corpus. Output is a sorted binary (.bin) file.</p>
-      <div class="tool-form">
-        <label>Min seed frequency <input type="number" id="fg-minseed" value="2" min="1" max="100" style="width:5em" title="Minimum times a position must appear in human games to be used as a BFS seed"></label>
-        <label>Early expand depth <input type="number" id="fg-expdepth-early" value="8" min="1" max="20" style="width:4em" title="BFS depth for early-game positions (0 pieces placed); tapers to late depth by end of placement"></label>
-        <label>Late expand depth <input type="number" id="fg-expdepth" value="4" min="1" max="12" style="width:4em" title="BFS depth for late-game positions (all pieces placed)"></label>
-        <label>Max expand positions <input type="number" id="fg-maxexpand" value="200000" min="1000" style="width:8em" title="Hard cap on total BFS-expanded positions (controls file size)"></label>
-        <label>Output dir (blank = data/) <input type="text" id="fg-dbdir" value="" placeholder="data/" style="width:16em"></label>
-      </div>
-      <button class="btn-run" id="btn-build-fg" data-tool="build_fullgame_db">&#9654; Build FullGame DB</button>
-    </section>
-
-    <!-- ── Build Endgame DB ───────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Build Endgame Solved DB</h2>
-      <p class="tool-desc">Retrograde-solve all positions with ≤5 pieces per side. Takes minutes to hours depending on depth. Output goes to <code>data/endgame/</code>.</p>
-      <div class="tool-form">
-        <label>Output dir <input type="text" id="eg-outdir" value="data/endgame" style="width:18em"></label>
-      </div>
-      <button class="btn-run" id="btn-build-eg" data-tool="build_endgame_db">&#9654; Build Endgame DB</button>
-    </section>
-
-    <!-- ── Self-Play ──────────────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Self-Play</h2>
-      <p class="tool-desc">Run AI vs AI games to accumulate training data. Uses <code>tools/self_play.py</code>. Saves game records to <code>data/games/</code>.</p>
-      <div class="tool-form">
-        <label>Games <input type="number" id="sp-games" value="20" min="1" max="500" style="width:5em"></label>
-        <label>White difficulty <input type="number" id="sp-white" value="5" min="1" max="10" style="width:4em"></label>
-        <label>Black difficulty <input type="number" id="sp-black" value="5" min="1" max="10" style="width:4em"></label>
-        <label>Parallel workers <input type="number" id="sp-parallel" value="2" min="1" max="8" style="width:4em"></label>
-        <label><input type="checkbox" id="sp-nollm" checked> Skip LLM (faster)</label>
-      </div>
-      <button class="btn-run" id="btn-selfplay" data-tool="self_play">&#9654; Run Self-Play</button>
-    </section>
-
-    <!-- ── Evolve Weights ─────────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Evolve Heuristic Weights</h2>
-      <p class="tool-desc">Runs an era-aware (1+1)-ES to find better heuristic weights. Uses <code>tools/evolve_weights_v2.py</code>.</p>
-      <div class="tool-form">
-        <label><input type="checkbox" id="ew-gauntlet"> Gauntlet mode — tune <code>best.json</code> against all personalities</label>
-        <label>Generations <input type="number" id="ew-gens" value="30" min="1" max="200" style="width:5em"></label>
-        <label>Games/gen <input type="number" id="ew-gpg" value="20" min="1" max="100" style="width:5em"></label>
-        <label>Difficulty <input type="number" id="ew-diff" value="5" min="1" max="10" style="width:4em"></label>
-        <label>Parallel <input type="number" id="ew-parallel" value="4" min="1" max="8" style="width:4em"></label>
-        <label>Sigma <input type="number" id="ew-sigma" value="0.12" min="0.01" max="1" step="0.01" style="width:5em"></label>
-        <label title="Fields to tune per era (0 = all 53 fields; e.g. 48 drops 5 at random each era)">Subset size <input type="number" id="ew-subset" value="0" min="0" max="53" style="width:4em"></label>
-      </div>
-      <p class="tool-desc" id="ew-gauntlet-note" style="display:none">Gauntlet mode evaluates against all personalities and saves to <code>data/weights/best.json</code>. Threshold is 0.52 (vs 0.55 per-personality).</p>
-      <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
-    </section>
-
-    <!-- ── Auto-Evolve ────────────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Auto-Evolve After N Games</h2>
-      <p class="tool-desc">Server automatically runs gauntlet evolution after every N saved human games. Set to 0 to disable. Log goes to <code>data/weights/auto_evolve.log</code>.</p>
-      <div class="tool-form">
-        <label>Trigger after <input type="number" id="ae-threshold" value="0" min="0" max="1000" style="width:5em"> games (0 = disabled)</label>
-        <span id="ae-status" style="margin-left:1em; color:#888">—</span>
-      </div>
-      <button id="btn-ae-save" class="btn-refresh">&#x2714; Save Auto-Evolve Setting</button>
-    </section>
-
-    <!-- ── Name Openings ──────────────────────────────────────────────── -->
-    <section class="tools-section">
-      <h2>Name Openings</h2>
-      <p class="tool-desc">Merges duplicate openings and names unnamed ones via the LLM. Requires Ollama to be running for naming; deduplication always runs.</p>
-      <div class="tool-form">
-        <label><input type="checkbox" id="no-dryrun"> Dry run (no changes)</label>
-        <label><input type="checkbox" id="no-mergeonly"> Merge only (skip LLM naming)</label>
-        <label>Min common moves <input type="number" id="no-mincommon" value="4" min="1" max="12" style="width:4em"></label>
-      </div>
-      <button class="btn-run" id="btn-nameopenings" data-tool="name_openings">&#9654; Name Openings</button>
-    </section>
-
-    <!-- ── Purge AI Learning ──────────────────────────────────────────── -->
-    <section class="tools-section tools-section-danger">
-      <h2>&#9888; Purge AI Self-Play Learning</h2>
-      <p class="tool-desc">Removes AI-generated openings and self-play game records. Keeps human games and book-imported openings. Writes a backup before making changes.</p>
-      <div class="tool-form">
-        <label><input type="checkbox" id="purge-dryrun" checked> Dry run first (preview only)</label>
-      </div>
-      <button class="btn-run btn-danger" id="btn-purge" data-tool="purge_ai_learning">&#x1F5D1; Purge AI Learning</button>
-    </section>
-
-    <!-- ── Output Log ─────────────────────────────────────────────────── -->
-    <section class="tools-section" id="section-log">
-      <h2>Output <span id="log-tool-label"></span></h2>
-      <div id="log-output"></div>
-      <div class="log-controls">
-        <button id="btn-stop" style="display:none" class="btn-danger">&#x23F9; Stop</button>
-        <button id="btn-clear-log">&#x2715; Clear</button>
-        <label><input type="checkbox" id="chk-autoscroll" checked> Auto-scroll</label>
-      </div>
-    </section>
-
   </main>
 </div>
 
@@ -187,7 +328,7 @@
 <div id="modal-confirm" style="display:none">
   <div class="modal-box">
     <h3>Confirm Purge</h3>
-    <p>This will permanently remove all AI self-play generated openings and self-play game records. A backup will be created first.</p>
+    <p>This will permanently remove all AI self-play generated openings and self-play game records. A backup will be created in <code>data/backups/</code> first.</p>
     <p>Are you sure?</p>
     <div class="modal-btns">
       <button id="modal-cancel">Cancel</button>

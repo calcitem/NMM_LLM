@@ -27,10 +27,24 @@ async function refreshStatus() {
 
   // Endgame solved DB
   const es = data.endgame_solved || {};
-  setText("es-status",    es.exists ? "Available" : "Not found", es.exists ? "status-ok" : "status-missing");
-  setText("es-positions", es.positions != null ? fmt(es.positions) : "—");
-  setText("es-size",      es.size_mb   != null ? es.size_mb + " MB" : "—");
-  setText("es-mtime",     es.mtime || "—");
+  setText("es-status",     es.exists ? "Available" : "Not found", es.exists ? "status-ok" : "status-missing");
+  setText("es-tablecount", es.table_count != null ? String(es.table_count) : "0");
+  setText("es-positions",  es.positions != null ? fmt(es.positions) : "—");
+  setText("es-size",       es.size_mb   != null ? es.size_mb + " MB" : "—");
+  setText("es-mtime",      es.mtime || "—");
+
+  // WDL tables list
+  const tablesBody = document.getElementById("es-tables-body");
+  if (tablesBody) {
+    const tables = es.tables || [];
+    if (tables.length === 0) {
+      tablesBody.innerHTML = '<div class="stat-row"><span style="color:var(--text-dim)">No tables built yet</span></div>';
+    } else {
+      tablesBody.innerHTML = tables.map(t =>
+        `<div class="stat-row"><span>${t.name}</span><span>${t.size_mb} MB</span></div>`
+      ).join("");
+    }
+  }
 
   // Trajectory DB
   const tdb = data.trajectory_db || {};
@@ -48,6 +62,12 @@ async function refreshStatus() {
   setText("wt-status",  wt.exists ? "Found" : "Not found", wt.exists ? "status-ok" : "status-missing");
   setText("wt-size",    wt.size_mb != null ? wt.size_mb + " MB" : "—");
   setText("wt-mtime",   wt.mtime || "—");
+
+  // Value network
+  const vn = data.value_net || {};
+  setText("vn-status", vn.exists ? "Found" : "Not found", vn.exists ? "status-ok" : "status-missing");
+  setText("vn-size",   vn.size_mb != null ? vn.size_mb + " MB" : "—");
+  setText("vn-mtime",  vn.mtime || "—");
 
   // Opening book
   const ob = data.opening_book || {};
@@ -114,7 +134,6 @@ function runTool(tool, args, confirmed) {
   _ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "confirm") {
-      // Server needs confirmation (should not reach here — handled before open)
       return;
     }
     if (msg.type === "done") {
@@ -134,7 +153,7 @@ function runTool(tool, args, confirmed) {
     }
   };
 
-  _ws.onerror = (e) => {
+  _ws.onerror = () => {
     logLine("[WebSocket error]", "error");
     setBusy(false);
     _ws = null;
@@ -151,22 +170,57 @@ function runTool(tool, args, confirmed) {
 // ── Build FullGame DB ─────────────────────────────────────────────────────────
 
 document.getElementById("btn-build-fg").addEventListener("click", () => {
-  const dbdir = document.getElementById("fg-dbdir").value.trim();
-  const args = ["--expand-from-games", "data/games"];
-  args.push("--min-seed-frequency", document.getElementById("fg-minseed").value);
-  args.push("--expand-depth",       document.getElementById("fg-expdepth").value);
-  args.push("--early-expand-depth", document.getElementById("fg-expdepth-early").value);
-  const maxexpand = document.getElementById("fg-maxexpand").value;
-  if (parseInt(maxexpand) > 0) args.push("--max-expand-positions", maxexpand);
-  if (dbdir) args.push("--db-dir", dbdir);
+  const gamesdir = document.getElementById("fg-gamesdir").value.trim();
+  const dbdir    = document.getElementById("fg-dbdir").value.trim();
+  const args = [];
+  if (gamesdir) args.push("--expand-from-games", gamesdir);
+  if (dbdir)    args.push("--db-dir", dbdir);
+  args.push("--min-seed-frequency",  document.getElementById("fg-minseed").value);
+  args.push("--expand-depth",        document.getElementById("fg-expdepth").value);
+  args.push("--early-expand-depth",  document.getElementById("fg-expdepth-early").value);
+  args.push("--passes",              document.getElementById("fg-passes").value);
+  args.push("--max-gb",              document.getElementById("fg-maxgb").value);
+  args.push("--max-db-gb",           document.getElementById("fg-maxdbgb").value);
+  const maxexpand = parseInt(document.getElementById("fg-maxexpand").value);
+  if (maxexpand > 0) args.push("--max-expand-positions", maxexpand);
+  if (document.getElementById("fg-quiet").checked)  args.push("--quiet");
+  if (document.getElementById("fg-dryrun").checked) args.push("--dry-run");
   runTool("build_fullgame_db", args);
 });
 
-// ── Build Endgame DB ──────────────────────────────────────────────────────────
+// ── Build Endgame Solved DB ───────────────────────────────────────────────────
 
 document.getElementById("btn-build-eg").addEventListener("click", () => {
   const outdir = document.getElementById("eg-outdir").value.trim() || "data/endgame";
-  runTool("build_endgame_db", ["--out-dir", outdir]);
+  const args = ["--out-dir", outdir];
+  if (document.getElementById("eg-buildall").checked) {
+    args.push("--build-all");
+    args.push("--max-sum", document.getElementById("eg-maxsum").value);
+  } else {
+    const nw = parseInt(document.getElementById("eg-nw").value);
+    const nb = parseInt(document.getElementById("eg-nb").value);
+    if (nw > 0) args.push("--nW", nw);
+    if (nb > 0) args.push("--nB", nb);
+  }
+  if (document.getElementById("eg-skip").checked)  args.push("--skip-existing");
+  if (document.getElementById("eg-quiet").checked) args.push("--quiet");
+  runTool("build_endgame_db", args);
+});
+
+// ── Endgame Self-Play ─────────────────────────────────────────────────────────
+
+document.getElementById("btn-endgame-play").addEventListener("click", () => {
+  const args = [
+    "--positions",  document.getElementById("ep-positions").value,
+    "--difficulty", document.getElementById("ep-diff").value,
+    "--parallel",   document.getElementById("ep-parallel").value,
+    "--min-pieces", document.getElementById("ep-minpc").value,
+    "--max-pieces", document.getElementById("ep-maxpc").value,
+  ];
+  const pers = document.getElementById("ep-personalities").value.trim();
+  if (pers) args.push("--personalities", pers);
+  if (document.getElementById("ep-seedgames").checked) args.push("--seed-from-games");
+  runTool("endgame_play", args);
 });
 
 // ── Self-Play ─────────────────────────────────────────────────────────────────
@@ -177,9 +231,31 @@ document.getElementById("btn-selfplay").addEventListener("click", () => {
     "--white",    document.getElementById("sp-white").value,
     "--black",    document.getElementById("sp-black").value,
     "--parallel", document.getElementById("sp-parallel").value,
+    "--blunder",  document.getElementById("sp-blunder").value,
   ];
-  if (document.getElementById("sp-nollm").checked) args.push("--no-llm");
+  const whitePers = document.getElementById("sp-white-pers").value;
+  const blackPers = document.getElementById("sp-black-pers").value;
+  const persPool  = document.getElementById("sp-personalities").value.trim();
+  if (whitePers) args.push("--white-personality", whitePers);
+  if (blackPers) args.push("--black-personality", blackPers);
+  if (persPool)  args.push("--personalities", persPool);
+  if (document.getElementById("sp-nollm").checked)       args.push("--no-llm");
+  if (document.getElementById("sp-swap").checked)        args.push("--swap");
+  if (document.getElementById("sp-nameopenings").checked) args.push("--name-openings");
   runTool("self_play", args);
+});
+
+// ── Train Value Network ───────────────────────────────────────────────────────
+
+document.getElementById("btn-train-vnet").addEventListener("click", () => {
+  const args = [
+    "--games-dir",  document.getElementById("vn-gamesdir").value.trim() || "data/games",
+    "--output",     document.getElementById("vn-output").value.trim()   || "data/value_net.npz",
+    "--epochs",     document.getElementById("vn-epochs").value,
+    "--lr",         document.getElementById("vn-lr").value,
+    "--batch-size", document.getElementById("vn-batch").value,
+  ];
+  runTool("train_value_net", args);
 });
 
 // ── Evolve Weights ────────────────────────────────────────────────────────────
@@ -190,15 +266,25 @@ document.getElementById("ew-gauntlet").addEventListener("change", (e) => {
 
 document.getElementById("btn-evolve").addEventListener("click", () => {
   const args = [
-    "--generations", document.getElementById("ew-gens").value,
-    "--games-per-gen", document.getElementById("ew-gpg").value,
-    "--difficulty", document.getElementById("ew-diff").value,
-    "--parallel",  document.getElementById("ew-parallel").value,
-    "--sigma",     document.getElementById("ew-sigma").value,
+    "--generations",        document.getElementById("ew-gens").value,
+    "--games-per-gen",      document.getElementById("ew-gpg").value,
+    "--difficulty",         document.getElementById("ew-diff").value,
+    "--parallel",           document.getElementById("ew-parallel").value,
+    "--sigma",              document.getElementById("ew-sigma").value,
+    "--threshold",          document.getElementById("ew-threshold").value,
+    "--gauntlet-threshold", document.getElementById("ew-g-threshold").value,
+    "--era-size",           document.getElementById("ew-erasize").value,
+    "--era-top-k",          document.getElementById("ew-topk").value,
+    "--bias-strength",      document.getElementById("ew-bias").value,
+    "--warm-blend",         document.getElementById("ew-warmblend").value,
   ];
   if (document.getElementById("ew-gauntlet").checked) args.push("--gauntlet");
+  const pers = document.getElementById("ew-personalities").value.trim();
+  if (pers) args.push("--personalities", pers);
   const subset = parseInt(document.getElementById("ew-subset").value);
   if (subset > 0) args.push("--subset-size", subset);
+  const seed = document.getElementById("ew-seed").value.trim();
+  if (seed) args.push("--seed", seed);
   runTool("evolve_weights_v2", args);
 });
 
@@ -237,7 +323,11 @@ document.getElementById("btn-ae-save").addEventListener("click", async () => {
 // ── Name Openings ─────────────────────────────────────────────────────────────
 
 document.getElementById("btn-nameopenings").addEventListener("click", () => {
-  const args = ["--min-common", document.getElementById("no-mincommon").value];
+  const args = [
+    "--min-common", document.getElementById("no-mincommon").value,
+    "--ollama-url", document.getElementById("no-ollamaurl").value.trim(),
+    "--model",      document.getElementById("no-model").value.trim(),
+  ];
   if (document.getElementById("no-dryrun").checked)   args.push("--dry-run");
   if (document.getElementById("no-mergeonly").checked) args.push("--merge-only");
   runTool("name_openings", args);
@@ -247,11 +337,9 @@ document.getElementById("btn-nameopenings").addEventListener("click", () => {
 
 document.getElementById("btn-purge").addEventListener("click", () => {
   if (document.getElementById("purge-dryrun").checked) {
-    // Dry run is read-only — no confirmation dialog needed
     runTool("purge_ai_learning", ["--dry-run", "--yes"], /*confirmed=*/true);
     return;
   }
-  // Real purge — show confirmation modal
   document.getElementById("modal-confirm").style.display = "flex";
 });
 
@@ -282,5 +370,4 @@ document.getElementById("btn-refresh-status").addEventListener("click", refreshS
 
 refreshStatus();
 loadAutoEvolve();
-// Auto-refresh status every 15s
 setInterval(refreshStatus, 15_000);

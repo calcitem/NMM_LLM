@@ -350,6 +350,7 @@ Key differences to look for in play:
 | **AI Personality** | Per-game personality override; "Use current AI Tuning sliders" applies your custom weights |
 | **AI Difficulty** | 1 (Beginner) – 10 (Maximum 45 s) |
 | **MillsAI commentary** | Enable/disable LLM commentary for this game |
+| **Pure AI** (toggle) | Temporarily bypass all personality slider settings and use the pure evolved weights from `best.json`. Sliders and saved weights are untouched — toggle it off to restore normal behaviour. Useful for comparing your tuned personality against the unmodified evolved baseline. Hidden when playing Human vs Human. |
 | **New Game** | Start the game |
 | **Setup Position…** | Open the Position Setup editor |
 
@@ -429,18 +430,19 @@ python tools/name\_openings.py
 
 ## Training Tools
 
-The `tools/` directory contains scripts for building and improving the AI's knowledge bases. They work independently of the web server and can be run while the server is stopped.
+The `tools/` directory contains scripts for building and improving the AI’s knowledge bases. They work independently of the web server and can be run while the server is stopped.
+
+All tools can also be run from the browser at `http://127.0.0.1:8000/tools`. The **Tools** page provides input forms for every parameter (pre-filled with defaults), a live scrolling log, a stop button, and a **Database Status** panel at the bottom showing the current state of every database and file the AI uses.
 
 | Tool | Purpose |
 | - | - |
-| `self\_play.py` | Run AI-vs-AI full games to populate the trajectory DB, endgame DB, and opening book win rates |
-| `endgame\_play.py` | Generate endgame-only positions and play them out — much faster than full games for building the EndgameDB |
-| `evolve\_weights.py` | Era-aware (1+1)-ES to hill-climb the global `HeuristicWeights`; saves result to `data/weights/best.json` |
-| `evolve\_weights\_v2.py` | Per-personality era-aware (1+1)-ES; evolves each personality’s weight overrides and saves back to `data/personalities/*.json` |
-| `build\_fullgame\_db.py` | Frequency-seeded BFS builder: scans human JSONL games, expands around common positions, writes a sorted binary `.bin` file with win/loss/draw outcomes |
-| `fullgame\_db.py` | Read-only query interface for the full-game position DB (used by `GameAI` at move-selection time) |
-| `build\_endgame\_db.py` | Offline retrograde solver: builds an exact WDL table for all 3v3 fly-phase positions using D4 symmetry (~8× speedup); writes `data/endgame/endgame_3_3.wdl` |
-| `train\_value\_net.py` | Train a small MLP value estimator from saved game records |
+| `self\_play.py` | AI vs AI full games — populates TrajectoryDB, EndgameDB, and opening book win rates |
+| `endgame\_play.py` | Endgame-only self-play — generates positions near game-end and plays them out; much faster than full games for building EndgameDB |
+| `evolve\_weights\_v2.py` | **Recommended weight evolver.** Per-personality and gauntlet-mode (1+1)-ES; saves results to `data/personalities/` and `data/weights/best.json` |
+| `evolve\_weights.py` | Legacy single-pass evolver; only tunes the global baseline. Prefer `evolve_weights_v2.py` |
+| `build\_fullgame\_db.py` | Frequency-seeded BFS builder: scans human JSONL games, expands around common positions, writes a sorted binary `.bin` for O(log N) position lookup at move time |
+| `build\_endgame\_db.py` | Retrograde solver: exact Win/Draw/Loss tables for fly-phase positions up to any piece count; outputs `endgame_<nW>_<nB>.wdl` files in `data/endgame/` |
+| `train\_value\_net.py` | Train a tiny MLP (79→128→64→1) on game outcome labels — infrastructure for future MCTS integration; see notes below |
 | `import\_openings.py` | Validate and import curated opening lines from a JSON book file |
 | `import\_book\_games.py` | Seed opening win/loss statistics from annotated book game records |
 | `name\_openings.py` | Batch-name all un-named openings via the local Ollama LLM |
@@ -457,11 +459,11 @@ python tools/import\_book\_games.py
 \# 2. Run self-play to build trajectory and endgame databases  
 python tools/self\_play.py --games 100 --no-llm --parallel 4  
   
-\# 3. (Optional) Evolve weights to find a stronger evaluation function  
-python tools/evolve\_weights.py --generations 20 --parallel 4  
+\# 3. (Optional) Evolve per-personality weights  
+python tools/evolve\_weights\_v2.py --generations 30 --parallel 4  
   
-\# 4. (Optional) Train a value network once you have 200+ games  
-python tools/train\_value\_net.py
+\# 3b. (Optional) Tune the global best.json against all personalities (gauntlet)  
+python tools/evolve\_weights\_v2.py --gauntlet --generations 30 --parallel 4
 ```
 
 
@@ -567,11 +569,13 @@ python tools/purge\_ai\_learning.py --yes
 A full backup is written to `data/backups/\<timestamp\>/` before any changes. The TrajectoryDB and EndgameDB rebuild automatically from the remaining human game records on the next server start.
 
 
-### Weight Evolution
+### Weight Evolution (legacy)
 
 ```
 python tools/evolve\_weights.py --generations 20 --parallel 4
 ```
+
+> **Prefer `evolve_weights_v2.py`** for new runs — it tunes per-personality weights and supports gauntlet mode (competing against all personalities at once). Use `evolve_weights.py` only if you want a simple single-pass tune of the global baseline without personality awareness.
 
 Runs a (1+1) evolution strategy: each generation mutates the current best heuristic weights by Gaussian noise, plays the candidate against the baseline, and promotes the candidate if its win rate reaches ≥ 55 %. Best weights are saved to `data/weights/best.json` and loaded automatically on the next server restart.
 
@@ -600,22 +604,32 @@ python tools/evolve\_weights.py --generations 50 --from-best --parallel 4
 python tools/evolve\_weights\_v2.py --generations 30 --parallel 4
 ```
 
-Evolves each personality's weight overrides independently using the same era-aware (1+1)-ES algorithm. Unlike `evolve_weights.py`, this script targets the per-personality style files rather than the global baseline.
+This is the recommended weight evolver. It has two modes:
 
-**Architecture**: personalities are thin overrides on top of `best.json`. Only the fields already present in each personality file are mutated — the rest inherit from `best.json` as they would at runtime. `make_mistakes` and `opening_adherence` are never mutated so each personality retains its character.
+**Per-personality mode** (default): evolves each personality's weight overrides independently. Personalities are thin override files layered on top of `best.json` — only the fields already in each personality file are mutated, so each personality stays stylistically distinct. `make_mistakes` and `opening_adherence` are never mutated. Results are saved to `data/personalities/{name}.json` on every promotion. Logs and checkpoints go to `data/weights/personalities/`.
 
-Results are saved to `data/personalities/{name}.json` on every promotion. Logs and checkpoints go to `data/weights/personalities/`.
+**Gauntlet mode** (`--gauntlet`): evolves `best.json` directly, but evaluates each candidate against *all* personalities rather than a single opponent. This is the broadest possible test — a weight set that beats the whole roster is stronger than one tuned against one opponent. The promotion threshold is lower (0.52 instead of 0.55) because the opponent pool is much harder. Results are saved to `data/weights/best.json`. Use this to improve the global foundation that all personalities build on.
 
-| Flag | Description |
-| - | - |
-| `--personalities LIST` | Comma-separated personalities to train (default: all except `custom`) |
-| `--skip LIST` | Personalities to skip (default: `custom`) |
-| `--generations N` | Generations per personality (default: 30) |
-| `--games-per-gen G` | Games per evaluation, rounded to even (default: 20) |
-| `--difficulty D` | Search difficulty for both sides (default: 5) |
-| `--parallel N` | Parallel game workers (default: 4) |
-| `--era-size N` | Generations per era for sigma adaptation (default: 5) |
-| `--bias-strength F` | Fraction of era directional bias added to mutations (default: 0.3) |
+**Era-aware sigma adaptation**: the mutation step size (`--sigma`) is automatically scaled up or down each era based on whether improvements are being found. This prevents premature convergence without needing manual tuning.
+
+| Flag | Default | Description |
+| - | - | - |
+| `--gauntlet` | off | Tune `best.json` against all personalities; uses `--gauntlet-threshold` |
+| `--personalities LIST` | all except `custom` | Comma-separated personalities to train (non-gauntlet) |
+| `--skip LIST` | `custom` | Personalities to skip |
+| `--generations N` | 30 | Generations per personality |
+| `--games-per-gen G` | 20 | Games per evaluation (rounded to even) |
+| `--difficulty D` | 5 | Search difficulty for both sides |
+| `--parallel N` | 4 | Parallel game workers |
+| `--sigma F` | 0.12 | Initial mutation noise magnitude |
+| `--threshold F` | 0.55 | Win rate required to promote per-personality weights |
+| `--gauntlet-threshold F` | 0.52 | Win rate required to promote in gauntlet mode |
+| `--era-size N` | 5 | Generations per sigma-adaptation era |
+| `--era-top-k N` | 3 | Top candidates used for directional bias each era |
+| `--bias-strength F` | 0.3 | Fraction of mutation biased toward era-best direction |
+| `--warm-blend F` | 0.25 | Blend toward era-best when no improvement found |
+| `--subset-size N` | 0 (all) | Number of weight fields to mutate per era (0 = all ~53) |
+| `--seed N` | random | RNG seed for reproducibility |
 
 **Examples:**
 
@@ -623,15 +637,34 @@ Results are saved to `data/personalities/{name}.json` on every promotion. Logs a
 \# Train all personalities, 30 gens each  
 python tools/evolve\_weights\_v2.py --generations 30 --parallel 4  
   
-\# Train specific personalities only  
+\# Gauntlet: tune best.json vs all personalities  
+python tools/evolve\_weights\_v2.py --gauntlet --generations 50 --parallel 4  
+  
+\# Train only specific personalities  
 python tools/evolve\_weights\_v2.py --personalities aggressive,defensive --generations 50  
   
-\# Ben's full run  
+\# Long high-quality run  
 python tools/evolve\_weights\_v2.py --generations 100 --parallel 8 --games-per-gen 32 \  
     --difficulty 7 --era-size 10 --bias-strength 0.3 --era-top-k 3
 ```
 
-Restart the web server after the run to pick up updated personality files.
+Restart the web server after the run to pick up updated personality and weights files.
+
+### Auto-Evolve
+
+The server can trigger a gauntlet evolution run automatically after every N human games — useful for keeping `best.json` improving passively as you play. Configure it from the **Tools** web page (Auto-Evolve After N Games section), or directly via the API:
+
+```
+\# Enable: trigger after every 20 games  
+curl -X POST http://127.0.0.1:8000/api/auto\_evolve \  
+     -H "Content-Type: application/json" -d '{"after\_games": 20}'  
+  
+\# Disable  
+curl -X POST http://127.0.0.1:8000/api/auto\_evolve \  
+     -H "Content-Type: application/json" -d '{"after\_games": 0}'
+```
+
+The auto-evolve run uses gauntlet mode at the last manually-set evolution parameters. Progress is logged to `data/weights/auto_evolve.log`. Set to 0 to disable.
 
 ### Full-Game Position Database
 
@@ -682,9 +715,11 @@ python tools/build\_fullgame\_db.py --dry-run
 python tools/build\_endgame\_db.py --nW 3 --nB 3
 ```
 
-Retrograde solver that produces an exact WDL (Win/Draw/Loss from side-to-move) table for all fly-phase positions with a given piece count. Uses D4 board symmetry (~8× speedup) and writes directly to a memory-mapped binary file — large tables never require full RAM allocation.
+Retrograde solver that produces exact WDL (Win/Draw/Loss from side-to-move) tables for fly-phase positions. Starts from all terminal positions (one side has fewer than 3 pieces or is fully blocked) and propagates backward through the game graph — so every entry is provably correct, not heuristic. Uses D4 board symmetry (~8× speedup) and writes directly to memory-mapped binary files so large tables never require full RAM allocation.
 
-Output is written to `data/endgame/endgame_<nW>_<nB>.wdl` and consulted by `GameAI` at search time.
+Each table is output to `data/endgame/endgame_<nW>_<nB>.wdl`. `GameAI` probes all available `.wdl` files at search time — the more tables exist, the more endgame positions get exact WDL values instead of heuristic estimates. Tables are independent: you can build just 3v3 and add 4v3, 5v3, etc. later without rebuilding. The 3v3 table alone covers nearly all practical endgames.
+
+Use `--build-all` to let the solver determine dependency order automatically (a table for nW pieces and nB pieces requires the (nW−1)×nB and nW×(nB−1) tables to exist first).
 
 | Flag | Default | Description |
 | - | - | - |
@@ -721,29 +756,27 @@ python tools/build\_endgame\_db.py --build-all --max-sum 8 --out-dir /mnt/fast/e
 python tools/train\_value\_net.py
 ```
 
-Trains a small MLP (79 inputs → 128 → 64 → 1 output) on completed game records. Every board position in every saved game is labelled with the final outcome (win/loss/draw from that colour's perspective) and used as a training sample.
+Trains a tiny 3-layer MLP (79 inputs → 128 → 64 → 1 tanh output) as a position evaluator. Every board position in every saved game is labelled +1 (the player to move won), −1 (lost), or 0 (draw/unknown) and used as a training sample. The network is side-invariant: features are encoded from the moving player's perspective so the same weights handle both White and Black.
 
-- **Input**: 24 board positions × 3 channels (own/opponent/empty) + 7 scalar metadata = 79 features, encoded from the current player's perspective so the same weights handle both colours.
+- **Input (79 values)**: 24 board positions × 3 one-hot channels (own / opponent / empty) = 72, plus 7 scalar metadata values (turn, pieces placed and on board for both sides).
+- **Output**: `tanh` scalar in (−1, 1) — positive means the current player is expected to win.
+- **Training**: mini-batch SGD with MSE loss; pure numpy, no GPU, no PyTorch needed. ~33 KB on disk.
 
-- **Output**: `tanh` scalar in (−1, 1) — positive means the current player is likely to win.
+**Current status: dormant infrastructure.** The network trains and saves fine, but the production game path (negamax, difficulty 1–10) does not currently load or query it — gameplay is unaffected whether or not `data/value_net.npz` exists. The hook exists in `ai/mcts.py` and `ai/game_ai.py` (`value_net` parameter) but the web app does not pass the loaded network to `GameAI`. Training the network now builds up data for when this wiring is completed.
 
-- **Training**: mini-batch SGD with MSE loss; runs entirely on CPU in pure numpy (no framework needed).
-
-- **Output file**: `data/value\_net.npz`, loaded automatically by MCTS at server start.
-
-- When a value net is present, it **replaces** the heuristic evaluator at MCTS leaf nodes — faster and stronger than the hand-tuned formula after sufficient training data.
-
+- Quality is limited by game count: with fewer than ~200 games the network learns noise. With 1000+ varied games it begins to provide meaningful signal.
 - Inference is ~0.1 ms per position; no GPU required.
+- The model is small enough that retraining from scratch is fast — no need to checkpoint.
 
-| Flag | Description |
-| - | - |
-| `--games-dir PATH` | Source directory for JSONL game files (default: `data/games`) |
-| `--output PATH` | Where to write the trained weights (default: `data/value\_net.npz`) |
-| `--epochs N` | Training epochs (default: 50) |
-| `--batch-size N` | Mini-batch size (default: 256) |
+| Flag | Default | Description |
+| - | - | - |
+| `--games-dir PATH` | `data/games` | Source directory for JSONL game files |
+| `--output PATH` | `data/value\_net.npz` | Where to write the trained weights |
+| `--epochs N` | 30 | Training epochs |
+| `--lr F` | 0.001 | Learning rate |
+| `--batch-size N` | 256 | Mini-batch size |
 
-
-Recommended: accumulate at least 200 self-play games before training for useful signal.
+Recommended: accumulate at least 200 self-play games before training for useful signal. Retrain after each major batch of new games — the whole run takes under a minute.
 
 
 ## Learned (Neural) AI

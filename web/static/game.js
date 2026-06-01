@@ -38,6 +38,7 @@ const QUALIFY_GAMES = 0;      // no qualification required — tournament always
 
 // ── Player profile state ──────────────────────────────────────────────────────
 let playerName = localStorage.getItem("nmm_player_name") || "";
+let _pureAiMode = false;
 
 // ── AI weight defaults (Stage 5.13) ──────────────────────────────────────────
 
@@ -178,6 +179,14 @@ document.addEventListener("DOMContentLoaded", () => {
     _loadPersonality(personality);
   }).catch(() => _loadPersonality("balanced"));
 
+  // VN status line in AI Tuning panel
+  fetch("/api/vn_status").then(r => r.json()).then(d => {
+    const el = $("vn-status-line");
+    if (el) el.textContent = d.loaded
+      ? `Value net: loaded (${d.size_kb} KB) — set value_net_blend > 0 in weights to activate`
+      : "Value net: not found — run Train Value Network in Tools to build one";
+  }).catch(() => {});
+
   $("btn-reset-weights").addEventListener("click", () => {
     const ps = $("sel-personality");
     const name = ps?.value ?? "balanced";
@@ -197,10 +206,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }).catch(() => addCommentary("Error", "Could not save settings.", "ai"));
   });
 
+  $("btn-pure-ai").addEventListener("click", () => {
+    _pureAiMode = !_pureAiMode;
+    $("btn-pure-ai").classList.toggle("btn-active", _pureAiMode);
+    addCommentary("Settings", _pureAiMode
+      ? "Pure AI mode ON — personality sliders bypassed. Start a new game to apply."
+      : "Pure AI mode OFF — personality sliders active again.", "ai");
+  });
+
   // Show/hide personality row based on opponent type
   function _updatePersonalityRow() {
+    const isHuman = $("sel-opponent").value === "human";
     const row = $("row-personality");
-    if (row) row.hidden = $("sel-opponent").value === "human";
+    if (row) row.hidden = isHuman;
+    const rowPure = $("row-pure-ai");
+    if (rowPure) rowPure.hidden = isHuman;
   }
   $("sel-opponent").addEventListener("change", _updatePersonalityRow);
   _updatePersonalityRow();
@@ -451,9 +471,9 @@ function startNewGame() {
   const vs     = $("sel-opponent").value === "human";
   const useLlm = $("chk-llm").checked;
 
-  // Apply personality for this game (overrides current sliders unless "current")
+  // Apply personality for this game (overrides current sliders unless "current" or Pure AI mode)
   const gamePSelect = $("sel-game-personality");
-  if (gamePSelect && gamePSelect.value !== "current") {
+  if (gamePSelect && gamePSelect.value !== "current" && !_pureAiMode) {
     let chosenPersonality = gamePSelect.value;
     if (chosenPersonality === "random") {
       const opts = PERSONALITIES.map(p => p.value);
@@ -1892,6 +1912,7 @@ function _updateSliderLabel(key, value) {
 }
 
 function _getWeights() {
+  if (_pureAiMode) return {};
   const weights = {};
   WEIGHT_DEFAULTS.forEach(w => {
     const el = $(`slider-${w.key}`);

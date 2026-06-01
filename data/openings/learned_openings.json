@@ -279,7 +279,7 @@
   },
   {
     "opening_id": "book-06-2971b5",
-    "name": "Game Four",
+    "name": "White diagonal fail -keep busy",
     "aliases": [],
     "family": "Early Game",
     "side": "B",
@@ -331,7 +331,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 2,
+      "B": 5,
       "D": 0
     },
     "confidence": 0.8,
@@ -344,7 +344,7 @@
   },
   {
     "opening_id": "book-07-a33845",
-    "name": "Z mill - c4 / e3 Bg7 variant",
+    "name": "Z mill c4 e3 variant",
     "aliases": [],
     "family": "Early Game",
     "side": "W",
@@ -395,7 +395,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 16,
+      "W": 22,
       "B": 0,
       "D": 0
     },
@@ -539,7 +539,7 @@
   },
   {
     "opening_id": "book-11-04f0dc",
-    "name": "Yin-Yang",
+    "name": "Yin-Yang - B scan ahead",
     "aliases": [],
     "family": "Early Game",
     "side": "both",
@@ -591,7 +591,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 7,
+      "B": 8,
       "D": 0
     },
     "confidence": 0.8,
@@ -4322,7 +4322,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 4,
+      "W": 5,
       "B": 0,
       "D": 0
     },
@@ -4336,7 +4336,7 @@
   },
   {
     "opening_id": "novel-de906242",
-    "name": "Early spread",
+    "name": "Early spread w B column",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -4388,7 +4388,7 @@
     },
     "outcome_stats": {
       "W": 2,
-      "B": 0,
+      "B": 1,
       "D": 0
     },
     "confidence": 0.3,
@@ -4464,7 +4464,7 @@
   },
   {
     "opening_id": "novel-dea28e83",
-    "name": "Strategic Ascent",
+    "name": "The cross",
     "aliases": [],
     "family": "novel",
     "side": "both",
@@ -4516,7 +4516,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 1,
+      "B": 2,
       "D": 0
     },
     "confidence": 0.3,
@@ -4525,7 +4525,7 @@
       "learned"
     ],
     "source_reference": "",
-    "needs_llm_name": true
+    "needs_llm_name": false
   },
   {
     "opening_id": "novel-1555692c",
@@ -4720,5 +4720,644 @@
     ],
     "source_reference": "",
     "needs_llm_name": true
+  },
+  {
+    "opening_id": "novel-003932a3",
+    "name": "Z mill c4 - B line 1",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "f6",
+      "b2",
+      "d2",
+      "d3",
+      "g4",
+      "e4",
+      "g7",
+      "g1",
+      "d1",
+      "e3",
+      "e5",
+      "c3",
+      "f6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "..........W..WB......B..|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...W......W..WB....B.B..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "..WWB.....W..WB....B.B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "..WWBW....W..WB....BBB..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-c6599580",
+    "name": "Black dead move",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d3",
+      "g7",
+      "a7",
+      "d2",
+      "e4",
+      "d5",
+      "d1",
+      "a1",
+      "c4",
+      "a4",
+      "b6",
+      "f6",
+      "b2",
+      "f6"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "BWW..................B..|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "BWW..........W.....B.B..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "BWW..B.......W...W.B.B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "BWW..BW......W...W.B.B.B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-a19466e5",
+    "name": "Black side, white scan ahead",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d3",
+      "g7",
+      "g4",
+      "a7",
+      "a4",
+      "d2",
+      "b2",
+      "d1",
+      "e4",
+      "g1",
+      "e5",
+      "a1",
+      "a4",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".WWB.................B..|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "WWWB...B.............B..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "WWWB...B.....WB......B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "WWWB.W.B.....WB....B.B..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-1fd72240",
+    "name": "White column loss",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "b2",
+      "c4",
+      "d2",
+      "f2",
+      "d5",
+      "g4",
+      "f4",
+      "d1",
+      "a1",
+      "d3",
+      "a7",
+      "a4",
+      "g7",
+      "a4",
+      "b4",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.......B....W........B|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W.......B..BWW........B|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B.....B..BWW..W.....B|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B.B...B.WBWW..W.....B|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-c1383e61",
+    "name": "Novel — d1-d6-f2",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d1",
+      "d6",
+      "f2",
+      "b4",
+      "f4",
+      "f6",
+      "b6",
+      "d3",
+      "d5",
+      "g4",
+      "a4",
+      "a7",
+      "g7",
+      "e5",
+      "e3",
+      "c5",
+      "d2",
+      "c4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....W...B..W..B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".....W...BBWW..B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....W..WBBWW..B.....B..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B.W..WBBWW..B.W...B..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-3c3beda6",
+    "name": "Sparse placement",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "d2",
+      "c4",
+      "b4",
+      "g4",
+      "d5",
+      "e3",
+      "d1",
+      "d3",
+      "c3",
+      "f4",
+      "e4",
+      "f6",
+      "b6",
+      "f2",
+      "b6",
+      "b2",
+      "a7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W...B.B.......W|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "...W.....W...B.B.B.....W|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "...W.B...W...B.B.B..W..W|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...W.B...W...B.B.B..WWBW|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-dd9c428c",
+    "name": "Convergence cluster B win",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "c3",
+      "d6",
+      "e5",
+      "e4",
+      "d3",
+      "e3",
+      "d2",
+      "d1",
+      "f4",
+      "b4",
+      "a7",
+      "d7",
+      "d5",
+      "c5",
+      "g4",
+      "a4",
+      "c4",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........B........WB..W.|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........B........WBBWW.|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....B...B...W....WBBWW.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".....B...B.W.W.B..WBBWW.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-ba1f7236",
+    "name": "Black scan ahead busy",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "b6",
+      "f4",
+      "b2",
+      "b4",
+      "d6",
+      "f6",
+      "f2",
+      "d2",
+      "d7",
+      "d5",
+      "e3",
+      "a1",
+      "a7",
+      "g7",
+      "g4",
+      "c4",
+      "a4",
+      "e5"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "........W..B..WB........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "........WWBB..WB........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "........WWBBWBWB........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W......WWBBWBWB.B......|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 2,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-462cd0d7",
+    "name": "White late central",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d7",
+      "d6",
+      "b2",
+      "f4",
+      "b4",
+      "b6",
+      "f6",
+      "e3",
+      "d1",
+      "a4",
+      "d2",
+      "d3",
+      "f2",
+      "b6",
+      "c3",
+      "g4",
+      "e4",
+      "g1"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.......B.B..W.........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W......BB.B..WW........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W......BBWB..WW....B...|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W...W.BBBWB..WW....B...|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
+  },
+  {
+    "opening_id": "novel-45ddc095",
+    "name": "White column loss variant 2",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "b4",
+      "f4",
+      "d6",
+      "d2",
+      "d3",
+      "d5",
+      "a1",
+      "a4",
+      "g4",
+      "d7",
+      "g1",
+      "g7",
+      "d1",
+      "d2",
+      "a7",
+      "c5",
+      "e5",
+      "b2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".........W.B.B.W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".........W.B.B.W.B...W..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "......WB.W.B.B.W.B...W..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B.W..WB.W.B.B.W.B...W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": false
   }
 ]

@@ -406,10 +406,12 @@ def _run_llm_game(
     url   = settings.get("ollama_url",   "http://localhost:11434")
     model = settings.get("ollama_model", "llama3.1:8b")
 
+    _llm_self_play_dir = ROOT / "data" / "games" / "self_play"
+    _llm_self_play_dir.mkdir(parents=True, exist_ok=True)
     mem  = MemoryManager(
         ollama_url=url, ollama_model=model,
         chroma_path=str(ROOT / "data" / "chroma"),
-        games_path=str(ROOT / "data" / "games"),
+        games_path=str(_llm_self_play_dir),
         session_path=str(ROOT / "data" / "session_memory"),
     )
     llm  = MillsLLM(memory=mem, ollama_url=url, model=model)
@@ -481,20 +483,6 @@ def _run_llm_game(
     record["move_count"]       = move_count
 
     mem.save_game_record(record)
-
-    result = rec.get_current_result()
-    if result.opening_id and result.status in ("exact", "probable", "transposition"):
-        book.update_outcome_stats(result.opening_id, winner=winner or "D")
-    elif result.status == "novel":
-        placement_moves = [m["to"] for m in record.get("moves", []) if m.get("type") == "place"]
-        if len(placement_moves) >= 6:
-            sigs  = _compute_fen_signatures(placement_moves)
-            name  = llm.name_novel_opening(placement_moves)
-            novel = book.save_novel_opening(placement_moves, sigs, outcome=winner)
-            novel.name = name or f"Self-Play Line {novel.opening_id[:6]}"
-            book.save_opening(novel)
-            if verbose:
-                print(f"  Novel opening saved: {novel.name}")
 
     return record
 
@@ -609,6 +597,11 @@ def main() -> None:
     total_time  = 0.0
     all_records: list[dict] = []
 
+    # Self-play games go to data/games/self_play/ — separate from human games
+    # so the opening book and human game context stay clean.
+    _SELF_PLAY_DIR = ROOT / "data" / "games" / "self_play"
+    _SELF_PLAY_DIR.mkdir(parents=True, exist_ok=True)
+
     # ── Shared objects for sequential fast mode ───────────────────────────────
     book        = OpeningBook()
     endgame_db  = EndgameDB(ROOT / "data" / "games")
@@ -620,7 +613,7 @@ def main() -> None:
         mem   = MemoryManager(
             ollama_url=url, ollama_model=model,
             chroma_path=str(ROOT / "data" / "chroma"),
-            games_path=str(ROOT / "data" / "games"),
+            games_path=str(_SELF_PLAY_DIR),
             session_path=str(ROOT / "data" / "session_memory"),
             use_ollama_embeddings=False,
         )
@@ -676,33 +669,15 @@ def main() -> None:
         elapsed_all = time.perf_counter() - t0_all
         total_time  = elapsed_all
 
-        # Consolidate opening book and save records in main process.
-        # Workers skip book writes to avoid concurrent JSON corruption; we
-        # apply all stats updates and novel openings here serially instead.
+        # Save records only — no opening book updates from self-play.
         print(f"\n  Saving {len(all_records)} game records …")
-        _merge_book = OpeningBook()
         for record in all_records:
+            record.pop("opening_outcomes", None)
+            record.pop("novel_opening", None)
             try:
                 mem.save_game_record(record)  # type: ignore[union-attr]
             except Exception as exc:
                 print(f"  Warning: failed to save record: {exc}")
-            for outcome in record.pop("opening_outcomes", []):
-                try:
-                    _merge_book.update_outcome_stats(outcome["opening_id"], winner=outcome["winner"])
-                except Exception as exc:
-                    print(f"  Warning: book stats update failed: {exc}")
-            novel_info = record.get("novel_opening")
-            if novel_info and "sigs" in novel_info:
-                try:
-                    novel = _merge_book.save_novel_opening(
-                        novel_info["placement_moves"],
-                        novel_info.pop("sigs"),
-                        outcome=novel_info.get("outcome"),
-                        needs_llm_name=True,
-                    )
-                    novel_info["opening_id"] = novel.opening_id
-                except Exception as exc:
-                    print(f"  Warning: novel opening save failed: {exc}")
 
     # ── Sequential mode (fast or LLM) ────────────────────────────────────────
     else:
@@ -742,7 +717,10 @@ def main() -> None:
                         white_personality=wp,
                         black_personality=bp,
                         forced_opening=forced,
+                        skip_book_write=True,  # self-play never updates opening book
                     )
+                    record.pop("opening_outcomes", None)
+                    record.pop("novel_opening", None)
                     mem.save_game_record(record)  # type: ignore[union-attr]
                     endgame_db.add_game(record)
             except KeyboardInterrupt:
@@ -786,8 +764,7 @@ def main() -> None:
     print(f"  Avg time   : {avg_t:.1f}s / game  (wall clock)")
     print(f"  Total time : {total_time:.0f}s")
     print()
-    print(f"  Game records  → data/games/")
-    print(f"  Opening book  → data/openings/openings.json")
+    print(f"  Game records  → data/games/self_play/")
 
     # ── Optional LLM batch summary ────────────────────────────────────────────
     if args.summary and all_records:

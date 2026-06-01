@@ -67,7 +67,7 @@ def extract_samples(games_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
-    files = sorted(games_dir.glob("game_*.jsonl"))
+    files = sorted(games_dir.rglob("game_*.jsonl"))
 
     for fpath in files:
         try:
@@ -129,7 +129,7 @@ def main() -> None:
     print(f"Loading game records from {args.games_dir} ...")
     X, y = extract_samples(args.games_dir)
     N = len(X)
-    print(f"  {N} positions extracted from {len(list(args.games_dir.glob('game_*.jsonl')))} games.")
+    print(f"  {N} positions extracted from {len(list(args.games_dir.rglob('game_*.jsonl')))} games.")
 
     label_dist = {
         "+1 (win)":  int((y > 0.5).sum()),

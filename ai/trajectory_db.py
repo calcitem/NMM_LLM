@@ -78,7 +78,7 @@ class TrajectoryDB:
         if not self._games_dir.exists():
             logger.warning("TrajectoryDB: games directory not found: %s", self._games_dir)
             return
-        for path in sorted(self._games_dir.glob("*.jsonl")):
+        for path in sorted(self._games_dir.rglob("*.jsonl")):
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line:

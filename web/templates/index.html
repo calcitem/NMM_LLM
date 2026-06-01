@@ -275,6 +275,11 @@
           <label for="chk-llm" style="color:var(--text); font-size:.9rem;">MillsAI commentary (LLM)</label>
         </div>
 
+        <div class="form-row" id="row-pure-ai" style="flex-direction:row; align-items:center; gap:8px;">
+          <button id="btn-pure-ai" class="btn-small" title="Toggle pure evolved AI weights — bypasses personality sliders while active">Pure AI</button>
+          <span style="font-size:.78rem;color:var(--text-dim)">Bypass personality sliders</span>
+        </div>
+
         <button id="btn-new-game">New Game</button>
         <button id="btn-setup-toggle" class="btn-small" style="margin-top:6px;width:100%">&#x270E; Setup Position…</button>
       </div>
@@ -369,10 +374,11 @@
       <div class="panel-box" id="ai-tuning-panel" hidden>
         <h3>AI Tuning</h3>
         <div id="ai-weight-sliders"></div>
-        <div style="display:flex;gap:6px;margin-top:8px;">
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
           <button id="btn-reset-weights" class="btn-small">Reset defaults</button>
           <button id="btn-save-weights"  class="btn-small">Save settings</button>
         </div>
+        <div id="vn-status-line" style="margin-top:8px;font-size:.75rem;color:var(--text-dim)">Value net: —</div>
       </div>
 
     </div><!-- /side-panel -->
