@@ -515,21 +515,35 @@ class GameAI:
                     _wdl = None
                 if _wdl == "W":
                     self.last_was_blunder = False
+                    # First: any immediate terminal win (capture → opponent has 2 pieces).
                     for _move in moves:
                         _succ = board.apply_move(_move)
                         _succ_terminal, _ = is_terminal(_succ)
                         if _succ_terminal:
-                            # Capture reduces opponent to 2 pieces → instant win
                             self.last_thinking = "endgame DB (win)"
                             return _move
+                    # Collect all DB-correct winning continuations, then let the search
+                    # pick the BEST among them rather than returning the first found.
+                    # This prevents choosing a slow/suboptimal win when a faster fork
+                    # setup is available (e.g. preferring a7→d5+d7→c5 fork over a7→d6).
+                    _db_winning: list[dict] = []
+                    for _move in moves:
+                        _succ = board.apply_move(_move)
                         try:
                             _succ_wdl = _esdb.query(_succ)
                         except Exception:
                             _succ_wdl = None
                         if _succ_wdl == "L":
-                            self.last_thinking = "endgame DB (win)"
-                            return _move
-                    # fall through to heuristic if no winning continuation found
+                            _db_winning.append(_move)
+                    if len(_db_winning) == 1:
+                        self.last_thinking = "endgame DB (win)"
+                        return _db_winning[0]
+                    if _db_winning:
+                        # Multiple winning moves: restrict search to DB-correct moves
+                        # so the search can identify the fastest/cleanest win.
+                        moves = _db_winning
+                        # last_thinking set by _populate_thinking after search
+                    # fall through to search (with moves restricted to winners if found)
                 elif _wdl == "L":
                     self.last_thinking = "endgame DB (loss/search)"
                     # fall through to heuristic search for most stubborn defence
