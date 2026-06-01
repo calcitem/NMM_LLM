@@ -918,7 +918,7 @@ class GameAI:
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _MAX_OPP_PLIES)
+                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _MAX_OPP_PLIES, 1)
             except _SearchAbort:
                 self._move_path_buf.pop()
                 if not scored_any:
@@ -929,7 +929,13 @@ class GameAI:
             # Deadline check before expensive tactical bonus: abort between root moves if time is up.
             if time.time() >= self._deadline:
                 break
-            score = score_raw + tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+            # Don't apply tactical bonus when the move is already a near-certain win/loss
+            # (score near INF via endgame DB or terminal).  Bonuses would otherwise favour
+            # cycling moves over mill-closing captures, preventing actual conversion.
+            if abs(score_raw) < INF // 2:
+                score = score_raw + tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+            else:
+                score = score_raw
             if top_n > 1:
                 all_scored.append((move, score))
             if score > best_score:
@@ -943,6 +949,11 @@ class GameAI:
         if top_n > 1 and all_scored:
             top = sorted(all_scored, key=lambda x: x[1], reverse=True)[:top_n]
             best_move = random.choice(top)[0]
+        if best_score == -INF:
+            # Deadline fired between scored_any=True and the score comparison, so
+            # best_score was never updated from its sentinel.  Signal as an abort so
+            # _iterative_deepen treats this depth as incomplete.
+            raise _SearchAbort()
         return best_move, best_score
 
     def _negamax(
@@ -954,6 +965,7 @@ class GameAI:
         endgame_state=None,
         ext_budget: int = 0,
         opp_plies_left: int = 0,  # SE-11b/11c: opponent plies remaining for trajectory/VN extension
+        ply: int = 0,              # plies from root; used for mate scoring (faster wins score higher)
     ) -> int:
         """
         Negamax with alpha-beta pruning and transposition table.
@@ -967,23 +979,7 @@ class GameAI:
 
         terminal, _ = is_terminal(board)
         if terminal:
-            return -(INF - depth)
-
-        # SE-4: endgame tablebase probe — exact WDL for post-placement positions.
-        # Tables cover (nW, nB) from 3v3 up to 5v3/3v6; query() returns None when no
-        # matching table exists, so the <= 3 guard is not needed here.
-        if (self._endgame_solved_db is not None
-                and board.pieces_placed.get("W", 0) >= 9
-                and board.pieces_placed.get("B", 0) >= 9):
-            try:
-                _wdl = self._endgame_solved_db.query(board)
-            except Exception:
-                _wdl = None
-            if _wdl == "W":
-                return INF - depth
-            elif _wdl == "L":
-                return -(INF - depth)
-            # "D" or None → fall through to normal search
+            return -(INF - ply)
 
         # SE-14: FullGameDB probe — exact outcomes short-circuit; best-move hints
         # are stored for promotion after the move list is generated.
@@ -995,9 +991,9 @@ class GameAI:
                     if _db14.outcome is not None:
                         _stm = board.turn
                         if _db14.outcome == 1:
-                            return INF - depth if _stm == "W" else -(INF - depth)
+                            return INF - ply if _stm == "W" else -(INF - ply)
                         elif _db14.outcome == -1:
-                            return INF - depth if _stm == "B" else -(INF - depth)
+                            return INF - ply if _stm == "B" else -(INF - ply)
                         else:  # draw
                             return 0
                     elif _db14.best_move_canonical:
@@ -1023,6 +1019,21 @@ class GameAI:
                 ext_budget -= 1
 
         if depth == 0:
+            # SE-4: endgame tablebase probe at leaves — ply-based scoring so faster
+            # wins score higher than slower ones (INF - ply decreases as ply increases).
+            if (self._endgame_solved_db is not None
+                    and board.pieces_placed.get("W", 0) >= 9
+                    and board.pieces_placed.get("B", 0) >= 9):
+                try:
+                    _wdl = self._endgame_solved_db.query(board)
+                except Exception:
+                    _wdl = None
+                if _wdl == "W":
+                    return INF - ply
+                elif _wdl == "L":
+                    return -(INF - ply)
+                elif _wdl == "D":
+                    return 0
             if self._neural_evaluator is not None:
                 return self._neural_evaluator.evaluate(board)
             _q_moves = get_all_legal_moves(board)
@@ -1044,6 +1055,10 @@ class GameAI:
         tt_entry = self._tt.lookup(board.hash_key)
         if tt_entry is not None:
             tt_depth, tt_score, tt_flag, tt_move_from, tt_move_to = tt_entry
+            # Denormalize mate scores: stored as "mate in N from this position",
+            # convert back to "mate in N from root" by adjusting by current ply.
+            if abs(tt_score) > INF // 2:
+                tt_score = tt_score - ply if tt_score > 0 else tt_score + ply
             if tt_depth >= depth:
                 if tt_flag == EXACT:
                     return tt_score
@@ -1054,7 +1069,7 @@ class GameAI:
 
         moves = get_all_legal_moves(board)
         if not moves:
-            return -(INF - depth)
+            return -(INF - ply)
 
         # Sort at upper levels only — biggest benefit to alpha-beta, negligible overhead
         if depth >= 2:
@@ -1149,22 +1164,22 @@ class GameAI:
             )
 
             if is_first:
-                score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
                 is_first = False
             elif use_lmr:
                 # LMR: reduced-depth zero-window scout
-                score = -self._negamax(nb, depth - 2 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                score = -self._negamax(nb, depth - 2 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
                 if score > alpha:
                     # Failed high — re-search at full depth with PVS zero-window
-                    score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
                     if alpha < score < beta:
                         # PVS also failed high — full window re-search
-                        score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                        score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
             else:
                 # Standard PVS zero-window scout
-                score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                score = -self._negamax(nb, depth - 1 + _se11_ext, -alpha - 1, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
                 if alpha < score < beta:
-                    score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies)
+                    score = -self._negamax(nb, depth - 1 + _se11_ext, -beta, -alpha, endgame_state, ext_budget, _next_opp_plies, ply + 1)
 
             # SE-11b: restore path buffer after exploring this branch.
             if _do_path:
@@ -1193,7 +1208,12 @@ class GameAI:
                 flag = LOWER_BOUND
             else:
                 flag = EXACT
-            self._tt.store(board.hash_key, depth, value, flag, best_from, best_to)
+            # Normalize mate scores to "mate in N from this position" so they
+            # remain correct when retrieved at a different ply in later iterations.
+            store_value = value
+            if abs(value) > INF // 2:
+                store_value = value + ply if value > 0 else value - ply
+            self._tt.store(board.hash_key, depth, store_value, flag, best_from, best_to)
 
         return value
 
@@ -1246,8 +1266,9 @@ class GameAI:
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _MAX_OPP_PLIES)
-                score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _MAX_OPP_PLIES, 1)
+                if abs(score) < INF // 2:
+                    score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
                 self._move_path_buf.pop()
                 results.append((move, score))
             except _SearchAbort:
@@ -1341,14 +1362,17 @@ class GameAI:
                                     board, depth, top_n=1, moves=moves, beta=asp_hi,
                                 )
                             except _SearchAbort:
-                                pass  # keep aspiration result; deadline fires next iteration
+                                # Fail-low re-search aborted: first pass returned an incomplete
+                                # (possibly all-LOSS) result because deadline fired during move
+                                # ordering (losses first).  Keep previous depth's best_move.
+                                break
                         elif score >= asp_hi:
                             try:
                                 move, score = self._root_search(
                                     board, depth, top_n=1, moves=moves, alpha=asp_lo,
                                 )
                             except _SearchAbort:
-                                pass
+                                pass  # first call's high-scoring move is still in `move`
                         best_move = move
                         prev_score = score
                     else:
