@@ -1198,7 +1198,7 @@ When `key_present` is false, the badge is amber with text "Set `ANTHROPIC_API_KE
 
 ---
 
-### B-77 — Multi-step mill setup detection (2-ply pin rule) ⬜ ★★
+### B-77 — Multi-step mill setup detection (2-ply pin rule) ✅ 2026-06-01 ★★
 
 **Problem:** The move-phase pin rule (B-70) blocks moves where the AI's own piece is the *sole blocker* of an opponent 2-config AND an opponent piece is *adjacent* to the pinned square. This looks exactly 1 ply ahead. A 2-step setup (e.g. Black d2→d1 then a4→a1) is not detected, so the AI vacates g1 allowing Black to form the a1-d1-g1 mill two moves later.
 
@@ -1211,7 +1211,7 @@ When `key_present` is false, the badge is amber with text "Set `ANTHROPIC_API_KE
 
 ---
 
-### B-78 — Trajectory DB turn-4 interference investigation ⬜ ★
+### B-78 — Trajectory DB turn-4 interference investigation ✅ 2026-06-01 ★
 
 **Problem:** In the same game as B-77, White played b2 (placement) on turn 4 instead of completing the mill at g7 (a7 and d7 already placed). This is a B-22-class error but occurs during the placement phase. Suspected cause: trajectory DB promoting b2 as a frequent human move, overriding the tactical mill-close priority.
 

@@ -131,6 +131,33 @@ def _pinned_move_squares(board: BoardState, color: str) -> frozenset:
     return frozenset(pinned)
 
 
+def _pinned_move_squares_2ply(board: BoardState, color: str) -> frozenset:
+    """2-ply move-phase pin: own square that, if vacated, lets the opponent build
+    a 2-config in two moves (slide into vacated square + feeder slides into mill).
+
+    Pattern: mill (S, X, Y) where own=1, opp=1, empty=1; opp_sq is adjacent to
+    own_sq (can slide in immediately); a feeder opp piece is adjacent to opp_sq
+    but outside the mill (would complete a 2-config on the next move).
+    """
+    opp = "B" if color == "W" else "W"
+    pinned: set[str] = set()
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) != 1 or vals.count(opp) != 1 or vals.count("") != 1:
+            continue
+        our_sq = next(p for p in mill if board.positions[p] == color)
+        opp_sq = next(p for p in mill if board.positions[p] == opp)
+        if opp_sq not in ADJACENCY.get(our_sq, []):
+            continue
+        mill_set = set(mill)
+        if any(
+            board.positions.get(nb) == opp and nb not in mill_set
+            for nb in ADJACENCY.get(opp_sq, [])
+        ):
+            pinned.add(our_sq)
+    return frozenset(pinned)
+
+
 def _squeeze_targets(board: BoardState) -> set[str]:
     """Return empty squares that are the last escape route of an opponent piece.
 
@@ -511,6 +538,7 @@ class GameAI:
 
         # ── Optional full-game DB consultation ────────────────────────────
         # Falls back to self._fullgame_db when no explicit parameter passed.
+        _db14_forced_notation: str | None = None   # B-78: set below, applied after filters
         _fgdb = fullgame_db if fullgame_db is not None else self._fullgame_db
         if _fgdb is not None and _fgdb.is_available():
             try:
@@ -524,18 +552,10 @@ class GameAI:
                     pass
                 result = None
             if result is not None:
-                # Resolved exact hit — return DB best move when legal.
+                # Resolved exact hit — stash best notation to apply after filters.
+                # B-78: only return DB move when no capture is available this turn.
                 if result.outcome is not None and result.best_move_canonical:
-                    best_notation = _fgdb.best_move(board)
-                    if best_notation:
-                        match = next(
-                            (m for m in moves if self._move_notation(m) == best_notation),
-                            None,
-                        )
-                        if match is not None:
-                            self.last_was_blunder = False
-                            self.last_thinking = "fullgame DB"
-                            return match
+                    _db14_forced_notation = _fgdb.best_move(board)
                 # Unresolved row — merge DB deltas into trajectory hints.
                 db_hints = _fgdb.score_delta(board, self.color)
                 if db_hints:
@@ -606,6 +626,12 @@ class GameAI:
                 unpinned = [m for m in moves if m.get("from") not in pinned]
                 if unpinned:
                     moves = unpinned
+            # 2-ply pin: vacating this square lets opp build a 2-config in two moves.
+            pinned2 = _pinned_move_squares_2ply(board, self.color)
+            if pinned2:
+                unpinned2 = [m for m in moves if m.get("from") not in pinned2]
+                if unpinned2:
+                    moves = unpinned2
 
         # Book forcing: early-game forcing (first 2 AI placements) or 100% adherence.
         # Applied after ban filtering so a banned book move is never forced.
@@ -619,6 +645,21 @@ class GameAI:
                 if book_mv is not None:
                     self.last_was_blunder = False
                     return book_mv
+
+        # B-78: Apply deferred full-game DB forced move now that all filters have run.
+        # Skip when a capture is available — capturing is always correct and must not be
+        # overridden by a DB move that was recorded for a non-capture position.
+        if _db14_forced_notation is not None:
+            _has_capture = any(m.get("capture") for m in moves)
+            if not _has_capture:
+                match = next(
+                    (m for m in moves if self._move_notation(m) == _db14_forced_notation),
+                    None,
+                )
+                if match is not None:
+                    self.last_was_blunder = False
+                    self.last_thinking = "fullgame DB"
+                    return match
 
         # Blunder mode: occasionally play a bad move on purpose
         if self.blunder_probability > 0.0 and random.random() < self.blunder_probability:
@@ -829,7 +870,9 @@ class GameAI:
             if delta <= self._HARD_BAN_THRESHOLD:
                 adjusted.append((move, -INF + 1))  # always last; still legal
                 continue
-            bonus = int(delta * scale) if scale else 0
+            # B-78: cap bonus so a trajectory hint cannot override a mill-close move.
+            _bonus_cap = self._weights.close_mill - 1   # 499 < 500 (close_mill)
+            bonus = min(int(delta * scale), _bonus_cap) if scale else 0
             adjusted.append((move, raw + bonus))
         return adjusted
 
