@@ -55,7 +55,9 @@ from ai.trajectory_db import TrajectoryDB
 from ai.endgame_db import EndgameDB
 from ai.fullgame_db import FullGameDB
 from ai.endgame_solved_db import EndgameSolvedDB
+from ai.value_net import ValueNet
 from ai.starting_play import combined_family_summary
+from ai.ponder import PonderManager
 from ai.player_profile import PlayerProfile, load_profile, save_profile, is_valid_name
 
 _GAMES_PATH = _ROOT / "data" / "games"
@@ -133,8 +135,8 @@ if _fgdb_path.exists():
     if _fullgame_db.is_available():
         _fgdb_stats = _fullgame_db.stats()
         log.info(
-            "FullGameDB: %d positions (%d resolved) from %s",
-            _fgdb_stats.get("positions", 0), _fgdb_stats.get("resolved", 0), _fgdb_path,
+            "FullGameDB: %d positions from %s",
+            _fgdb_stats.get("positions", 0), _fgdb_path,
         )
     else:
         _fullgame_db = None
@@ -155,6 +157,15 @@ if _esdb.is_available():
     _endgame_solved_db = _esdb
 else:
     log.info("EndgameSolvedDB: not found at %s", _esdb_dir)
+
+# Load value network — optional; has no effect unless value_net_blend > 0 in weights.
+_value_net_path = _ROOT / "data" / "value_net.npz"
+_value_net: "ValueNet | None" = ValueNet.load_if_exists(_value_net_path)
+if _value_net is not None:
+    _vn_size_kb = round(_value_net_path.stat().st_size / 1024, 1)
+    log.info("ValueNet: loaded from %s (%s KB)", _value_net_path, _vn_size_kb)
+else:
+    log.info("ValueNet: not found at %s", _value_net_path)
 
 
 # ── Library consolidation (Stage 5.27) ───────────────────────────────────────
@@ -530,6 +541,8 @@ class Session:
         self.black_personality: str = ""
         # Background task handle for AI-vs-AI loop
         self._ava_task: Optional[asyncio.Task] = None
+        # B-75: pondering during the opponent's turn (None when not applicable)
+        self.ponder_manager: Optional[PonderManager] = None
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -564,6 +577,15 @@ async def save_weights(request: Request):
     settings["ai_weights"] = body
     _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/vn_status")
+async def get_vn_status():
+    from fastapi.responses import JSONResponse
+    if _value_net is not None and _value_net_path.exists():
+        size_kb = round(_value_net_path.stat().st_size / 1024, 1)
+        return JSONResponse({"loaded": True, "size_kb": size_kb})
+    return JSONResponse({"loaded": False})
 
 
 _PERSONALITIES_DIR = _ROOT / "data" / "personalities"
@@ -701,10 +723,22 @@ async def tool_status():
     if _fullgame_db and _fullgame_db.is_available():
         s = _fullgame_db.stats()
         fgdb_info["positions"] = s.get("positions", 0)
-        fgdb_info["resolved"]  = s.get("resolved", 0)
+        # resolved count not pre-computed (would require scanning all records)
+        fgdb_info["resolved"]  = None
 
-    # Endgame solved DB
+    # Endgame solved DB — enumerate individual WDL tables
     esdb_info = _db_file_info(_esdb_dir if _esdb_dir.exists() else None)
+    wdl_tables = []
+    if _esdb_dir.exists():
+        for wdl_path in sorted(_esdb_dir.glob("endgame_*.wdl")):
+            st = wdl_path.stat()
+            wdl_tables.append({
+                "name": wdl_path.stem,
+                "size_mb": round(st.st_size / 1_048_576, 2),
+                "mtime": _dt.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M"),
+            })
+    esdb_info["tables"] = wdl_tables
+    esdb_info["table_count"] = len(wdl_tables)
     if _endgame_solved_db and _endgame_solved_db.is_available():
         s2 = _endgame_solved_db.stats() if hasattr(_endgame_solved_db, "stats") else {}
         esdb_info["positions"] = s2.get("positions", 0) if s2 else 0
@@ -725,6 +759,10 @@ async def tool_status():
     weights_path = _ROOT / "data" / "weights" / "best.json"
     weights_info = _db_file_info(weights_path if weights_path.exists() else None)
 
+    # Value network
+    vnet_path = _ROOT / "data" / "value_net.npz"
+    vnet_info = _db_file_info(vnet_path if vnet_path.exists() else None)
+
     # Opening book
     book = OpeningBook()
     ob_total = len(list(book.values()))
@@ -744,6 +782,7 @@ async def tool_status():
         "trajectory_db":  tdb_info,
         "endgame_db":     edb_info,
         "weights":        weights_info,
+        "value_net":      vnet_info,
         "opening_book":   {"total": ob_total, "named": ob_named},
         "games":          {"count": games_count, "earliest": games_earliest, "latest": games_latest},
         "busy":           busy,
@@ -793,6 +832,7 @@ async def ws_tools(websocket: WebSocket):
         _ALLOWED = {
             "build_fullgame_db", "build_endgame_db", "self_play",
             "evolve_weights", "evolve_weights_v2", "name_openings", "purge_ai_learning",
+            "endgame_play", "train_value_net",
         }
         if tool not in _ALLOWED:
             await _send_line(f"Unknown tool: {tool!r}", "error")
@@ -1126,12 +1166,15 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         blocked_scale=_w("blocked_scale", 100),
         make_mistakes=_w("make_mistakes", 0),
         opening_adherence=_w("opening_adherence", 50),
+        value_net_blend=_w("value_net_blend", 0),
+        cross_mill_cycling=_w("cross_mill_cycling", 300),
     )
     return GameAI(
         color=color, difficulty=difficulty, weights=hw,
         blunder_probability=hw.make_mistakes / 100.0,
         fullgame_db=_fullgame_db,
         endgame_solved_db=_endgame_solved_db,
+        value_net=_value_net,
     )
 
 
@@ -1273,9 +1316,20 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         "expected_seconds": exp,
     })
 
+    # B-75: stop any running ponder; check if we pre-computed this position.
+    _ponder_hit: dict | None = None
+    if session.ponder_manager is not None and not session.coordinator:
+        session.ponder_manager.stop()
+        _ponder_hit = session.ponder_manager.get_result(board)
+
     t0 = _time.time()
     try:
-        if session.coordinator:
+        if _ponder_hit is not None:
+            move = _ponder_hit
+            if session.game_ai:
+                session.game_ai.last_was_blunder = False
+                session.game_ai.last_thinking    = "pondered"
+        elif session.coordinator:
             move = await asyncio.to_thread(session.coordinator.deliberate, board)
         else:
             move = await asyncio.to_thread(_nollm_choose_move, session, board)
@@ -1284,7 +1338,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         raise
 
     elapsed = _time.time() - t0
-    log.info("AI turn end    move=%s elapsed=%.2fs", move, elapsed)
+    log.info("AI turn end    move=%s elapsed=%.2fs ponder_hit=%s", move, elapsed, _ponder_hit is not None)
 
     # Latch whether the coordinator wants to resign (cleared so it only fires once).
     resignation_offered = bool(
@@ -1333,6 +1387,18 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     if session.engine.finished:
         await _game_over(ws, session)
         return
+
+    # B-75: start pondering from the predicted opponent reply.
+    # Only when no coordinator (no-LLM path) and ponder_manager is set.
+    if session.ponder_manager is not None and session.game_ai is not None:
+        _game_moves = session.engine.game_record.get("moves", [])
+        _game_notations = [m["notation"] for m in _game_moves]
+        session.ponder_manager.start(
+            board=session.engine.board,
+            game_ai=session.game_ai,
+            game_notations=_game_notations,
+            trajectory_db=_trajectory_db,
+        )
 
     # Offer resignation after move + commentary — player decides whether to accept.
     if resignation_offered and not session.engine.finished:
@@ -1527,6 +1593,8 @@ async def ws_endpoint(websocket: WebSocket):
                         blocked_scale=_w("blocked_scale", 100),
                         make_mistakes=_w("make_mistakes", 0),
                         opening_adherence=_w("opening_adherence", 50),
+                        value_net_blend=_w("value_net_blend", 0),
+                        cross_mill_cycling=_w("cross_mill_cycling", 300),
                     )
                     base_blunder = _hw.make_mistakes / 100.0
                     game_ai  = GameAI(
@@ -1534,6 +1602,7 @@ async def ws_endpoint(websocket: WebSocket):
                         blunder_probability=min(1.0, base_blunder + adaptive.extra_blunder),
                         fullgame_db=_fullgame_db,
                         endgame_solved_db=_endgame_solved_db,
+                        value_net=_value_net,
                     )
                     log.info(
                         "Adaptive: requested diff=%d effective diff=%d extra_blunder=%.2f",
@@ -1584,6 +1653,10 @@ async def ws_endpoint(websocket: WebSocket):
                                 target.name, sym_idx,
                                 target.opening_score(game_ai.color),
                             )
+                        # B-75: enable pondering at difficulty >= 3 (where search depth
+                        # is deep enough for pre-computation to provide real benefit).
+                        if game_ai.difficulty >= 3:
+                            session.ponder_manager = PonderManager()
                 log.info("New game  human=%s diff=%s vs_human=%s llm=%s tournament=%s",
                          hc, diff, vs_human, use_llm, is_tournament)
                 await _send(websocket, _state(session))
@@ -1633,12 +1706,15 @@ async def ws_endpoint(websocket: WebSocket):
                         blocked_scale=_w("blocked_scale", 100),
                         make_mistakes=_w("make_mistakes", 0),
                         opening_adherence=_w("opening_adherence", 50),
+                        value_net_blend=_w("value_net_blend", 0),
+                        cross_mill_cycling=_w("cross_mill_cycling", 300),
                     )
                     game_ai = GameAI(
                         color=ai_color, difficulty=diff, weights=_hw,
                         blunder_probability=_hw.make_mistakes / 100.0,
                         fullgame_db=_fullgame_db,
                         endgame_solved_db=_endgame_solved_db,
+                        value_net=_value_net,
                     )
 
                     if use_llm:
@@ -1842,8 +1918,10 @@ async def ws_endpoint(websocket: WebSocket):
                     blocked_scale=_w("blocked_scale", 100),
                     make_mistakes=_w("make_mistakes", 0),
                     opening_adherence=_w("opening_adherence", 50),
+                    value_net_blend=_w("value_net_blend", 0),
+                    cross_mill_cycling=_w("cross_mill_cycling", 300),
                 )
-                new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db)
+                new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
 
                 new_coord = None
                 if use_llm:
@@ -1908,6 +1986,10 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── move ──────────────────────────────────────────────────────────
             elif kind == "move" and session:
+                # B-75: stop ponder early so the thread doesn't fight the upcoming search.
+                if session.ponder_manager is not None and session.ponder_manager.is_running():
+                    session.ponder_manager.stop()
+
                 frm = msg.get("from")  # None for placement
                 to  = msg.get("to")
                 move = {"from": frm, "to": to, "capture": None}
@@ -1966,6 +2048,10 @@ async def ws_endpoint(websocket: WebSocket):
 
             # ── capture ───────────────────────────────────────────────────────
             elif kind == "capture" and session and session._pending:
+                # B-75: stop ponder — the capture completes the human's move.
+                if session.ponder_manager is not None and session.ponder_manager.is_running():
+                    session.ponder_manager.stop()
+
                 cap   = msg.get("position")
                 board = session.engine.board
                 caps  = board.legal_captures(board.turn)
@@ -2195,8 +2281,8 @@ async def ws_endpoint(websocket: WebSocket):
                     # _run_ai_vs_ai_loop safely handles None coordinators.
                     _ava_diff = 3
                     _ava_hw = HeuristicWeights()
-                    _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db)
-                    _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db)
+                    _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
+                    _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
                     session.ai_vs_ai = True
                     session.vs_human = False
                     session.game_ai_white = _ai_w

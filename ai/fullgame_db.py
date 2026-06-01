@@ -375,4 +375,5 @@ class FullGameDB:
     def stats(self) -> dict[str, int]:
         if not self._binary:
             return {"available": 0}
-        return {"available": 1, "positions": self._record_count, "resolved": -1}
+        # "resolved" would require scanning all records; omit rather than show -1.
+        return {"available": 1, "positions": self._record_count, "resolved": None}

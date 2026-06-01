@@ -969,12 +969,12 @@ class GameAI:
         if terminal:
             return -(INF - depth)
 
-        # SE-4: endgame tablebase probe — exact WDL for 3v3 fly-phase positions.
+        # SE-4: endgame tablebase probe — exact WDL for post-placement positions.
+        # Tables cover (nW, nB) from 3v3 up to 5v3/3v6; query() returns None when no
+        # matching table exists, so the <= 3 guard is not needed here.
         if (self._endgame_solved_db is not None
                 and board.pieces_placed.get("W", 0) >= 9
-                and board.pieces_placed.get("B", 0) >= 9
-                and board.pieces_on_board.get("W", 0) <= 3
-                and board.pieces_on_board.get("B", 0) <= 3):
+                and board.pieces_placed.get("B", 0) >= 9):
             try:
                 _wdl = self._endgame_solved_db.query(board)
             except Exception:
