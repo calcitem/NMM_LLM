@@ -463,6 +463,7 @@ main {
 #eval-graph-wrap {
   flex: 1;
   min-width: 0;
+  position: relative;
 }
 
 .eval-graph-labels {
@@ -480,6 +481,25 @@ main {
   height: 64px;
   border-radius: 4px;
   overflow: hidden;
+}
+
+#eval-graph.graph-seekable {
+  cursor: crosshair;
+}
+
+#graph-tooltip {
+  position: absolute;
+  background: #2a2418;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: .72rem;
+  font-family: monospace;
+  color: var(--tan);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 50;
+  transform: translateX(-50%);
 }
 
 /* ── Draw / Hint / Undo buttons ──────────────────────────────────────── */

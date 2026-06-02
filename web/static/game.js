@@ -380,6 +380,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-replay-last").addEventListener("click",  () => replayGo(replayMoves.length));
   $("btn-replay-live").addEventListener("click",  exitReplay);
 
+  // Strength graph seek interaction
+  _initGraphInteraction();
+
   $("settings-panel").hidden  = false;
   $("ai-tuning-panel").hidden = true;
   $("moves-panel").hidden     = false;   // show moves by default
@@ -1384,6 +1387,9 @@ function drawEvalGraph() {
   svg.setAttribute("height", H);
   svg.innerHTML = "";
 
+  // Mark seekable when game history exists
+  svg.classList.toggle("graph-seekable", replayMoves.length > 0);
+
   const ns = "http://www.w3.org/2000/svg";
   const mk = (tag, attrs) => {
     const el = document.createElementNS(ns, tag);
@@ -1411,6 +1417,10 @@ function drawEvalGraph() {
 
   const mid    = H / 2;
   const xScale = (W - 2) / Math.max(n - 1, 1);
+  // Store on svg element so the event handler can read them without recomputing
+  svg._xScale = xScale;
+  svg._n      = n;
+
   const pts    = evalHistory.map((s, i) => ({
     x: 1 + i * xScale,
     y: mid - s * (mid - 4),   // 4px padding from edges
@@ -1422,7 +1432,6 @@ function drawEvalGraph() {
   area += ` L ${pts[pts.length-1].x},${mid} Z`;
 
   // Fill: white when White leading (positive), black when Black leading
-  // Use gradient-like split: positive fill = white-tan, negative = dark
   const lastScore = evalHistory[n - 1];
   const fillCol   = lastScore > 0.05 ? "rgba(242,237,224,0.18)"
                   : lastScore < -0.05 ? "rgba(30,26,46,0.5)"
@@ -1434,18 +1443,87 @@ function drawEvalGraph() {
   for (const p of pts.slice(1)) linePath += ` L ${p.x},${p.y}`;
   svg.appendChild(mk("path", { d: linePath, stroke:"#c8a96e", "stroke-width":1.5, fill:"none" }));
 
-  // Current value dot
-  const last = pts[n - 1];
-  svg.appendChild(mk("circle", { cx: last.x, cy: last.y, r: 3,
-    fill: lastScore > 0 ? "#f2ede0" : "#4040a0", stroke:"#c8a96e", "stroke-width":1 }));
+  // Replay cursor: vertical line + dot at the current replay position
+  if (replayIdx >= 0) {
+    // replayIdx=k means board after move k-1; eval index = k-1
+    const evalIdx = replayIdx > 0 ? Math.min(replayIdx - 1, n - 1) : 0;
+    const cx = replayIdx === 0 ? 1 : pts[evalIdx].x;
+    svg.appendChild(mk("line", {
+      x1: cx, y1: 0, x2: cx, y2: H,
+      stroke: "#ffffff", "stroke-width": 1, opacity: "0.35",
+    }));
+    if (replayIdx > 0) {
+      const cy = pts[evalIdx].y;
+      svg.appendChild(mk("circle", { cx, cy, r: 4,
+        fill: "#ffffff", opacity: "0.7", stroke: "#c8a96e", "stroke-width": 1 }));
+    }
+  }
 
-  // Score label
-  const pct = Math.round(Math.abs(lastScore) * 100);
-  const who = lastScore > 0.05 ? `+${pct} W` : lastScore < -0.05 ? `+${pct} B` : "=";
-  const lbl = mk("text", { x: Math.min(last.x + 4, W - 32), y: Math.max(last.y - 3, 10),
-    fill:"#c8a96e", "font-size":"9", "font-family":"monospace" });
-  lbl.textContent = who;
-  svg.appendChild(lbl);
+  // Current-end dot and label (only when not replaying or at last position)
+  const showEndDot = replayIdx === -1 || replayIdx >= n;
+  if (showEndDot) {
+    const last = pts[n - 1];
+    svg.appendChild(mk("circle", { cx: last.x, cy: last.y, r: 3,
+      fill: lastScore > 0 ? "#f2ede0" : "#4040a0", stroke:"#c8a96e", "stroke-width":1 }));
+    const pct = Math.round(Math.abs(lastScore) * 100);
+    const who = lastScore > 0.05 ? `+${pct} W` : lastScore < -0.05 ? `+${pct} B` : "=";
+    const lbl = mk("text", { x: Math.min(last.x + 4, W - 32), y: Math.max(last.y - 3, 10),
+      fill:"#c8a96e", "font-size":"9", "font-family":"monospace" });
+    lbl.textContent = who;
+    svg.appendChild(lbl);
+  }
+}
+
+function _graphSvgX(e) {
+  const svg = $("eval-graph");
+  const rect = svg.getBoundingClientRect();
+  return (e.clientX - rect.left) / rect.width * 800;
+}
+
+function _graphPlyFromSvgX(svgX) {
+  const svg = $("eval-graph");
+  const xScale = svg._xScale;
+  const n = svg._n;
+  if (!xScale || !n) return -1;
+  // pts[i].x = 1 + i*xScale → i = (svgX-1)/xScale
+  // replayIdx = i + 1 (since replayIdx=k means after move k-1, i.e. pts[k-1])
+  const i = Math.round((svgX - 1) / xScale);
+  return Math.max(0, Math.min(replayMoves.length, i + 1));
+}
+
+function _initGraphInteraction() {
+  const svg = $("eval-graph");
+  const tip = $("graph-tooltip");
+  if (!svg || !tip) return;
+
+  svg.addEventListener("click", e => {
+    if (!replayMoves.length) return;
+    const ply = _graphPlyFromSvgX(_graphSvgX(e));
+    if (ply < 0) return;
+    replayGo(ply);
+  });
+
+  svg.addEventListener("mousemove", e => {
+    if (!replayMoves.length || !svg._xScale) { tip.hidden = true; return; }
+    const svgX = _graphSvgX(e);
+    const i = Math.round((svgX - 1) / svg._xScale);
+    if (i < 0 || i >= svg._n) { tip.hidden = true; return; }
+    const score  = evalHistory[i];
+    const ply    = i + 1;
+    const pct    = Math.round(Math.abs(score) * 100);
+    const leader = score > 0.05 ? `+${pct}% W` : score < -0.05 ? `+${pct}% B` : "Equal";
+    tip.textContent = `Move ${ply}: ${leader}`;
+
+    // Position tooltip just above the SVG, tracking mouse x
+    const wrapRect = svg.parentElement.getBoundingClientRect();
+    const svgTop   = svg.getBoundingClientRect().top - wrapRect.top;
+    tip.style.left   = `${e.clientX - wrapRect.left}px`;
+    tip.style.top    = `${Math.max(0, svgTop - 22)}px`;
+    tip.style.bottom = "auto";
+    tip.hidden = false;
+  });
+
+  svg.addEventListener("mouseleave", () => { tip.hidden = true; });
 }
 
 // ── Moves list ────────────────────────────────────────────────────────────────
@@ -1619,6 +1697,7 @@ function replayGo(idx) {
 
   _updateReplayLabel();
   _highlightReplayMove(idx);
+  drawEvalGraph();
 }
 
 function exitReplay() {
@@ -1629,6 +1708,7 @@ function exitReplay() {
   }
   _updateReplayLabel();
   _highlightReplayMove(-1);
+  drawEvalGraph();
 }
 
 function _setReplayButtonsDisabled(disabled) {
