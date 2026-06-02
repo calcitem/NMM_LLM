@@ -10,11 +10,14 @@ Track 1 (heuristic/phase-control), SE-1 through SE-9, SE-14, and the B-55–B-64
 
 | Priority | Item | Key outcome |
 |----------|------|-------------|
+| ★★★ | **B-86** ✅ | `_closeable_mills` in-mill exclusion bug → broken sealed-2-config detection |
+| ★★★ | **B-87** ✅ | `setup_mill_bonus` fires for non-closeable 2-configs → `d2→d1` style blunders |
+| ★★ | **B-88** ✅ | Vacate-threat penalty: 1-step lookahead for opponent stepping onto vacated square |
 | ★★★ | **B-82** ✅ | Mill-close suppressed by multi-threat filter (two bugs) |
-| ★★ | **B-83** | Fly-phase forked 2-config: AI should prefer d1→f6 style fork over d1→d7 |
-| ★★ | **B-84** | Mill assembly from 3 separate same-colour pieces on same ring |
+| | **B-83** ✅ | Fly-phase forked 2-config: AI should prefer d1→f6 style fork over d1→d7 |
+| | **B-84** ✅ | Mill assembly from 3 separate same-colour pieces on same ring |
 | ★★ | **B-58** | Multiple LLM provider support (Claude, OpenAI, Perplexity, Null) |
-| ★★ | **SE-10** | Proactive fly-fork anticipation (move phase) |
+| | **SE-10** ✅ | Proactive own fork setup bonus (move phase) |
 | ★ | **B-53** | ChromaDB embedding dimension mismatch when `ollama_model` changes |
 | ★ | **B-54** | Inject `phase_strategy.md` into LLM prompts by game phase |
 | ★ | **B-24** | GUI settings for FullGame / Endgame DB toggles and blend factor |
@@ -58,7 +61,30 @@ B-55, B-59, B-60, B-61, B-62, B-63, B-64, B-56 (D4 endgame symmetry), B-57 (mmap
 
 ---
 
-### Enhancement B-83 — Fly-phase forked 2-config preference
+### Bug B-85 — Endgame DB WIN/LOSS counts violate NMM symmetry ⬜ ★★
+
+**Symptom:** `tests/test_build_endgame_db.py::TestSolver3v3Properties::test_win_equals_loss_by_symmetry` fails:
+```
+AssertionError: 4464320 != 911296 : WIN and LOSS counts should be equal by NMM symmetry
+```
+Total table entries: 5,383,840. WIN = 4,464,320; LOSS = 911,296; DRAW = 8,224. By NMM symmetry (swapping White and Black sides), WIN and LOSS counts must be equal — every mover-wins position has a color-swapped mover-loses counterpart. The ~5:1 ratio indicates a systematic error in the offline retrograde solver.
+
+**Root cause (unknown — investigation needed):**
+1. **D4 fill pass interacts with colour-swap symmetry**: canonical form is lex-min over D4 transforms of `(w_mask, b_mask)`. Some D4 transforms swap which bitmask is "lower" but do NOT swap White/Black semantics. The fill pass copies canonical WDL to all equivalents, which is correct. However, if the canonical form of a position P is NOT also canonical for the colour-swapped position P' = (b_mask, w_mask, flipped_turn), the LOSS entry for P' might be overwritten by a WIN entry during the fill pass.
+2. **Propagation asymmetry**: a position is WIN if any successor is LOSS; LOSS if all successors are WIN. If the fly-move generation canonicalises successors inconsistently (e.g., resolves ties differently for W-to-move vs B-to-move positions), some LOSS entries may not be reachable.
+3. **Terminal detection**: `_closes_mill(piece_mask, to_idx)` is used to detect immediate mill closures. If this function has a false negative for certain board orientations, some terminal WINs are missed and become UNKNOWN → DRAW after convergence.
+
+**Likely fix:** Add a diagnostic pass in `tools/build_endgame_db.py` that counts how many (WIN, P) positions have their colour-swap P' = (b, w, 1-turn) also labelled WIN (expected: all of them should be WIN too, since WIN means the mover wins regardless of colour). Any P where P' is labelled LOSS or DRAW indicates a mislabelled canonical entry. Fix the canonical resolution to ensure colour-swap pairs are consistently handled.
+
+**Impact:** The runtime `EndgameSolvedDB.query()` returns incorrect WDL for some 3v3 positions. Since B-48 (best-move selection) is also unresolved, the AI currently treats any WIN result as "try to win" without checking specific successors — the WDL mislabelling degrades quality of 3v3 fly play but does not cause crashes.
+
+**Files:**
+- `tools/build_endgame_db.py` — investigate and fix propagation / canonical fill logic
+- `tests/test_build_endgame_db.py` — existing symmetry test already captures the failure (pre-existing; not introduced by recent changes)
+
+---
+
+### Enhancement B-83 — Fly-phase forked 2-config preference ✅ 2026-06-03
 
 **Observed**: In fly-vs-fly position (White: d6, f4, d1 / Black: c3, d2, a7, White to move), the AI plays `d1→d7` (one 2-config) instead of `d1→f6` (two 2-configs: closing at b6 AND f2 — an unblockable fork). Static eval correctly scores `d1→f6` at +2527 vs `d1→d7` at +1286. Bug may appear at specific search depths due to alpha-beta cutoff or ordering.
 
@@ -68,11 +94,83 @@ B-55, B-59, B-60, B-61, B-62, B-63, B-64, B-56 (D4 endgame symmetry), B-57 (mmap
 
 ---
 
-### Enhancement B-84 — Mill assembly from 3 separate same-colour pieces
+### Enhancement B-84 — Mill assembly from 3 separate same-colour pieces (cold convergence) ✅ 2026-06-03
 
 **Observed**: The AI sometimes fails to converge 3 separate pieces (especially on the same ring) toward a mill, even when the path is straightforward and no tactical urgency exists. The existing `_free_piece_assembly` / `_assembly_reach_count` heuristics reward APPROACH but may under-reward direct ring-completion moves.
 
 **Investigation needed**: Profile a specific game position where this occurs. Check whether the assembly heuristic weights are outbid by tactical bonuses or convergence-penalty terms. May require increasing move-phase `assembly_reach_count` weights or adding a "ring completion" bonus for owning 2 of 3 squares on any ring with the third reachable in 1 move.
+
+---
+
+### Bug B-86 — `_closeable_mills` does not exclude in-mill pieces ✅ 2026-06-03 ★★★
+
+**Symptom:** `_closeable_mills(board, color)` counts a mill as closeable when the only "supporting" piece adjacent to the empty closing square is already inside the mill itself. Moving that piece to the closing square would vacate the mill, not close it. Meanwhile `_mill_threats` correctly excludes in-mill pieces using `if nb not in mill_set`.
+
+**Root cause:** `_closeable_mills` (line ~1575 in `ai/heuristics.py`) does not build `mill_set = set(mill)` and therefore counts in-mill neighbors when checking reachability. `_mill_threats` has the correct guard.
+
+**Downstream effects:**
+- `_sealed_two_configs(board, color)` uses `_closeable_mills(board, opp) > 0` as an early exit guard. Because the guard fires erroneously (sees false-positive closeable mills for the opponent), `_sealed_two_configs` returns 0 in positions where the opponent has no real closing threat. This means the P0.5 move-ordering tier (sealed-2-config-creating moves) is suppressed when it should fire.
+- Call sites at lines ~1555, 2105, 2234, 2496: audit each to confirm the in-mill exclusion is needed; some tactical bonuses may have been implicitly calibrated around the buggy count — run self-play A/B before promoting.
+
+**Fix:** In `_closeable_mills`, after `mill_set = set(mill)`, filter: `any(board.positions[nb] == color for nb in ADJACENCY[empty] if nb not in mill_set)`.
+
+**Second test case (game 2026-06-03):** Black AI level 7 places c5 on move 9 (last placement) instead of a1.
+```
+1.d6 d2 / 2.f4 b4 / 3.f6 b6 / 4.f2xb6 b6 / 5.d3 a7
+6.c5 b2xc5 / 7.c4 d7 / 8.g7 g4 / 9.c3 c5 ← WRONG (should be a1)
+```
+After White places c3, White has c3+c4 in mill c3-c4-c5. The bug falsely flags this mill as closeable (c4 is adjacent to closing square c5, but c4 is inside the mill). Black's c5 placement gets P1 block priority and a `blocked` bonus. Better move: a1 (creates genuine 2-config a1-a4-a7, closeable via b4→a4, winning in one more move).
+
+**Status:** Fixed 2026-06-03. `_closeable_mills` now builds `mill_set = set(mill)` and excludes in-mill pieces from adjacency check (same pattern as `_mill_threats`). 88/88 tests pass.
+
+**Files:** `ai/heuristics.py` — `_closeable_mills` function.
+
+---
+
+### Bug B-87 — `setup_mill_bonus` fires for non-closeable 2-configs in move phase ✅ 2026-06-03 ★★★
+
+**Symptom:** In the game below, Black AI (level 7) plays `d2→d1` on move 10 instead of the better `c4→c3`.
+
+```
+1.d6 d2 / 2.f4 a7 / 3.f6 b6 / 4.f2xb6 b6 / 5.b4 d7
+6.g7 g1 / 7.e4 g4 / 8.a4 c4 / 9.e3 e5 / 10.e3-d3 d2-d1 ← WRONG
+```
+
+**Why `d2→d1` is bad:** vacates cardinal node d2, enabling White d3→d2 → b4→b2 forming mill b2-d2-f2 and capturing a Black piece.
+
+**Root cause:** `d2→d1` creates 2-config g1-d1-a1 (Black has g1 and d1; a1 is the closing square). But a1's neighbors are a4=White and d1=Black(in-mill) — no reachable Black piece outside the mill can close to a1, so this 2-config is **not closeable**. Nevertheless `tactical_move_bonus()` computes `setup_mill_bonus = int(100 × 1.3) × 1 = +130` using `_two_configs` delta (which counts all 2-configs regardless of reachability). The negamax penalty for the resulting White mill combination is only ~–41 at depth 4, so net score for `d2→d1` ≈ +89 vs. ~+20 for `c4→c3` → AI incorrectly picks `d2→d1`.
+
+**Fix:** In the move-phase branch of `setup_mill_bonus` (lines ~2139–2143), replace the `_two_configs` delta with a `_closeable_mills` delta: award setup_mill_bonus only when the move gains a **closeable** 2-config, not a structurally inert one.
+
+```python
+# Before (buggy):
+two_cfg_gained = max(0, _two_configs(after, color) - _two_configs(before, color))
+setup_mill_bonus = int(weights.setup_mill * 1.3) * two_cfg_gained
+
+# After (fixed):
+closeable_gained = max(0, _closeable_mills(after, color) - _closeable_mills(before, color))
+setup_mill_bonus = int(weights.setup_mill * 1.3) * closeable_gained
+```
+
+Note: fix B-86 first (or apply its in-mill exclusion to `_closeable_mills`) so the count is accurate before wiring it here.
+
+**Files:** `ai/heuristics.py` — `tactical_move_bonus()`, move-phase setup_mill_bonus block.
+
+---
+
+### Enhancement B-88 — Vacate-threat penalty (1-step consolidation lookahead) ✅ 2026-06-03 ★★
+
+**Motivation:** `consolidation_penalty` currently checks: after my move, does the opponent's 2-config count increase immediately? For `d2→d1` this fires 0 — White needs to move d3→d2 first, so the new 2-config doesn't appear until the next ply. There is no signal for "vacating square X lets an adjacent opponent piece step onto X and form a closeable 2-config."
+
+**Logic:** In `tactical_move_bonus()`, when a move vacates `from_sq`:
+1. For each opponent piece `opp_piece` adjacent to `from_sq`:
+   - Simulate `opp_piece → from_sq`
+   - Check if the resulting board has a new closeable White 2-config that passed through `from_sq`
+   - If yes, apply penalty ~`weights.consolidation_penalty * 3` (severity is higher than the standard 1-step check because the vacate enables an immediate forced response)
+
+**Effect for `d2→d1`:** d3 is adjacent to d2; simulating d3→d2 creates closeable b2-d2-f2; penalty fires ~–300. Combined with B-87 dropping setup_mill_bonus to 0, net score for `d2→d1` becomes ≈ –341 vs. +20 for `c4→c3` — unambiguous.
+
+**Files:** `ai/heuristics.py` — `tactical_move_bonus()`, near `consolidation_penalty_val`.
 
 ---
 
@@ -893,7 +991,7 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 
 ### TIER 3 — Solid, Secondary Priority
 
-### SE-10 — Proactive Fly-Fork Anticipation (Move Phase) ⬜ ★ Medium Impact
+### SE-10 — Proactive Own Fork Setup (Move Phase) ✅ 2026-06-03
 
 **Why:** The existing `fly_fork_bonus` fires reactively. Extend `_fork_in_n(board, opp, n=2)` (already used in placement-phase, Enhancement B-4) to the move phase: scan forward up to 3 half-moves for forcing lines that result in 2+ simultaneous 2-configs.
 

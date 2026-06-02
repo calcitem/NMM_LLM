@@ -1586,7 +1586,12 @@ def _closeable_mills(board: BoardState, color: str) -> int:
             elif phase == "fly":
                 reachable = True
             else:
-                reachable = any(board.positions[nb] == color for nb in ADJACENCY[empty])
+                mill_set = set(mill)
+                reachable = any(
+                    board.positions[nb] == color
+                    for nb in ADJACENCY[empty]
+                    if nb not in mill_set
+                )
             if reachable:
                 count += 1
     return count
@@ -2137,10 +2142,11 @@ def tactical_move_bonus(
         two_cfg_gained = max(0, own_two_after - own_two_before)
         setup_mill_bonus = int(weights.setup_mill * _late_mult) * two_cfg_gained
     elif before_phase == "move":
-        two_cfg_gained = max(0, own_two_after - own_two_before)
-        # Slightly higher weight in move phase — gaining a 2-config is now a
-        # concrete mill threat, not just a structural seed.
-        setup_mill_bonus = int(weights.setup_mill * 1.3) * two_cfg_gained
+        # Only reward closeable 2-configs in move phase: non-closeable structural
+        # gains (where the only supporting piece is already inside the mill) still
+        # score via evaluate() weight-5 but don't earn the root-level +130 bonus.
+        closeable_gained = max(0, _closeable_mills(after, color) - _closeable_mills(before, color))
+        setup_mill_bonus = int(weights.setup_mill * 1.3) * closeable_gained
 
     # B-59: root-level bonus for moves that create a new sealed 2-config.
     # Supplements the static eval term so the AI selects sealed-threat-creating
@@ -2619,6 +2625,25 @@ def tactical_move_bonus(
         if new_opp_configs > 0:
             consolidation_penalty_val = new_opp_configs * weights.consolidation_penalty
 
+    # B-88: vacate-threat penalty.
+    # When a move vacates from_sq, an adjacent opponent piece can step onto it next
+    # ply and form a new closeable 2-config.  Penalise now so the search doesn't
+    # need to look two half-moves ahead to catch this.
+    vacate_threat_penalty = 0
+    if before_phase == "move" and not capture_this_move:
+        from_sq = next(
+            (p for p in POSITIONS if before.positions[p] == color and after.positions[p] != color),
+            None,
+        )
+        if from_sq:
+            for adj in ADJACENCY[from_sq]:
+                if after.positions[adj] == opp:
+                    sim = after.apply_move({"from": adj, "to": from_sq})
+                    new_closeable = max(0, _closeable_mills(sim, opp) - _closeable_mills(after, opp))
+                    if new_closeable > 0:
+                        vacate_threat_penalty += new_closeable * weights.consolidation_penalty * 3
+                        break
+
     # Mobility-reduction bonus: each opponent legal move removed by this move earns
     # a direct reward in move phase.  Herding the opponent into a corner (zero moves)
     # is a win condition, so moves that tighten the noose deserve explicit credit
@@ -2974,6 +2999,7 @@ def tactical_move_bonus(
         ("Outer-ring mill penalty",        -outer_mill_penalty),
         ("Ring crowding penalty",          -ring_crowd_penalty),
         ("Consolidation penalty (B-10)",   -consolidation_penalty_val),
+        ("Vacate-threat penalty (B-88)",   -vacate_threat_penalty),
         ("Opp chain non-disrupt (B-37)",   -opp_chain_nondisrupt_penalty),
         ("Disrupted 2-config (B-39)",      -disrupted_two_config_penalty),
         ("Dead/near-dead placement (B-64)", -placement_mobility_penalty),
