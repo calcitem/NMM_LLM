@@ -385,6 +385,7 @@ def evaluate(
         base += 10 * (_assembly_step3_count(board, color) - _assembly_step3_count(board, opp))
         base +=  4 * (_assembly_step4_count(board, color) - _assembly_step4_count(board, opp))
         base += 12 * (_one_config_approach(board, color) - _one_config_approach(board, opp))
+        base += 12 * (_cold_convergence_count(board, color) - _cold_convergence_count(board, opp))
 
     # Move-phase locked-mill penalty: penalise each own closed mill that has no
     # exit squares (every neighbour is opponent-occupied).  These mills contribute
@@ -1091,6 +1092,27 @@ def _one_config_approach(board: BoardState, color: str) -> int:
             score += 1   # step-2: two hops away
             counted.add(pos)
     return score
+
+
+def _cold_convergence_count(board: BoardState, color: str) -> int:
+    """Count empty squares targeted by 2+ distinct own 1-config mills.
+
+    Fires when all pieces are cold (no 2-config exists), filling the gap where
+    _free_piece_assembly and _assembly_reach_count return 0.  A high count means
+    two or more own pieces are aiming at the same empty mill square — convergence
+    is in progress even without a 2-config yet.  Move phase only.
+    """
+    target_pieces: dict[str, set[str]] = {}
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 1 and vals.count("") == 2:
+            own_sq = next(p for p in mill if board.positions[p] == color)
+            for p in mill:
+                if board.positions[p] == "":
+                    if p not in target_pieces:
+                        target_pieces[p] = set()
+                    target_pieces[p].add(own_sq)
+    return sum(1 for pieces in target_pieces.values() if len(pieces) >= 2)
 
 
 def _opponent_ring_concentration(board: BoardState, opp: str) -> list[int]:
@@ -2651,6 +2673,20 @@ def tactical_move_bonus(
             if _moved_to in _fork_sqs:
                 fork_anticip_bonus = int(_fork_anticip_w * _late_mult)
 
+    # SE-10 — Proactive own fork setup: bonus for moving to a square that within
+    # 2 moves gives own side two simultaneous 2-configs.  Move phase only (fly
+    # phase already has fly_fork_bonus; placement phase uses placement_fork_surplus).
+    own_fork_anticip_bonus = 0
+    if get_game_phase(before, color) == "move":
+        _own_fork_sqs = _fork_in_n(before, color, 2)
+        if _own_fork_sqs:
+            _se10_to = next(
+                (p for p in POSITIONS if after.positions[p] == color and before.positions[p] == ""),
+                None,
+            )
+            if _se10_to in _own_fork_sqs:
+                own_fork_anticip_bonus = int(weights.fork_anticipation * 0.80 * _late_mult)
+
     # B-7 — Locked mill escape and redirected-pin creation.
     # Neither fires in placement or fly phase.
     locked_escape_bonus = 0
@@ -2931,6 +2967,7 @@ def tactical_move_bonus(
         ("Cardinal mill alert block (B-36)", cardinal_alert_bonus),
         ("Dead-block forcing quality (B-33)", dead_block_quality_bonus),
         ("Fork anticipation (B-4)",        fork_anticip_bonus),
+        ("Own fork setup (SE-10)",         own_fork_anticip_bonus),
         ("Locked mill escape (B-7)",       locked_escape_bonus),
         ("Redirected pin (B-7)",           redirected_pin_bonus),
         ("Forked-mill block (B-8)",        cycling_block_bonus),
