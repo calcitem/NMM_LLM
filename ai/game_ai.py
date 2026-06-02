@@ -1537,19 +1537,10 @@ class GameAI:
         return best_move
 
     def position_eval(self, board: BoardState) -> float:
+        """Return tanh-normalised score in (-1, +1): positive = White winning.
+
+        Delegates to evaluate(strength_mode=True) which uses phase-calibrated
+        scales (800/1500/3000) and returns ±1.0 for terminal positions.
         """
-        Return tanh-normalised score in (-1, +1): positive = White winning.
-        Uses phase-specific scale so each game stage reads meaningfully.
-        """
-        import math
-        from .heuristics import evaluate as _eval, TANH_SCALE
-        from game.rules import is_terminal, get_game_phase
-        terminal, winner = is_terminal(board)
-        if terminal:
-            return 1.0 if winner == "W" else (-1.0 if winner == "B" else 0.0)
-        w_score = _eval(board, "W")
-        b_score = _eval(board, "B")
-        raw   = w_score - b_score
-        phase = get_game_phase(board, board.turn)
-        scale = TANH_SCALE.get(phase, 180)
-        return math.tanh(raw / scale)
+        from .heuristics import evaluate as _eval
+        return _eval(board, "W", strength_mode=True)
