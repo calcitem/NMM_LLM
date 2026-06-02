@@ -1,79 +1,90 @@
-"""ai/trajectory_db.py — Game trajectory memory for move guidance.
+"""ai/trajectory_db.py — Board-state-first game trajectory memory.
 
-Indexes all saved game JSONL files by move-sequence prefix so the AI can
-ask: "given the moves played so far, which next moves historically correlated
-with a win for my colour?"
+ARCHITECTURE (v2):
+  Primary key: canonical board-state key (position + turn + phase + placed
+  counts, D4-normalised). Two boards reached by different move sequences share
+  one DB bucket — transpositions are merged automatically.
 
-Covers the full game (placement + movement phases) using checkpoint depths
-that grow from 4 to 48 half-moves.  Longer matches are preferred; the query
-falls back to shorter prefixes when no deep match is found.
+  Index structure:
+    _index[state_key][canon_notation] = {
+        "wins_ai": int,    "losses_ai": int,    "draws_ai": int,
+        "wins_human": int, "losses_human": int, "draws_human": int,
+        "total": int,
+        "reward_sum": float,  # accumulated per-move reward (Phase 3; 0.0 until then)
+        "blame_sum":  float,  # accumulated per-move blame  (Phase 3; 0.0 until then)
+    }
 
-D4 board symmetry is applied at indexing time: every prefix is stored in its
-canonical (lex-min under D4) form so rotations and reflections of the same
-game share statistics.
+  Notations stored in canonical space (same D4 transform as the board key).
+  query() maps them back to actual-game notation via the inverse transform.
 
-After each game the caller should invoke add_game() to keep the index
-current without a full reload.
+  Replaces the v1 move-sequence-prefix index.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ai.board_symmetry import (
-    canonical_sequence as _canonical_sequence,
-    prefix_query_canonicals as _prefix_query_canonicals,
+    canonical_board_str as _canonical_board_str,
     transform_notation as _transform_notation,
     SYM_INVERSE as _SYM_INVERSE,
 )
+from game.board import POSITIONS
+
+if TYPE_CHECKING:
+    from game.board import BoardState
 
 logger = logging.getLogger(__name__)
 
-# Checkpoint depths (half-moves from game start) used when building the index.
-_DEPTHS = (4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48)
-
-_UNICODE_X = "×"   # ×
+_UNICODE_X = "×"
 
 
 def _norm(notation: str) -> str:
-    """Normalise notation: replace Unicode × with ASCII x."""
     return notation.replace(_UNICODE_X, "x")
+
+
+def make_board_state_key(board: "BoardState") -> tuple[str, int]:
+    """Return (canonical_state_key, sym_idx) for this board under D4 symmetry.
+
+    sym_idx must be retained by callers: stored notations are in canonical
+    space; query results are mapped back to actual-game notation via
+    _SYM_INVERSE[sym_idx].
+    """
+    from game.rules import get_game_phase
+    board24 = "".join(board.positions.get(p, "") or "." for p in POSITIONS)
+    canon, sym_idx = _canonical_board_str(board24)
+    phase = get_game_phase(board, board.turn)
+    placed_w = board.pieces_placed.get("W", 0)
+    placed_b = board.pieces_placed.get("B", 0)
+    return f"{canon}|{board.turn}|{phase}|{placed_w}|{placed_b}", sym_idx
 
 
 class TrajectoryDB:
     """
-    In-memory index of historical game trajectories.
-
-    The index maps  canon_prefix → {canon_next_notation → outcome_counts}
-    where canon_prefix is the pipe-joined D4-canonical form of the first D
-    normalised move notations, and outcome_counts is
-        {"W": int, "B": int, "D": int, "total": int}.
-
-    All 8 D4 symmetric equivalents of a game share statistics, multiplying
-    effective sample size by up to 8×.
+    In-memory index of historical game trajectories, keyed by canonical
+    board state rather than move-sequence prefix.
 
     query() returns a per-move score delta (positive = historically good for
-    the colour about to move, negative = historically bad) so the engine can
-    boost moves that have won before and avoid those that have lost.
+    the colour about to move) so the engine can boost moves that have won
+    before and down-weight those that have lost.
+
+    Confidence-weighted: low-sample positions return smaller deltas.
     """
 
     def __init__(self, games_dir: Path | str) -> None:
         self._games_dir = Path(games_dir)
         self._index: dict[str, dict[str, dict]] = {}
-        self._bans:  dict[str, set[str]] = {}   # actual prefix → set of banned notations
         self._game_count = 0
 
     # ── Build / update ────────────────────────────────────────────────────────
 
-    def load(self, bad_moves_path: Path | str | None = None) -> None:
-        """
-        Index every *.jsonl file in the games directory from scratch.
-        If bad_moves_path is provided, load persistent ban list from it.
-        """
+    def load(self) -> None:
+        """Index every *.jsonl file in the games directory from scratch."""
         self._index.clear()
-        self._bans.clear()
         self._game_count = 0
         if not self._games_dir.exists():
             logger.warning("TrajectoryDB: games directory not found: %s", self._games_dir)
@@ -88,48 +99,73 @@ class TrajectoryDB:
                 except Exception as exc:
                     logger.debug("TrajectoryDB: skipping line in %s — %s", path.name, exc)
         logger.info(
-            "TrajectoryDB: indexed %d games → %d prefix entries.",
+            "TrajectoryDB: indexed %d games → %d state entries.",
             self._game_count, len(self._index),
         )
-        if bad_moves_path is not None:
-            self.load_bad_moves(bad_moves_path)
 
     def _index_game(self, record: dict) -> None:
-        # Skip adaptive-softened games — blunder-inflated play pollutes the library.
+        """Index a single game record by board-state key.
+
+        All moves in the game are indexed; each board position (board_fen_before)
+        is keyed canonically under D4 symmetry. The played notation is transformed
+        by the same symmetry so transpositions share one bucket.
+        """
         if record.get("adaptive_softened"):
             return
-        winner = record.get("winner")       # "W", "B", or None/missing
-        moves  = record.get("moves", [])
+        winner = record.get("winner")
+        moves = record.get("moves", [])
         if not moves:
             return
 
-        notations = [_norm(m.get("notation", "")) for m in moves if m.get("notation")]
-        if not notations:
-            return
+        # Derive source type from game record fields.
+        source_type = record.get("source_type")
+        if source_type is None:
+            if record.get("self_play") or (
+                record.get("white_difficulty") and record.get("black_difficulty")
+                and not record.get("human_color")
+            ):
+                source_type = "ai_vs_ai"
+            else:
+                source_type = "human_involved"
+        is_ai = (source_type == "ai_vs_ai")
 
         self._game_count += 1
 
-        for depth in _DEPTHS:
-            if len(notations) <= depth:
-                break
-
-            prefix_notations = notations[:depth]
-            next_mv_raw      = notations[depth]
-
-            # Canonicalise the prefix; transform the next move by the same symmetry.
-            canon_prefix_list, sym_idx = _canonical_sequence(prefix_notations)
-            canon_next_mv = _transform_notation(next_mv_raw, sym_idx)
-            if canon_next_mv is None:
+        for move in moves:
+            notation = _norm(move.get("notation", ""))
+            fen = move.get("board_fen_before", "")
+            if not notation or not fen:
+                continue
+            try:
+                from game.board import BoardState
+                board = BoardState.from_fen_string(fen)
+            except Exception:
                 continue
 
-            canon_prefix_key = "|".join(canon_prefix_list)
-            bucket = self._index.setdefault(canon_prefix_key, {})
-            entry  = bucket.setdefault(canon_next_mv, {"W": 0, "B": 0, "D": 0, "total": 0})
+            state_key, sym_idx = make_board_state_key(board)
+
+            # Transform notation into canonical D4 space (same transform as the key).
+            canon_notation = _transform_notation(notation, sym_idx)
+            if canon_notation is None:
+                continue
+
+            color = move.get("color", "W")
+            bucket = self._index.setdefault(state_key, {})
+            entry = bucket.setdefault(canon_notation, {
+                "wins_ai": 0, "losses_ai": 0, "draws_ai": 0,
+                "wins_human": 0, "losses_human": 0, "draws_human": 0,
+                "total": 0,
+                # blame_sum / reward_sum always 0 until Phase 3 adds inline enrichment.
+                "reward_sum": 0.0, "blame_sum": 0.0,
+            })
             entry["total"] += 1
-            if winner in ("W", "B"):
-                entry[winner] += 1
+
+            if winner == color:
+                entry["wins_ai" if is_ai else "wins_human"] += 1
+            elif winner is not None and winner != color:
+                entry["losses_ai" if is_ai else "losses_human"] += 1
             else:
-                entry["D"] += 1
+                entry["draws_ai" if is_ai else "draws_human"] += 1
 
     def add_game(self, record: dict) -> None:
         """Incrementally add one completed game without a full reload."""
@@ -139,244 +175,110 @@ class TrajectoryDB:
 
     def query(
         self,
-        move_notations: list[str],
+        board: "BoardState",
         current_color: str,
-        min_samples: int = 2,
+        min_samples: int = 3,
+        prefer_ai: bool = False,
     ) -> dict[str, float]:
-        """
-        Return a score-delta dict for candidate next-move notations.
+        """Return a score-delta dict for candidate next-move notations.
 
-        Positive delta  → this move historically correlates with `current_color`
-                          winning (max +0.5 when 100 % win rate).
+        Positive delta  → move historically correlates with current_color winning
+                          (max +0.5 when 100% win rate, 20+ samples).
         Negative delta  → correlates with a loss (min -0.5).
-        Returns {}      when no trajectory data are found for the current depth.
+        Returns {}      when no data or fewer than min_samples total.
 
-        Tries the longest matching prefix first and falls back to shorter ones.
-        All 8 D4 symmetric equivalents of each prefix are queried; results are
-        inverse-transformed back to the actual game notation.
-        Normalises notation before lookup so ×/x variants both match.
+        Confidence-weighted: low-sample buckets return smaller deltas.
+        Notations in canonical space are mapped back to actual-game notation
+        via the inverse D4 transform before returning.
         """
-        normed = [_norm(n) for n in move_notations]
+        state_key, sym_idx = make_board_state_key(board)
+        candidates = self._index.get(state_key)
+        if not candidates:
+            return {}
 
-        for depth in reversed(_DEPTHS):
-            if len(normed) < depth:
+        inv = _SYM_INVERSE[sym_idx]
+        result: dict[str, float] = {}
+
+        for canon_notation, stats in candidates.items():
+            total = stats["total"]
+            if total < min_samples:
                 continue
 
-            # Collect stats across all D4 equivalents of this query prefix.
-            merged: dict[str, dict] = {}
-            found_any = False
-
-            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
-                candidates = self._index.get(canon_prefix_key)
-                if not candidates:
-                    continue
-                found_any = True
-                inv = _SYM_INVERSE[sym_idx]
-                for canon_notation, stats in candidates.items():
-                    actual_notation = _transform_notation(canon_notation, inv)
-                    if actual_notation is None:
-                        continue
-                    if actual_notation not in merged:
-                        merged[actual_notation] = {"W": 0, "B": 0, "D": 0, "total": 0}
-                    entry = merged[actual_notation]
-                    entry["total"] += stats["total"]
-                    entry["W"]     += stats["W"]
-                    entry["B"]     += stats["B"]
-                    entry["D"]     += stats["D"]
-
-            if not found_any:
+            actual_notation = _transform_notation(canon_notation, inv)
+            if actual_notation is None:
                 continue
 
-            total_samples = sum(c["total"] for c in merged.values())
-            if total_samples < min_samples:
-                continue
+            if prefer_ai:
+                wins  = stats["wins_ai"]   + 0.5 * stats["wins_human"]
+                draws = stats["draws_ai"]  + 0.5 * stats["draws_human"]
+                eff   = max(1,
+                    stats["wins_ai"] + stats["losses_ai"] + stats["draws_ai"]
+                    + 0.5 * (stats["wins_human"] + stats["losses_human"] + stats["draws_human"])
+                )
+            else:
+                wins  = stats["wins_ai"]  + stats["wins_human"]
+                draws = stats["draws_ai"] + stats["draws_human"]
+                eff   = max(1, total)
 
-            # Bans are stored in actual (non-canonical) notation so they apply
-            # precisely to the specific sequence the user flagged.
-            banned = self._bans.get("|".join(normed[:depth]), set())
-            result: dict[str, float] = {}
-            for notation, stats in merged.items():
-                if _norm(notation) in banned:
-                    result[notation] = -1.0   # hard-ban sentinel (outside statistical range)
-                    continue
-                total = stats["total"]
-                if total == 0:
-                    continue
-                wins  = stats.get(current_color, 0)
-                draws = stats.get("D", 0)
-                score = (wins + 0.4 * draws) / total
-                result[notation] = score - 0.5
-            for bad_n in banned:
-                if bad_n not in result:
-                    result[bad_n] = -1.0
-            return result
+            win_rate = (wins + 0.4 * draws) / eff
+            raw = win_rate - 0.5
 
-        # Even with no statistical match, surface bans at the shortest applicable depth.
-        for depth in _DEPTHS:
-            if len(normed) < depth:
-                break
-            prefix = "|".join(normed[:depth])
-            banned = self._bans.get(prefix, set())
-            if banned:
-                return {n: -1.0 for n in banned}
+            # Blend blame/reward signal; harmless (both 0) until Phase 3.
+            avg_blame  = stats["blame_sum"]  / total
+            avg_reward = stats["reward_sum"] / total
+            adjusted = raw - avg_blame * 0.4 + avg_reward * 0.3
 
-        return {}
+            # Confidence: reaches 1.0 at ~20 samples; shrinks delta for low-sample buckets.
+            confidence = min(1.0, math.log(total + 1) / math.log(20))
+
+            result[actual_notation] = max(-0.5, min(0.5, adjusted * confidence))
+
+        return result
 
     def query_opponent_loss(
         self,
-        move_notations: list[str],
+        board: "BoardState",
         opponent_color: str,
-        min_samples: int = 2,
+        min_samples: int = 3,
     ) -> dict[str, float]:
-        """Score candidate moves by how often the opponent loses from this position.
+        """Score candidate moves by how often opponent_color loses from this position.
 
-        Positive delta  → opponent historically loses frequently after this next move
-                          (max +0.5 when opponent always loses).
-        Negative delta  → opponent wins frequently; avoid this line.
-        Returns {}      when no trajectory data match.
-
-        Complements query(): where query() rewards moves that correlate with
-        our wins, this method rewards moves that correlate with their losses —
-        a subtly different signal when the database has many drawn games.
+        In v2, state_key encodes board.turn so all stored moves at a key are by
+        the same mover. "Opponent loses" = "current mover wins" — identical signal
+        to query(). This method is kept for caller compatibility; it delegates to
+        query() with the board mover as current_color.
         """
-        normed = [_norm(n) for n in move_notations]
-
-        for depth in reversed(_DEPTHS):
-            if len(normed) < depth:
-                continue
-
-            merged: dict[str, dict] = {}
-            found_any = False
-
-            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
-                candidates = self._index.get(canon_prefix_key)
-                if not candidates:
-                    continue
-                found_any = True
-                inv = _SYM_INVERSE[sym_idx]
-                for canon_notation, stats in candidates.items():
-                    actual_notation = _transform_notation(canon_notation, inv)
-                    if actual_notation is None:
-                        continue
-                    if actual_notation not in merged:
-                        merged[actual_notation] = {"W": 0, "B": 0, "D": 0, "total": 0}
-                    entry = merged[actual_notation]
-                    entry["total"] += stats["total"]
-                    entry["W"]     += stats["W"]
-                    entry["B"]     += stats["B"]
-                    entry["D"]     += stats["D"]
-
-            if not found_any:
-                continue
-
-            total_samples = sum(c["total"] for c in merged.values())
-            if total_samples < min_samples:
-                continue
-
-            result: dict[str, float] = {}
-            for notation, stats in merged.items():
-                total = stats["total"]
-                if total == 0:
-                    continue
-                opp_losses = stats.get(
-                    "W" if opponent_color == "B" else "B", 0
-                )
-                loss_rate = opp_losses / total
-                result[notation] = loss_rate - 0.5
-            return result
-
-        return {}
+        return self.query(board, board.turn, min_samples=min_samples)
 
     def query_all_frequencies(
         self,
-        move_notations: list[str],
+        board: "BoardState",
         min_samples: int = 5,
     ) -> dict[str, float]:
-        """Return per-move relative frequency (0.0–1.0) for the next move at this prefix.
+        """Return per-move relative frequency (0.0–1.0) for next moves at this board state.
 
         SE-11: used to identify commonly-played opponent replies so the search
         can extend by 1 ply for high-frequency (≥ 0.5) opponent moves.
-        Returns {} when no data match or fewer than min_samples total moves.
-        Tries the longest matching prefix first, falls back to shorter ones.
+        Returns {} when no data or fewer than min_samples total.
         """
-        normed = [_norm(n) for n in move_notations]
+        state_key, sym_idx = make_board_state_key(board)
+        candidates = self._index.get(state_key)
+        if not candidates:
+            return {}
 
-        for depth in reversed(_DEPTHS):
-            if len(normed) < depth:
+        total_all = sum(c["total"] for c in candidates.values())
+        if total_all < min_samples:
+            return {}
+
+        inv = _SYM_INVERSE[sym_idx]
+        result: dict[str, float] = {}
+        for canon_n, c in candidates.items():
+            if c["total"] == 0:
                 continue
-
-            merged: dict[str, int] = {}
-            found_any = False
-
-            for canon_prefix_key, sym_idx in _prefix_query_canonicals(normed, depth):
-                candidates = self._index.get(canon_prefix_key)
-                if not candidates:
-                    continue
-                found_any = True
-                inv = _SYM_INVERSE[sym_idx]
-                for canon_notation, stats in candidates.items():
-                    actual_notation = _transform_notation(canon_notation, inv)
-                    if actual_notation is None:
-                        continue
-                    merged[actual_notation] = merged.get(actual_notation, 0) + stats["total"]
-
-            if not found_any:
-                continue
-
-            total_all = sum(merged.values())
-            if total_all < min_samples:
-                continue
-
-            return {n: c / total_all for n, c in merged.items() if c > 0}
-
-        return {}
-
-    # ── Bad move bans ─────────────────────────────────────────────────────────
-
-    def mark_bad_move(self, prior_notations: list[str], bad_notation: str) -> None:
-        """
-        Permanently penalise `bad_notation` from the position described by
-        `prior_notations`.  query() will return -1.0 (hard-ban) for that
-        move at any prefix depth that matches.
-
-        Bans are stored in actual notation (not canonical) so they apply
-        precisely to the specific game situation the user flagged.
-        """
-        normed_prior = [_norm(n) for n in prior_notations]
-        normed_bad   = _norm(bad_notation)
-        for depth in _DEPTHS:
-            if len(normed_prior) < depth:
-                break
-            prefix = "|".join(normed_prior[:depth])
-            self._bans.setdefault(prefix, set()).add(normed_bad)
-
-    def load_bad_moves(self, path: Path | str) -> None:
-        """Load a persistent bad-moves JSON file and apply all bans."""
-        path = Path(path)
-        if not path.exists():
-            return
-        try:
-            entries = json.loads(path.read_text(encoding="utf-8"))
-            for e in entries:
-                self.mark_bad_move(e.get("prior_notations", []), e.get("bad_notation", ""))
-            logger.info("TrajectoryDB: loaded %d bad-move bans from %s", len(entries), path.name)
-        except Exception as exc:
-            logger.warning("TrajectoryDB: could not load bad moves from %s — %s", path, exc)
-
-    def save_bad_move(
-        self, path: Path | str, prior_notations: list[str], bad_notation: str
-    ) -> None:
-        """Append one bad-move entry to the persistent JSON file and apply the ban."""
-        path = Path(path)
-        existing: list = []
-        try:
-            if path.exists():
-                existing = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-        existing.append({"prior_notations": list(prior_notations), "bad_notation": bad_notation})
-        path.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
-        self.mark_bad_move(prior_notations, bad_notation)
+            actual_n = _transform_notation(canon_n, inv)
+            if actual_n:
+                result[actual_n] = c["total"] / total_all
+        return result
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
 

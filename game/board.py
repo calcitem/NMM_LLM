@@ -193,6 +193,27 @@ class BoardState:
         b.hash_key = hash_board(b)
         return b
 
+    @classmethod
+    def from_fen_string(cls, fen: str) -> "BoardState":
+        """Parse a FEN string produced by to_fen_string().
+        Format: '<24 chars>|<turn>|<W_placed>|<B_placed>'
+        """
+        pos_str, turn, w_placed_s, b_placed_s = fen.split("|")
+        w_placed, b_placed = int(w_placed_s), int(b_placed_s)
+        positions = {POSITIONS[i]: (pos_str[i] if pos_str[i] != "." else "") for i in range(24)}
+        w_on = sum(1 for v in positions.values() if v == "W")
+        b_on = sum(1 for v in positions.values() if v == "B")
+        b = cls(
+            positions=positions,
+            turn=turn,
+            pieces_on_board={"W": w_on, "B": b_on},
+            pieces_placed={"W": w_placed, "B": b_placed},
+            pieces_captured={"W": b_placed - b_on, "B": w_placed - w_on},
+            hash_key=0,
+        )
+        b.hash_key = hash_board(b)
+        return b
+
     # ── Phase ─────────────────────────────────────────────────────────────────
 
     @property

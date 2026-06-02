@@ -806,13 +806,10 @@ class GameAI:
         if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
 
-        _has_hard_bans = bool(trajectory_hints and any(
-            d <= -1.0 for d in trajectory_hints.values()
-        ))
         use_adjustments = (
             (recognition is not None and recognition.status not in ("novel", "inactive"))
             or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
-        ) or _has_hard_bans
+        )
         if use_adjustments:
             scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
             if recognition is not None:
@@ -923,8 +920,6 @@ class GameAI:
             s += f"x{move['capture']}"
         return s
 
-    _HARD_BAN_THRESHOLD = -1.0  # sentinel from TrajectoryDB for user-marked bad moves
-
     def _apply_trajectory_hints(
         self,
         scored: list[tuple[dict, int]],
@@ -933,8 +928,6 @@ class GameAI:
         """Apply trajectory-database score deltas to a scored move list.
 
         Deltas in [-0.5, +0.5] are statistical hints scaled by opening_adherence.
-        Delta == -1.0 is a hard-ban sentinel from the user's bad-move button:
-        the move receives -INF+1 so it is never chosen regardless of adherence.
         """
         if not hints:
             return scored
@@ -944,9 +937,6 @@ class GameAI:
         for move, raw in scored:
             notation = self._move_notation(move)
             delta    = hints.get(notation, 0.0)
-            if delta <= self._HARD_BAN_THRESHOLD:
-                adjusted.append((move, -INF + 1))  # always last; still legal
-                continue
             # B-78: cap bonus so a trajectory hint cannot override a mill-close move.
             _bonus_cap = self._weights.close_mill - 1   # 499 < 500 (close_mill)
             bonus = min(int(delta * scale), _bonus_cap) if scale else 0
@@ -1237,9 +1227,9 @@ class GameAI:
         # SE-11b: query trajectory frequency dict at first opponent ply only (307µs/call — too
         # expensive at ply 2 where ~27k nodes × 307µs ≈ 8 s overhead).
         _opp_freq = None
-        if is_opp_node and opp_plies_left == _MAX_OPP_PLIES and self._trajectory_db is not None and self._move_path_buf:
+        if is_opp_node and opp_plies_left == _MAX_OPP_PLIES and self._trajectory_db is not None:
             _opp_freq = self._trajectory_db.query_all_frequencies(
-                self._move_path_buf, min_samples=3
+                board, min_samples=3
             ) or None
 
         # SE-14: Promote DB hint to front (done before TT so TT gets final priority).
@@ -1474,15 +1464,12 @@ class GameAI:
         if moves is None:
             moves = get_all_legal_moves(board)
         best_move     = moves[0]
-        _has_hard_bans = bool(trajectory_hints and any(
-            d <= -1.0 for d in trajectory_hints.values()
-        ))
         use_adjustments = (
             (
                 recognition is not None
                 and recognition.status not in ("novel", "inactive")
             ) or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
-        ) or _has_hard_bans
+        )
 
         prev_score: int | None = None
         for depth in range(2, max_depth + 1):

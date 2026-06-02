@@ -78,11 +78,10 @@ def _persist_game_record(record: dict) -> None:
 
 # Load trajectory DB once at startup — updated incrementally as games complete.
 _trajectory_db    = TrajectoryDB(_ROOT / "data" / "games")
-_BAD_MOVES_PATH   = _ROOT / "data" / "bad_moves.json"
 try:
-    _trajectory_db.load(bad_moves_path=_BAD_MOVES_PATH)
+    _trajectory_db.load()
     log.info(
-        "TrajectoryDB: %d games, %d prefix entries",
+        "TrajectoryDB: %d games, %d state entries",
         _trajectory_db.game_count, _trajectory_db.entry_count,
     )
 except Exception as _exc:
@@ -194,7 +193,7 @@ async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
     try:
         log.info("Library consolidation: %d games", game_count)
         new_tdb = TrajectoryDB(_ROOT / "data" / "games")
-        await asyncio.to_thread(new_tdb.load, bad_moves_path=_BAD_MOVES_PATH)
+        await asyncio.to_thread(new_tdb.load)
         _trajectory_db = new_tdb
 
         new_edb = EndgameDB(_ROOT / "data" / "games")

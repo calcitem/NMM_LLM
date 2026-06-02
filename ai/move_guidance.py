@@ -90,12 +90,9 @@ def build_trajectory_hints(
 ) -> dict[str, float] | None:
     """Merge trajectory, opponent-loss, and endgame DB hints for choose_move()."""
     trajectory_hints: dict[str, float] | None = None
-    notations = [m.get("notation", "") for m in game_moves if m.get("notation")]
-    if not notations:
-        return None
 
     if trajectory_db is not None:
-        trajectory_hints = trajectory_db.query(notations, board.turn) or None
+        trajectory_hints = trajectory_db.query(board, board.turn) or None
 
         opp_color = "B" if board.turn == "W" else "W"
         loss_weight = (
@@ -104,7 +101,7 @@ def build_trajectory_hints(
             else 1.5
         )
         if loss_weight > 0:
-            exploit_hints = trajectory_db.query_opponent_loss(notations, opp_color)
+            exploit_hints = trajectory_db.query_opponent_loss(board, opp_color)
             if exploit_hints:
                 if trajectory_hints:
                     for notation, delta in exploit_hints.items():
