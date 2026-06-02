@@ -280,17 +280,16 @@ class TestB78TrajectoryHintCap(unittest.TestCase):
         score = adjusted[0][1]
         self.assertLess(score, 0)
 
-    def test_hard_ban_not_affected_by_cap(self):
-        """Hard-ban sentinel (-1.0) still sends move to -INF+1."""
+    def test_large_negative_hint_reduces_score(self):
+        """Large negative delta lowers the move score (soft scoring, no hard ban)."""
         ai = GameAI(color="W", difficulty=3)
         ai._weights.opening_adherence = 100
 
-        from ai.game_ai import INF
         scored = [({"to": "d7"}, 500)]
-        hints = {"d7": -1.0}
+        hints = {"d7": -0.5}
 
         adjusted = ai._apply_trajectory_hints(scored, hints)
-        self.assertEqual(adjusted[0][1], -INF + 1)
+        self.assertLess(adjusted[0][1], 500)
 
 
 if __name__ == "__main__":
