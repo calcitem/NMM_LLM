@@ -365,6 +365,22 @@ class TrajectoryDB:
         """
         return self.query(board, board.turn, min_samples=min_samples)
 
+    def query_line(
+        self,
+        board: "BoardState",
+        k: int = 4,
+        min_samples: int = 3,
+    ) -> list[tuple[str, float]]:
+        """Top-k historically strong next moves sorted by score descending.
+
+        Used by game_ai to promote high-trajectory moves to the front of the
+        root move list before alpha-beta search, improving cut efficiency.
+        Returns [(notation, score_delta), ...] — empty list when no data.
+        """
+        scores = self.query(board, board.turn, min_samples=min_samples)
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return ranked[:k]
+
     def query_all_frequencies(
         self,
         board: "BoardState",

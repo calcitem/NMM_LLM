@@ -441,6 +441,7 @@ class GameAI:
         # SE-11: trajectory DB + game notations for opponent-frequency-based extension.
         # Set by choose_move each call; used in _root_search and _score_all.
         self._trajectory_db = None
+        self._trajectory_line: list[tuple[str, float]] = []
         self._game_notations: list = []
         self._move_path_buf: list = []  # SE-11b: shared push/pop path buffer for _negamax recursion
         # Neural leaf evaluator (replaces heuristic evaluate() at depth-0 leaves).
@@ -497,6 +498,10 @@ class GameAI:
         self._history = {}
         self._trajectory_db = trajectory_db            # SE-11
         self._game_notations = list(game_notations) if game_notations else []  # SE-11
+        # Phase 4: pre-fetch top trajectory moves for root ordering (lightweight).
+        self._trajectory_line: list[tuple[str, float]] = (
+            trajectory_db.query_line(board) if trajectory_db is not None else []
+        )
         moves = get_all_legal_moves(board)
         if not moves:
             return {}
@@ -1038,6 +1043,13 @@ class GameAI:
             moves = get_all_legal_moves(board)
         killers = self._killers[depth] if depth < 32 else None
         moves = _order_moves(board, moves, killers, self._history)
+
+        # Phase 4: promote top trajectory-line moves to the front of the root list.
+        # Sort is stable: top-trajectory moves come first, existing order preserved within each tier.
+        if self._trajectory_line:
+            _top = {n for n, _ in self._trajectory_line[:3]}
+            moves.sort(key=lambda mv: 0 if self._move_notation(mv) in _top else 1)
+
         self._nodes = 0
         best_move = moves[0]
         best_score = -INF
