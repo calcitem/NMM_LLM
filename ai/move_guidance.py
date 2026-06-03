@@ -63,6 +63,18 @@ def synthesize_opening_recognition(
     if book_mv not in legal_dests:
         return recognition
 
+    # Guard: only steer if the game moves so far actually follow this opening's
+    # line.  If the actual game has diverged (different moves played), applying
+    # the opening's Nth move to an unrelated board position is harmful.
+    for i, gm in enumerate(game_moves):
+        if i >= len(line):
+            break
+        expected_raw = line[i]
+        expected = (_transform_book_notation(expected_raw, game_sym_idx) or expected_raw)
+        actual = gm.get("notation", "")
+        if actual != expected:
+            return recognition  # game deviated from this opening — do not steer
+
     return RecognitionResult(
         opening_id=target_opening.opening_id,
         name=target_opening.name,
