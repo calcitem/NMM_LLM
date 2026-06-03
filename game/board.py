@@ -294,7 +294,7 @@ class BoardState:
         # Incremental Zobrist hash update
         new_hash = self.hash_key
 
-        if move["from"] is None:
+        if move["from"] is None and move.get("to") is not None:
             # Placement: add color piece at to-square
             new_pos[move["to"]] = color
             new_on[color] += 1
@@ -303,7 +303,7 @@ class BoardState:
             # If this placement completes the 9th piece, toggle the done-placing bit
             if new_placed[color] >= 9 and self.pieces_placed[color] < 9:
                 new_hash ^= PLACED_DONE_KEYS[color_idx]
-        else:
+        elif move["from"] is not None:
             # Movement (or fly): relocate color piece from→to
             new_pos[move["from"]] = ""
             new_pos[move["to"]] = color
