@@ -13,6 +13,7 @@ Track 1 (heuristic/phase-control), SE-1 through SE-9, SE-14, and the B-55–B-64
 | ★★★ | **B-86** ✅ | `_closeable_mills` in-mill exclusion bug → broken sealed-2-config detection |
 | ★★★ | **B-87** ✅ | `setup_mill_bonus` fires for non-closeable 2-configs → `d2→d1` style blunders |
 | ★★ | **B-88** ✅ | Vacate-threat penalty: 1-step lookahead for opponent stepping onto vacated square |
+| ★★★ | **B-89** ✅ | Dead-placement B-64 fires on valid mill-contributor pieces (immobile but closeable 2-config) |
 | ★★★ | **B-82** ✅ | Mill-close suppressed by multi-threat filter (two bugs) |
 | | **B-83** ✅ | Fly-phase forked 2-config: AI should prefer d1→f6 style fork over d1→d7 |
 | | **B-84** ✅ | Mill assembly from 3 separate same-colour pieces on same ring |
@@ -159,6 +160,25 @@ Note: fix B-86 first (or apply its in-mill exclusion to `_closeable_mills`) so t
 ---
 
 ### Enhancement B-88 — Vacate-threat penalty (1-step consolidation lookahead) ✅ 2026-06-03 ★★
+
+---
+
+### Bug B-89 — B-64 dead-placement penalty fires on valid mill-contributor pieces ✅ 2026-06-03 ★★★
+
+**Symptom:** In the game below, Black AI level 7 places e5 (last placement) instead of g1.
+```
+1.d6 d2 / 2.f4 d7 / 3.f6 b6 / 4.f2xb6 b6 / 5.b4 d5
+6.d1 a4 / 7.e3 g4 / 8.a7 c3 / 9.c5 e5 ← WRONG (should be g1)
+```
+After White places c5, Black placing g1 would create closeable 2-config g7-g4-g1 (closeable by moving d7→g7 in move phase), enabling the mill and a cycling fork (g1↔d1 oscillating with d1-d2-d3 and g7-g4-g1). Black places e5 instead, which creates a dead pattern (c5-d5-e5 with White c5).
+
+**Root cause:** B-64 dead/near-dead penalty fires when `free_nb == 0`. g1's neighbors are g4=Black and d1=White — both occupied → `free_nb = 0` → penalty = -1500. But g1 creates a closeable 2-config (g7-g4-g1, closeable via d7→g7 where d7 is Black and not in the mill). The piece doesn't need to move itself — another Black piece closes the mill. B-64 incorrectly treats "immobile piece" as "dead piece."
+
+**Fix:** In B-64 block, add `_creates_closeable = _closeable_mills(after, color) > _closeable_mills(before, color)`. Exempt the penalty when either `_is_pivot_blocker` OR `_creates_closeable`. After fix: g1 scores +47 (setup bonus, no dead penalty); e5 scores -178 (disrupted 2-config penalty).
+
+**Status:** Fixed 2026-06-03. Also: LMR test `test_lmr_block_guard_not_reduced` updated — the old position (W: a7/a4/c5) had White winning immediately by closing a1-a4-a7 and reducing Black to 2 pieces; test updated to a position where blocking is genuinely best (W: b6/g7/d3).
+
+**Files:** `ai/heuristics.py` — B-64 block in `tactical_move_bonus()`. `tests/test_search_enhancements.py` — LMR test position updated.
 
 **Motivation:** `consolidation_penalty` currently checks: after my move, does the opponent's 2-config count increase immediately? For `d2→d1` this fires 0 — White needs to move d3→d2 first, so the new 2-config doesn't appear until the next ply. There is no signal for "vacating square X lets an adjacent opponent piece step onto X and form a closeable 2-config."
 

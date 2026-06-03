@@ -2487,10 +2487,15 @@ def tactical_move_bonus(
                 and sum(1 for p in mill if after.positions.get(p) == _opp_b64) == 1
             )
             _is_pivot_blocker = _opp_one_configs >= 2
+            # B-89: also exempt when the placement creates a new closeable 2-config.
+            # The piece may be immobile itself but another piece can slide to the
+            # closing square — the piece is a live mill contributor, not truly dead.
+            _creates_closeable = _closeable_mills(after, color) > _closeable_mills(before, color)
+            _exempt = _is_pivot_blocker or _creates_closeable
             if free_nb == 0:
-                placement_mobility_penalty = 0 if _is_pivot_blocker else weights.dead_placement_penalty
+                placement_mobility_penalty = 0 if _exempt else weights.dead_placement_penalty
             elif free_nb == 1:
-                placement_mobility_penalty = 0 if _is_pivot_blocker else weights.near_dead_placement_penalty
+                placement_mobility_penalty = 0 if _exempt else weights.near_dead_placement_penalty
 
     # Placement busy-opponent chain scan.
     # Rewards forcing sequences where every placement compels an opp response
@@ -2636,10 +2641,34 @@ def tactical_move_bonus(
             None,
         )
         if from_sq:
+            _from_mills = [mill for mill in MILLS if from_sq in mill]
             for adj in ADJACENCY[from_sq]:
                 if after.positions[adj] == opp:
                     sim = after.apply_move({"from": adj, "to": from_sq})
-                    new_closeable = max(0, _closeable_mills(sim, opp) - _closeable_mills(after, opp))
+                    # Only count mills that pass THROUGH from_sq: the opponent must
+                    # exploit the specific vacated square to create the threat.
+                    # This avoids penalising moves that merely allow the opponent to
+                    # open/cycle an existing closed mill on a different part of the board.
+                    opp_phase = get_game_phase(sim, opp)
+                    new_closeable = 0
+                    for mill in _from_mills:
+                        vals_after = [after.positions[p] for p in mill]
+                        vals_sim   = [sim.positions[p]   for p in mill]
+                        # Must be a new 2-config in sim that wasn't there in after
+                        if vals_sim.count(opp) == 2 and vals_sim.count("") == 1:
+                            if not (vals_after.count(opp) == 2 and vals_after.count("") == 1):
+                                empty = next(p for p in mill if sim.positions[p] == "")
+                                if opp_phase == "move":
+                                    mill_set = set(mill)
+                                    reachable = any(
+                                        sim.positions[nb] == opp
+                                        for nb in ADJACENCY[empty]
+                                        if nb not in mill_set
+                                    )
+                                else:
+                                    reachable = True
+                                if reachable:
+                                    new_closeable += 1
                     if new_closeable > 0:
                         vacate_threat_penalty += new_closeable * weights.consolidation_penalty * 3
                         break

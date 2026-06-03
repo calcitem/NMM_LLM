@@ -351,13 +351,15 @@ class TestLMR(unittest.TestCase):
     def test_lmr_block_guard_not_reduced(self):
         """A blocking move must still be played correctly even in fly phase.
 
-        W: a7, a4, c5 (3 pieces, fly phase).
-        B: f6, f4 — 2-config closing f2.  W must block f2 or B closes the mill
-        next turn for free.  In fly phase all W pieces can reach f2, so f2 lands
-        in p1 (block) of _order_moves and is guarded from LMR reduction.
+        W: b6, g7, d3 (3 pieces, fly phase — no immediate mill available).
+        B: f6, f4, d2 — 2-config closing f2.  W must block f2 or B closes the
+        mill next turn for free.  In fly phase all W pieces can reach f2, so f2
+        lands in p1 (block) of _order_moves and is guarded from LMR reduction.
+        (Original position w/ a7/a4/c5 retired: AI now correctly closes a1-a4-a7
+        and captures, winning immediately — a better line than blocking.)
         """
         positions = {
-            "a7": "W", "a4": "W", "c5": "W",
+            "b6": "W", "g7": "W", "d3": "W",
             "f6": "B", "f4": "B", "d2": "B",
         }
         b = BoardState.from_setup(positions, turn="W", phase="move")
