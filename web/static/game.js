@@ -202,6 +202,14 @@ document.addEventListener("DOMContentLoaded", () => {
       : "Value net: not found — run Train Value Network in Tools to build one";
   }).catch(() => {});
 
+  const chkSentinel = $("chk-sentinel");
+  if (chkSentinel) {
+    chkSentinel.addEventListener("change", () => {
+      const modeRow = $("row-sentinel-mode");
+      if (modeRow) modeRow.style.display = chkSentinel.checked ? "" : "none";
+    });
+  }
+
   $("btn-reset-weights").addEventListener("click", () => {
     const ps = $("sel-personality");
     const name = ps?.value ?? "balanced";
@@ -593,6 +601,8 @@ function startNewGame() {
       difficulty:   diff,
       vs_human:     vs,
       use_llm:      useLlm,
+      use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
+      sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
       ai_weights:   _getWeights(),
       player_name:  playerName,
     }));
@@ -976,6 +986,44 @@ function handleMessage(msg) {
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
       addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
+      // Sentinel advisory
+      if (msg.sentinel) {
+        const s = msg.sentinel;
+        const badge = $("sentinel-advisory");
+        const txt   = $("sentinel-text");
+        const icon  = $("sentinel-icon");
+
+        if (badge && txt) {
+          if (s.is_turning_point) {
+            // Show the badge prominently
+            const msgMap = {
+              "critical":             { icon: "🔴", label: "Critical position",       bg: "rgba(220,50,50,.15)" },
+              "possible_mistake":     { icon: "🟡", label: "Possible mistake here",   bg: "rgba(220,180,50,.15)" },
+              "missed_opportunity":   { icon: "🔵", label: "Missed opportunity",      bg: "rgba(50,120,220,.15)" },
+              "safe":                 { icon: "🟢", label: "Position looks safe",     bg: "rgba(50,180,80,.1)"  },
+            };
+            const style = msgMap[s.advisory_message] || msgMap["safe"];
+            icon.textContent  = style.icon;
+            txt.textContent   = `${style.label} (confidence: ${Math.round(s.turning_point_confidence * 100)}%)`;
+            badge.style.background = style.bg;
+            badge.style.display = "";
+          } else {
+            // Not a turning point — hide the badge
+            badge.style.display = "none";
+          }
+
+          // Always add a subtle commentary line if sentinel is active
+          const riskPct = Math.round(s.mistake_risk * 100);
+          const oppPct  = Math.round(s.opportunity_score * 100);
+          if (s.is_turning_point || riskPct > 40 || oppPct > 40) {
+            addCommentary(
+              "Sentinel",
+              `${s.advisory_message.replace(/_/g, " ")} · risk ${riskPct}% · opp ${oppPct}%`,
+              "ai"
+            );
+          }
+        }
+      }
       if (msg.thinking) {
         const showReasoning = $("showReasoning");
         if (showReasoning && showReasoning.checked) {
@@ -2159,6 +2207,8 @@ function _handleTournamentNext(msg) {
       type:           "new_game",
       tournament_game: true,
       use_llm:        $("chk-llm").checked,
+      use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
+      sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
     }));
   }
 }

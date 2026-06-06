@@ -60,6 +60,12 @@
           <div id="ai-reasoning-toggle" style="margin-bottom:6px;font-size:.8rem;color:var(--text-dim)">
             <label><input type="checkbox" id="showReasoning"> Show AI reasoning</label>
           </div>
+          <!-- Sentinel advisory badge — hidden by default, shown on is_turning_point -->
+          <div id="sentinel-advisory" style="display:none; margin-bottom:6px; padding:6px 8px;
+               border-radius:4px; font-size:.82rem; font-weight:600; border-left:3px solid var(--accent);">
+            <span id="sentinel-icon">⚠</span>
+            <span id="sentinel-text"></span>
+          </div>
           <div id="commentary-ai"></div>
         </div>
       </div>
@@ -299,6 +305,22 @@
         <div class="form-row" style="flex-direction:row; align-items:center; gap:8px;">
           <input type="checkbox" id="chk-llm" checked>
           <label for="chk-llm" style="color:var(--text); font-size:.9rem;">MillsAI commentary (LLM)</label>
+        </div>
+
+        <div class="form-row" id="row-sentinel" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-sentinel">
+          <label for="chk-sentinel" style="color:var(--text); font-size:.9rem;">
+            Sentinel guidance
+            <span style="font-size:.75rem; color:var(--text-dim);">(requires trained checkpoint)</span>
+          </label>
+        </div>
+        <div class="form-row" id="row-sentinel-mode" style="display:none">
+          <label for="sel-sentinel-mode" style="font-size:.85rem;">Sentinel mode</label>
+          <select id="sel-sentinel-mode" style="font-size:.85rem;">
+            <option value="advisory" selected>Advisory (log only)</option>
+            <option value="score_adjust">Score adjust</option>
+            <option value="reconsider">Reconsider on critical</option>
+          </select>
         </div>
 
         <div class="form-row" id="row-pure-ai" style="flex-direction:row; align-items:center; gap:8px;">

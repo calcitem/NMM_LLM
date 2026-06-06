@@ -167,6 +167,23 @@ else:
     log.info("ValueNet: not found at %s", _value_net_path)
 
 
+# ── Sentinel overlay (optional — only loads if checkpoint exists) ─────────────
+_sentinel_advisor = None
+_sentinel_ckpt = None
+try:
+    from learned_ai.sentinel.infer import SentinelAdvisor, load_advisor
+    from learned_ai.sentinel.config import load_config as _load_sentinel_config
+    _sentinel_cfg = _load_sentinel_config()
+    _sentinel_ckpt = Path(_ROOT) / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"
+    if _sentinel_ckpt.exists():
+        _sentinel_advisor = load_advisor(str(_sentinel_ckpt), _sentinel_cfg)
+        log.info("Sentinel overlay loaded from %s", _sentinel_ckpt)
+    else:
+        log.info("Sentinel checkpoint not found at %s — overlay disabled", _sentinel_ckpt)
+except Exception as _e:
+    log.warning("Sentinel overlay unavailable: %s", _e)
+
+
 # ── Library consolidation (Stage 5.27) ───────────────────────────────────────
 
 _CONSOLIDATION_INTERVAL = 50  # games between automatic DB reloads
@@ -599,6 +616,14 @@ async def get_vn_status():
         size_kb = round(_value_net_path.stat().st_size / 1024, 1)
         return JSONResponse({"loaded": True, "size_kb": size_kb})
     return JSONResponse({"loaded": False})
+
+
+@app.get("/api/sentinel_status")
+async def sentinel_status():
+    return {
+        "available": _sentinel_advisor is not None and _sentinel_advisor.is_loaded(),
+        "checkpoint": str(_sentinel_ckpt) if _sentinel_advisor else "",
+    }
 
 
 _PERSONALITIES_DIR = _ROOT / "data" / "personalities"
@@ -1239,14 +1264,25 @@ async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
 
             session.engine.apply_move(move)
 
-            await _send(ws, {
+            _avai_move_msg = {
                 "type":        "ai_move",
                 "from":        move.get("from"),
                 "to":          move.get("to"),
                 "capture":     move.get("capture"),
                 "was_blunder": bool(game_ai.last_was_blunder),
                 "can_mark_bad": False,
-            })
+            }
+            if game_ai and game_ai.last_sentinel_advice is not None:
+                adv = game_ai.last_sentinel_advice
+                _avai_move_msg["sentinel"] = {
+                    "mistake_risk":             round(adv.mistake_risk, 3),
+                    "opportunity_score":        round(adv.opportunity_score, 3),
+                    "turning_point_confidence": round(adv.turning_point_confidence, 3),
+                    "is_turning_point":         adv.is_turning_point,
+                    "advisory_message":         adv.advisory_message,
+                }
+                game_ai.last_sentinel_advice = None  # consume after sending
+            await _send(ws, _avai_move_msg)
 
             # Flush commentary from the active coordinator
             if coord:
@@ -1415,6 +1451,16 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     }
     if session.coordinator and session.coordinator.last_thinking:
         _ai_move_msg["thinking"] = session.coordinator.last_thinking
+    if session.game_ai and session.game_ai.last_sentinel_advice is not None:
+        adv = session.game_ai.last_sentinel_advice
+        _ai_move_msg["sentinel"] = {
+            "mistake_risk":             round(adv.mistake_risk, 3),
+            "opportunity_score":        round(adv.opportunity_score, 3),
+            "turning_point_confidence": round(adv.turning_point_confidence, 3),
+            "is_turning_point":         adv.is_turning_point,
+            "advisory_message":         adv.advisory_message,
+        }
+        session.game_ai.last_sentinel_advice = None  # consume after sending
     await _send(ws, _ai_move_msg)
     await _commentary(ws, session)
     await _send(ws, _state(session))
@@ -1593,6 +1639,8 @@ async def ws_endpoint(websocket: WebSocket):
                     _t_pers = ""
                 vs_human  = bool(msg.get("vs_human", False))
                 use_llm   = bool(msg.get("use_llm", True))
+                use_sentinel  = bool(msg.get("use_sentinel", False))
+                sentinel_mode = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
                 settings  = _load_settings()
 
                 engine   = GameEngine(human_color=hc)
@@ -1752,6 +1800,10 @@ async def ws_endpoint(websocket: WebSocket):
                         endgame_solved_db=_endgame_solved_db,
                         value_net=_value_net,
                     )
+
+                    if use_sentinel and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                        game_ai.set_sentinel(_sentinel_advisor, mode=sentinel_mode)
+                        log.info("Sentinel overlay attached to GameAI (mode=%s)", sentinel_mode)
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")
