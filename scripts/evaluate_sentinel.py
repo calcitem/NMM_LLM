@@ -1,8 +1,8 @@
-"""scripts/evaluate_sentinel.py — offline sentinel evaluation metrics.
+"""scripts/evaluate_sentinel.py — offline move-level sentinel evaluation.
 
-Reports turning-point precision/recall, mistake-risk calibration (reliability
-bins), opportunity-detection quality, and an early-warning rate (how often the
-model flags a turning point in the plies leading up to a confirmed one).
+Reports move-quality accuracy (pred>=0.5 vs label>=0.5), a win/draw/loss
+breakdown, and a calibration (reliability bins) of predicted vs. observed
+move quality.
 
 Usage:
     python scripts/evaluate_sentinel.py --checkpoint learned_ai/sentinel/checkpoints/best.pt
@@ -27,40 +27,20 @@ from learned_ai.sentinel.infer import SentinelAdvisor
 
 
 def _gather(advisor: SentinelAdvisor, dataset: SentinelDataset, device):
-    """Run the model over every example; return prediction/target arrays."""
+    """Run the model over every example; return (preds, targets, sources)."""
     model = advisor.model
     model.eval()
-    feats = np.stack([e.state_features for e in dataset.examples]).astype(np.float32)
+    feats = np.stack([e.features for e in dataset.examples]).astype(np.float32)
     x = torch.from_numpy(feats).to(device)
     with torch.no_grad():
-        out = model(x)
-    preds = {
-        "mistake_risk": out.mistake_risk.reshape(-1).cpu().numpy(),
-        "opportunity_score": out.opportunity_score.reshape(-1).cpu().numpy(),
-        "trajectory_value_delta": out.trajectory_value_delta.reshape(-1).cpu().numpy(),
-        "turning_point_confidence": out.turning_point_confidence.reshape(-1).cpu().numpy(),
-    }
-    targets = {
-        "mistake_risk": np.array([e.mistake_risk for e in dataset.examples]),
-        "opportunity_score": np.array([e.opportunity_score for e in dataset.examples]),
-        "turning_point_confidence": np.array(
-            [e.turning_point_confidence for e in dataset.examples]),
-        "ply": np.array([e.ply for e in dataset.examples]),
-    }
-    return preds, targets
+        out = model(x).reshape(-1)
+    preds = out.cpu().numpy()
+    targets = np.array([e.move_quality for e in dataset.examples], dtype=np.float32)
+    sources = np.array([e.supervision_source for e in dataset.examples], dtype=object)
+    return preds, targets, sources
 
 
-def _precision_recall(pred_pos, gold_pos):
-    tp = int(np.sum(pred_pos & gold_pos))
-    fp = int(np.sum(pred_pos & ~gold_pos))
-    fn = int(np.sum(~pred_pos & gold_pos))
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
-    return precision, recall, f1
-
-
-def _calibration(pred, gold_binary, bins=10):
+def _calibration(pred, gold, bins=10):
     edges = np.linspace(0.0, 1.0, bins + 1)
     rows = []
     for i in range(bins):
@@ -69,12 +49,12 @@ def _calibration(pred, gold_binary, bins=10):
         if not np.any(mask):
             continue
         rows.append((f"[{lo:.1f},{hi:.1f})", int(np.sum(mask)),
-                     float(np.mean(pred[mask])), float(np.mean(gold_binary[mask]))))
+                     float(np.mean(pred[mask])), float(np.mean(gold[mask]))))
     return rows
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Evaluate the sentinel overlay")
+    p = argparse.ArgumentParser(description="Evaluate the move-level sentinel")
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--game-dir", default="data/games")
     p.add_argument("--dataset", default=None)
@@ -107,41 +87,40 @@ def main() -> int:
         return 1
     print(f"Evaluating on {len(dataset)} examples.\n")
 
-    preds, targets = _gather(advisor, dataset, device)
-    thr = config.turning_point_threshold
+    preds, targets, sources = _gather(advisor, dataset, device)
 
-    # turning-point precision/recall
-    tp_pred = preds["turning_point_confidence"] >= thr
-    tp_gold = targets["turning_point_confidence"] >= 0.5
-    prec, rec, f1 = _precision_recall(tp_pred, tp_gold)
-    print(f"Turning-point detection @ threshold {thr}:")
-    print(f"  precision={prec:.3f} recall={rec:.3f} f1={f1:.3f}")
-    print(f"  positives predicted={int(np.sum(tp_pred))} gold={int(np.sum(tp_gold))}\n")
+    # overall accuracy: agreement on the >=0.5 boundary
+    pred_pos = preds >= 0.5
+    gold_pos = targets >= 0.5
+    acc = float(np.mean(pred_pos == gold_pos))
+    mae = float(np.mean(np.abs(preds - targets)))
+    print(f"Overall: accuracy(>=0.5)={acc:.3f}  MAE={mae:.3f}\n")
 
-    # mistake-risk calibration
-    print("Mistake-risk reliability (bin, n, mean_pred, mean_gold):")
-    for row in _calibration(preds["mistake_risk"], (targets["mistake_risk"] >= 0.5).astype(float)):
-        print(f"  {row[0]} n={row[1]:5d} pred={row[2]:.3f} gold={row[3]:.3f}")
+    # win/draw/loss breakdown
+    print("Win/draw/loss accuracy:")
+    for name, sel, ok in (
+        ("win", targets >= 0.99, preds >= 0.5),
+        ("draw", np.abs(targets - 0.5) < 1e-3, np.abs(preds - 0.5) < 0.25),
+        ("loss", targets <= 0.01, preds < 0.5),
+    ):
+        n = int(np.sum(sel))
+        a = float(np.mean(ok[sel])) if n else float("nan")
+        print(f"  {name:5s} n={n:6d} acc={a:.3f}")
     print()
 
-    # opportunity detection
-    op_pred = preds["opportunity_score"] >= 0.6
-    op_gold = targets["opportunity_score"] >= 0.6
-    oprec, orec, of1 = _precision_recall(op_pred, op_gold)
-    print(f"Opportunity detection @0.6: precision={oprec:.3f} recall={orec:.3f} f1={of1:.3f}\n")
+    # supervision-source breakdown
+    print("By supervision source:")
+    for src in sorted(set(sources.tolist())):
+        m = sources == src
+        n = int(np.sum(m))
+        a = float(np.mean((preds[m] >= 0.5) == (targets[m] >= 0.5))) if n else float("nan")
+        print(f"  {src:14s} n={n:6d} accuracy={a:.3f}")
+    print()
 
-    # early-warning rate: of confirmed turning points (gold), what fraction have
-    # the model already flagging high confidence at ply-1 or ply-2 before them?
-    # Approximated here within the flattened dataset by checking the preceding
-    # examples' predictions (dataset is ply-ordered per game in load order).
-    confirmed_idx = np.where(tp_gold)[0]
-    early = 0
-    for idx in confirmed_idx:
-        lookback = preds["turning_point_confidence"][max(0, idx - 2):idx]
-        if lookback.size and np.any(lookback >= thr):
-            early += 1
-    ew_rate = early / len(confirmed_idx) if len(confirmed_idx) else 0.0
-    print(f"Early-warning rate (flag within 2 plies before a turning point): {ew_rate:.3f}")
+    # calibration of predicted vs. observed quality
+    print("Move-quality reliability (bin, n, mean_pred, mean_gold):")
+    for row in _calibration(preds, targets):
+        print(f"  {row[0]} n={row[1]:6d} pred={row[2]:.3f} gold={row[3]:.3f}")
     return 0
 
 

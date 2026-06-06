@@ -40,7 +40,7 @@ def main() -> int:
     ds = SentinelDataset.load_from_games(
         args.game_dir, db=db, config=config, limit=args.limit
     )
-    print(f"Loaded {len(ds)} examples. Class distribution: {ds.class_distribution()}")
+    print(f"Loaded {len(ds)} examples. Quality distribution: {ds.quality_distribution()}")
     print(f"Supervision sources: {ds.source_distribution()}")
 
     if args.format == "npz":
@@ -49,15 +49,12 @@ def main() -> int:
         with open(args.output, "w") as out:
             for ex in ds.examples:
                 out.write(json.dumps({
-                    "label": ex.label,
-                    "turning_point_confidence": ex.turning_point_confidence,
-                    "value_delta": ex.value_delta,
-                    "mistake_risk": ex.mistake_risk,
-                    "opportunity_score": ex.opportunity_score,
+                    "move_quality": ex.move_quality,
                     "training_weight": ex.training_weight,
                     "supervision_source": ex.supervision_source,
                     "ply": ex.ply,
-                    "features": ex.state_features.tolist(),
+                    "move_notation": ex.move_notation,
+                    "features": ex.features.tolist(),
                 }) + "\n")
     print(f"Wrote dataset to {args.output} ({args.format})")
     return 0

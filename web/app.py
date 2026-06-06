@@ -1003,6 +1003,19 @@ async def _send(ws: WebSocket, obj: dict) -> None:
     await ws.send_text(json.dumps(obj))
 
 
+def _sentinel_payload(adv) -> dict:
+    """Serialise a move-level SentinelAdvice into the ai_move 'sentinel' dict."""
+    return {
+        "player":                 adv.player,
+        "played_move_quality":    round(adv.played_move_quality, 3),
+        "best_available_quality": round(adv.best_available_quality, 3),
+        "opportunity_gap":        round(adv.opportunity_gap, 3),
+        "advisory_message":       adv.advisory_message,
+        "intervention":           getattr(adv, "intervention_applied", None),
+        "intervention_detail":    getattr(adv, "intervention_detail", None),
+    }
+
+
 def _classify_commentary(line: str) -> tuple[str, str, str]:
     """Parse '[Speaker] text' and return (speaker, text, section).
 
@@ -1276,16 +1289,7 @@ async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
                 "can_mark_bad": False,
             }
             if game_ai and game_ai.last_sentinel_advice is not None:
-                adv = game_ai.last_sentinel_advice
-                _avai_move_msg["sentinel"] = {
-                    "mistake_risk":             round(adv.mistake_risk, 3),
-                    "opportunity_score":        round(adv.opportunity_score, 3),
-                    "turning_point_confidence": round(adv.turning_point_confidence, 3),
-                    "is_turning_point":         adv.is_turning_point,
-                    "advisory_message":         adv.advisory_message,
-                    "intervention":             getattr(adv, "intervention_applied", None),
-                    "intervention_detail":      getattr(adv, "intervention_detail", None),
-                }
+                _avai_move_msg["sentinel"] = _sentinel_payload(game_ai.last_sentinel_advice)
                 game_ai.last_sentinel_advice = None  # consume after sending
             await _send(ws, _avai_move_msg)
 
@@ -1457,16 +1461,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     if session.coordinator and session.coordinator.last_thinking:
         _ai_move_msg["thinking"] = session.coordinator.last_thinking
     if session.game_ai and session.game_ai.last_sentinel_advice is not None:
-        adv = session.game_ai.last_sentinel_advice
-        _ai_move_msg["sentinel"] = {
-            "mistake_risk":             round(adv.mistake_risk, 3),
-            "opportunity_score":        round(adv.opportunity_score, 3),
-            "turning_point_confidence": round(adv.turning_point_confidence, 3),
-            "is_turning_point":         adv.is_turning_point,
-            "advisory_message":         adv.advisory_message,
-            "intervention":             getattr(adv, "intervention_applied", None),
-            "intervention_detail":      getattr(adv, "intervention_detail", None),
-        }
+        _ai_move_msg["sentinel"] = _sentinel_payload(session.game_ai.last_sentinel_advice)
         session.game_ai.last_sentinel_advice = None  # consume after sending
     await _send(ws, _ai_move_msg)
     await _commentary(ws, session)

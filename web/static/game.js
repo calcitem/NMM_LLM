@@ -986,39 +986,40 @@ function handleMessage(msg) {
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
       addCommentary("GameAI", `Played ${from === "—" ? to : from + "→" + to}${cap}${blunder}`, "ai");
-      // Sentinel advisory
+      // Sentinel advisory (move-level scorer)
       if (msg.sentinel) {
         const s = msg.sentinel;
         const badge = $("sentinel-advisory");
         const txt   = $("sentinel-text");
         const icon  = $("sentinel-icon");
 
+        const qualityPct = Math.round((s.played_move_quality || 0) * 100);
+        const gapPct     = Math.round((s.opportunity_gap || 0) * 100);
+        const player     = s.player || "?";
+
         if (badge && txt) {
-          if (s.is_turning_point) {
-            // Show the badge prominently
-            const msgMap = {
-              "critical":             { icon: "🔴", label: "Critical position",       bg: "rgba(220,50,50,.15)" },
-              "possible_mistake":     { icon: "🟡", label: "Possible mistake here",   bg: "rgba(220,180,50,.15)" },
-              "missed_opportunity":   { icon: "🔵", label: "Missed opportunity",      bg: "rgba(50,120,220,.15)" },
-              "safe":                 { icon: "🟢", label: "Position looks safe",     bg: "rgba(50,180,80,.1)"  },
-            };
-            const style = msgMap[s.advisory_message] || msgMap["safe"];
-            icon.textContent  = style.icon;
-            txt.textContent   = `${style.label} (confidence: ${Math.round(s.turning_point_confidence * 100)}%)`;
+          const msgMap = {
+            "critical":           { icon: "🔴", label: "Critical — much better move available", bg: "rgba(220,50,50,.15)" },
+            "possible_mistake":   { icon: "🟡", label: "Possible mistake",                      bg: "rgba(220,180,50,.15)" },
+            "missed_opportunity": { icon: "🔵", label: "Missed opportunity",                    bg: "rgba(50,120,220,.15)" },
+            "safe":               { icon: "🟢", label: "Move looks sound",                      bg: "rgba(50,180,80,.1)"  },
+          };
+          const style = msgMap[s.advisory_message] || msgMap["safe"];
+
+          if (s.advisory_message && s.advisory_message !== "safe") {
+            icon.textContent = style.icon;
+            txt.textContent  = `${player}: ${style.label} (move quality ${qualityPct}%, gap ${gapPct}%)`;
             badge.style.background = style.bg;
             badge.style.display = "";
           } else {
-            // Not a turning point — hide the badge
             badge.style.display = "none";
           }
 
-          // Always add a subtle commentary line if sentinel is active
-          const riskPct = Math.round(s.mistake_risk * 100);
-          const oppPct  = Math.round(s.opportunity_score * 100);
-          if (s.is_turning_point || riskPct > 40 || oppPct > 40) {
+          // Commentary line whenever there's a non-trivial opportunity gap.
+          if (s.advisory_message !== "safe" || gapPct > 15) {
             addCommentary(
               "Sentinel",
-              `${s.advisory_message.replace(/_/g, " ")} · risk ${riskPct}% · opp ${oppPct}%`,
+              `${player} · ${(s.advisory_message || "safe").replace(/_/g, " ")} · move quality ${qualityPct}% · gap ${gapPct}%`,
               "ai"
             );
           }

@@ -1,8 +1,9 @@
-"""scripts/train_sentinel.py — train the sentinel overlay from watched games.
+"""scripts/train_sentinel.py — train the move-level sentinel from watched games.
 
-Trajectory-supervised training. The external solved DB is used as a teacher when
-available; otherwise training falls back to game-outcome proxy supervision (the
-model still learns, accuracy is just lower).
+The sentinel is a per-move quality scorer: each example is one candidate move
+in one position, labelled with a single ``move_quality`` in [0, 1] from the
+mover's perspective (1.0 = win, 0.5 = draw, 0.0 = loss). Labels come from the
+external solved DB when available; otherwise a weak heuristic label is used.
 
 Usage:
     python scripts/train_sentinel.py [--config configs/sentinel_default.yaml]
@@ -37,26 +38,57 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def _turning_point_pr(model, loader, device, threshold: float):
-    """Compute turning-point precision/recall over a loader (target>=0.5 positive)."""
+def _eval_metrics(model, loader, device):
+    """Mean BCE loss plus accuracy and a win/draw/loss breakdown over a loader.
+
+    A prediction is "correct" when ``round`` agreement holds: pred >= 0.5 iff
+    target >= 0.5. The WDL breakdown reports per-bucket accuracy using the same
+    >=0.5 / <=0.5 / ~0.5 banding the dataset uses for labels.
+    """
     model.eval()
-    tp = fp = fn = 0
+    total_loss = 0.0
+    n_batches = 0
+    correct = total = 0
+    buckets = {"win": [0, 0], "draw": [0, 0], "loss": [0, 0]}  # [correct, count]
     with torch.no_grad():
-        for feats, targets in loader:
+        for feats, quality, weight in loader:
             feats = feats.to(device)
+            quality = quality.to(device)
+            weight = weight.to(device)
             out = model(feats)
-            pred = (out.turning_point_confidence.reshape(-1).cpu().numpy() >= threshold)
-            gold = (targets["turning_point_confidence"].numpy() >= 0.5)
-            tp += int(np.sum(pred & gold))
-            fp += int(np.sum(pred & ~gold))
-            fn += int(np.sum(~pred & gold))
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    return precision, recall
+            losses = sentinel_loss(out, quality, sample_weight=weight)
+            total_loss += float(losses["total"])
+            n_batches += 1
+
+            p = out.reshape(-1).cpu().numpy()
+            g = quality.reshape(-1).cpu().numpy()
+            pred_pos = p >= 0.5
+            gold_pos = g >= 0.5
+            correct += int(np.sum(pred_pos == gold_pos))
+            total += len(g)
+            for i in range(len(g)):
+                if g[i] >= 0.99:
+                    b = "win"
+                    ok = p[i] >= 0.5
+                elif g[i] <= 0.01:
+                    b = "loss"
+                    ok = p[i] < 0.5
+                elif abs(g[i] - 0.5) < 1e-3:
+                    b = "draw"
+                    ok = abs(p[i] - 0.5) < 0.25
+                else:
+                    continue
+                buckets[b][1] += 1
+                buckets[b][0] += int(ok)
+
+    val_loss = total_loss / max(1, n_batches)
+    acc = correct / max(1, total)
+    wdl = {k: (v[0] / v[1] if v[1] else float("nan")) for k, v in buckets.items()}
+    return val_loss, acc, wdl
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Train the sentinel overlay")
+    p = argparse.ArgumentParser(description="Train the move-level sentinel")
     p.add_argument("--config", default=None)
     p.add_argument("--game-dir", default="data/games")
     p.add_argument("--dataset", default=None, help="Preprocessed .npz (skips replay)")
@@ -84,7 +116,7 @@ def main() -> int:
         if n == 0:
             print("No training examples found — nothing to train.")
             return 1
-        print(f"Dataset: {n} examples. Classes: {dataset.class_distribution()}")
+        print(f"Dataset: {n} examples. Quality: {dataset.quality_distribution()}")
         print(f"Supervision sources: {dataset.source_distribution()}")
         n_val = max(1, int(n * config.val_fraction)) if n > 1 else 0
         n_train = n - n_val
@@ -116,7 +148,7 @@ def main() -> int:
             print("No training examples found — nothing to train.")
             return 1
         print(f"Train: {len(train_ds)} examples, Val: {len(val_ds)} examples")
-        print(f"Train classes: {train_ds.class_distribution()}")
+        print(f"Train quality: {train_ds.quality_distribution()}")
         print(f"Train sources: {train_ds.source_distribution()}")
 
     train_loader = DataLoader(
@@ -161,59 +193,36 @@ def main() -> int:
     for epoch in range(start_epoch, config.epochs):
         model.train()
         t0 = time.time()
-        running = {"total": 0.0, "mistake_risk": 0.0, "opportunity_score": 0.0,
-                   "trajectory_value_delta": 0.0, "turning_point_confidence": 0.0}
+        running = 0.0
         n_batches = 0
-        for feats, targets in train_loader:
+        for feats, quality, weight in train_loader:
             feats = feats.to(device)
-            tg = {k: targets[k].to(device) for k in targets}
-            weight = tg.pop("weight", None)
+            quality = quality.to(device)
+            weight = weight.to(device)
             out = model(feats)
-            losses = sentinel_loss(out, tg, sample_weight=weight,
-                                   loss_weights=config.loss_weights)
+            losses = sentinel_loss(out, quality, sample_weight=weight)
             optimizer.zero_grad()
             losses["total"].backward()
             optimizer.step()
-            running["total"] += float(losses["total"].detach())
-            for k in ("mistake_risk", "opportunity_score",
-                      "trajectory_value_delta", "turning_point_confidence"):
-                running[k] += float(losses[k])
+            running += float(losses["total"].detach())
             n_batches += 1
 
         n_batches = max(1, n_batches)
-        train_loss = running["total"] / n_batches
+        train_loss = running / n_batches
 
         # validation
         val_loss = float("nan")
-        prec = rec = float("nan")
+        acc = float("nan")
+        wdl = {"win": float("nan"), "draw": float("nan"), "loss": float("nan")}
         if val_loader is not None:
-            model.eval()
-            v_total = 0.0
-            v_batches = 0
-            with torch.no_grad():
-                for feats, targets in val_loader:
-                    feats = feats.to(device)
-                    tg = {k: targets[k].to(device) for k in targets}
-                    weight = tg.pop("weight", None)
-                    out = model(feats)
-                    losses = sentinel_loss(out, tg, sample_weight=weight,
-                                           loss_weights=config.loss_weights)
-                    v_total += float(losses["total"])
-                    v_batches += 1
-            val_loss = v_total / max(1, v_batches)
-            prec, rec = _turning_point_pr(
-                model, val_loader, device, config.turning_point_threshold
-            )
+            val_loss, acc, wdl = _eval_metrics(model, val_loader, device)
 
         dt = time.time() - t0
         print(
             f"epoch {epoch + 1}/{config.epochs} "
-            f"train={train_loss:.4f} val={val_loss:.4f} "
-            f"[mistake={running['mistake_risk'] / n_batches:.3f} "
-            f"opp={running['opportunity_score'] / n_batches:.3f} "
-            f"delta={running['trajectory_value_delta'] / n_batches:.3f} "
-            f"tp={running['turning_point_confidence'] / n_batches:.3f}] "
-            f"tp_precision={prec:.3f} tp_recall={rec:.3f} ({dt:.1f}s)"
+            f"train={train_loss:.4f} val={val_loss:.4f} acc={acc:.3f} "
+            f"[win={wdl['win']:.3f} draw={wdl['draw']:.3f} loss={wdl['loss']:.3f}] "
+            f"({dt:.1f}s)"
         )
 
         _save(os.path.join(config.checkpoint_dir, "latest.pt"), epoch + 1)

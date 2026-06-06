@@ -1,214 +1,367 @@
-"""learned_ai/sentinel/feature_builder.py — extended sentinel feature vector.
+"""learned_ai/sentinel/feature_builder.py — per-move sentinel feature vector.
 
-The sentinel input is a 129-float vector:
+The sentinel is a *move-level* scorer: every example describes ONE candidate
+move in ONE position, encoded from the mover's perspective. The model predicts
+a single move-quality score in [0, 1].
 
-  [0:84)    base board-state encoding from learned_ai.models.state_encoder.encode_state
-            (REUSED — never duplicated here).
-  [84:120)  36 context features describing the *decision* at this ply.
-  [120:129) 9 counterfactual features from the Malom DB (all-legal-move WDL).
-            Computed at trajectory-build time only; zero-padded at inference
-            time because the DB is not queried during play.
+Feature layout (FEATURE_DIM = 58 floats)
+----------------------------------------
+Board context (mover-normalised, 20 floats) — same for all moves in a position:
+  [0:4)   phase one-hot [placement, midgame, endgame, flying]
+  [4]     mover piece count / 9
+  [5]     opponent piece count / 9
+  [6]     mover mills count / 3
+  [7]     opponent mills count / 3
+  [8]     mover mobility / 24
+  [9]     opponent mobility / 24
+  [10]    mover pieces in double mills / 9
+  [11]    opponent pieces in double mills / 9
+  [12]    mover placed / 9
+  [13]    opponent placed / 9
+  [14]    mover potential mills (2-of-3 with empty) / 8
+  [15]    opponent potential mills / 8
+  [16]    side-to-move is black (0.0 white, 1.0 black)
+  [17:20) reserved padding (0.0)
 
-Context layout (36 floats):
-  [0:5)   top-5 heuristic scores (normalised to [0,1], 0-padded)
-  [5:25)  top-5 move-type one-hots (4-way place/move/fly/capture each), 0-padded
-  [25]    chosen_move_rank  (rank / max(n-1,1); 0 if a single candidate)
-  [26]    closes_mill        (bool)
-  [27]    opens_mill_threat  (bool)
-  [28]    reduces_own_mobility (bool)
-  [29:33) trajectory score trend (last 4 heuristic scores, normalised, 0-padded)
-  [33]    game_source_is_human (1.0 if human-vs-ai else 0.0)
-  [34]    n_candidates_norm  (n_candidates / 30.0, clipped to 1.0)
-  [35]    reserved padding   (0.0) — keeps the block exactly 36 wide.
+Move-specific (20 floats):
+  [20]    from-square index / 24 (0 for placements)
+  [21]    to-square index / 24
+  [22]    is_placement (bool)
+  [23]    is_mill_closing (bool)
+  [24]    is_capture (bool)
+  [25]    captured piece index / 24 (0 if no capture)
+  [26]    would_create_double_mill (bool)
+  [27]    would_block_opponent_mill (bool)
+  [28]    resulting mover piece count / 9
+  [29]    resulting opponent piece count / 9
+  [30]    resulting mover mobility / 24
+  [31]    resulting opponent mobility / 24
+  [32]    resulting mover mills / 3
+  [33]    resulting opponent mills / 3
+  [34]    destination is a "strong" (junction, deg>=3) square (bool)
+  [35]    destination is a "corner" (deg==2) square (bool)
+  [36]    move reduces own mobility (bool)
+  [37]    move opens a new mill threat (bool)
+  [38:40) reserved padding (0.0)
+
+Counterfactual context (18 floats) — same for all moves in a position:
+  [40]    n_legal_moves / 24
+  [41]    frac_winning_moves   (DB)
+  [42]    frac_losing_moves    (DB)
+  [43]    frac_draw_moves      (DB)
+  [44]    best_available_wdl   (1.0 win / 0.5 draw / 0.0 loss)
+  [45]    worst_available_wdl
+  [46]    heuristic_rank / n_legal (0 = top)
+  [47]    heuristic_score_normalised (across candidates)
+  [48]    winning_move_available (bool, DB)
+  [49]    losing_move_available  (bool, DB)
+  [50]    this move is DB win (bool)
+  [51]    this move is DB loss (bool)
+  [52]    this move is DB draw (bool)
+  [53]    this move WDL known (bool)
+  [54]    db_available (bool)
+  [55]    a better DB move existed than this one (bool)
+  [56:58) reserved padding (0.0)
+
+At inference time the DB is not queried, so the DB-derived slots are populated
+from whatever the caller can compute cheaply (frac/best/worst left at 0 when the
+DB is unavailable). Training enriches them from query_all_moves().
 
 Public API:
-  build_features(board_state, move_context: dict) -> np.ndarray (129,)
-  counterfactual_features(all_moves, played_move) -> list[float] (9,)
-  CONTEXT_DIM, BASE_DIM, COUNTERFACTUAL_DIM, FEATURE_DIM constants.
+  build_move_features(board, move, player, move_ctx) -> np.ndarray (FEATURE_DIM,)
+  board_context_features(board, player) -> np.ndarray (BOARD_CTX_DIM,)
+  FEATURE_DIM, BOARD_CTX_DIM, MOVE_DIM, COUNTERFACTUAL_DIM constants.
 """
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from learned_ai.models.state_encoder import encode_state
+from game.board import ADJACENCY, MILLS, POSITIONS
 
-BASE_DIM = 84
-CONTEXT_DIM = 36
-COUNTERFACTUAL_DIM = 9
-FEATURE_DIM = BASE_DIM + CONTEXT_DIM + COUNTERFACTUAL_DIM  # 129
+BOARD_CTX_DIM = 20
+MOVE_DIM = 20
+COUNTERFACTUAL_DIM = 18
+FEATURE_DIM = BOARD_CTX_DIM + MOVE_DIM + COUNTERFACTUAL_DIM  # 58
 
-_MOVE_TYPES = ("place", "move", "fly", "capture")
-_MOVE_TYPE_IDX = {t: i for i, t in enumerate(_MOVE_TYPES)}
-_TOP_K = 5
-_MAX_CANDIDATES = 30.0
+_POS_INDEX = {p: i for i, p in enumerate(POSITIONS)}
+_N_POS = float(len(POSITIONS))  # 24
+
+# A square is "strong" (junction) when it has >= 3 neighbours; "corner" when 2.
+_DEGREE = {p: len(ADJACENCY.get(p, [])) for p in POSITIONS}
+
+_WDL_SCALAR = {"win": 1.0, "draw": 0.5, "loss": 0.0}
 
 
-def _squash(x: float) -> float:
-    """Map an unbounded heuristic score into (0,1) with a smooth logistic.
+# ── small helpers ──────────────────────────────────────────────────────────────
 
-    Heuristic scores in this engine are roughly centred near 0 and can be
-    moderately large; a logistic keeps the feature bounded and well-scaled
-    without needing dataset-wide statistics.
-    """
+def _opponent(player: str) -> str:
+    return "B" if player == "W" else "W"
+
+
+def _piece_count(board, color: str) -> int:
+    return sum(1 for v in board.positions.values() if v == color)
+
+
+def _mills_count(board, color: str) -> int:
+    return sum(1 for ml in MILLS if all(board.positions[p] == color for p in ml))
+
+
+def _potential_mills(board, color: str) -> int:
+    """Count mill lines with exactly 2 of ``color`` and 1 empty square."""
+    n = 0
+    for ml in MILLS:
+        vals = [board.positions[p] for p in ml]
+        if vals.count(color) == 2 and vals.count("") == 1:
+            n += 1
+    return n
+
+
+def _double_mill_pieces(board, color: str) -> int:
+    """Count pieces that participate in two or more completed mills."""
+    membership: Dict[str, int] = {}
+    for ml in MILLS:
+        if all(board.positions[p] == color for p in ml):
+            for p in ml:
+                membership[p] = membership.get(p, 0) + 1
+    return sum(1 for c in membership.values() if c >= 2)
+
+
+def _mobility(board, color: str) -> int:
+    """Total legal moves available to ``color`` from this board (place or move)."""
     try:
-        xf = float(x)
-    except (TypeError, ValueError):
-        return 0.0
-    if not math.isfinite(xf):
-        return 0.0
-    if xf >= 0:
-        z = math.exp(-xf)
-        return 1.0 / (1.0 + z)
-    z = math.exp(xf)
-    return z / (1.0 + z)
+        if board.phase == "place":
+            return len(board.legal_placements(color))
+        return len(board.legal_moves(color))
+    except Exception:
+        return 0
 
 
-def _candidate_move_type(cand: Dict[str, Any]) -> Optional[str]:
-    """Infer the 4-way move type of a candidate from its dict.
-
-    A candidate may carry an explicit ``type`` (from a game log) or just a raw
-    move dict {from,to,capture}. Capture takes precedence (it is the most
-    strategically salient channel), then explicit type, then from/to shape.
-    """
-    move = cand.get("move", cand)
-    if not isinstance(move, dict):
-        move = cand
-    if move.get("capture"):
-        return "capture"
-    t = cand.get("type") or move.get("type")
-    if t in _MOVE_TYPE_IDX:
-        return t
-    if move.get("from") is None and move.get("to") is not None:
-        return "place"
-    if move.get("from") is not None:
-        return "move"
-    return None
-
-
-def _build_context(ctx: Dict[str, Any]) -> np.ndarray:
-    """Build the 36-float context block from a move_context dict.
-
-    Recognised keys (all optional — missing keys are treated as empty/zero):
-      candidates:           list of {move|score|type} sorted desc by score
-      chosen_rank:          int
-      closes_mill:          bool
-      opens_mill_threat:    bool
-      reduces_own_mobility: bool
-      trajectory_scores:    list of up to 4 recent heuristic scores (chrono order)
-      game_source:          "human_vs_ai" | "ai_vs_ai"
-    """
-    out = np.zeros(CONTEXT_DIM, dtype=np.float32)
-    ctx = ctx or {}
-
-    candidates: List[Dict[str, Any]] = list(ctx.get("candidates") or [])
-    n_cand = len(candidates)
-
-    # [0:5) top-5 scores, [5:25) top-5 move-type one-hots
-    for i in range(_TOP_K):
-        if i >= n_cand:
-            break
-        cand = candidates[i] if isinstance(candidates[i], dict) else {}
-        score = cand.get("score", cand.get("game_ai_score", 0.0))
-        out[i] = _squash(score)
-        mt = _candidate_move_type(cand)
-        if mt is not None:
-            out[5 + i * 4 + _MOVE_TYPE_IDX[mt]] = 1.0
-
-    # [25] chosen move rank, normalised so 0 = best, 1 = worst.
-    chosen_rank = ctx.get("chosen_rank", 0)
+def _phase_onehot(board, player: str) -> List[float]:
+    """[placement, midgame, endgame, flying] one-hot from the mover's view."""
+    oh = [0.0, 0.0, 0.0, 0.0]
     try:
-        chosen_rank = int(chosen_rank)
-    except (TypeError, ValueError):
-        chosen_rank = 0
-    if n_cand > 1:
-        out[25] = max(0.0, min(1.0, chosen_rank / float(n_cand - 1)))
-    else:
-        out[25] = 0.0
+        if board.phase == "place":
+            oh[0] = 1.0
+            return oh
+        on = board.pieces_on_board.get(player, _piece_count(board, player))
+        if on <= 3:
+            oh[3] = 1.0
+        elif on <= 4:
+            oh[2] = 1.0
+        else:
+            oh[1] = 1.0
+    except Exception:
+        oh[1] = 1.0
+    return oh
 
-    # [26:29) boolean flags
-    out[26] = 1.0 if ctx.get("closes_mill") else 0.0
-    out[27] = 1.0 if ctx.get("opens_mill_threat") else 0.0
-    out[28] = 1.0 if ctx.get("reduces_own_mobility") else 0.0
 
-    # [29:33) trajectory trend — last 4 scores, right-aligned (most recent last).
-    traj = list(ctx.get("trajectory_scores") or [])[-4:]
-    for j, s in enumerate(traj):
-        out[29 + (4 - len(traj)) + j] = _squash(s)
+# ── board context ───────────────────────────────────────────────────────────────
 
-    # [33] game source, [34] candidate-count norm, [35] reserved.
-    out[33] = 1.0 if ctx.get("game_source") == "human_vs_ai" else 0.0
-    out[34] = min(1.0, n_cand / _MAX_CANDIDATES)
-    out[35] = 0.0
+def board_context_features(board, player: str) -> np.ndarray:
+    """20-float board context, normalised so ``player`` is the mover."""
+    opp = _opponent(player)
+    out = np.zeros(BOARD_CTX_DIM, dtype=np.float32)
+    out[0:4] = _phase_onehot(board, player)
+    out[4] = min(1.0, _piece_count(board, player) / 9.0)
+    out[5] = min(1.0, _piece_count(board, opp) / 9.0)
+    out[6] = min(1.0, _mills_count(board, player) / 3.0)
+    out[7] = min(1.0, _mills_count(board, opp) / 3.0)
+    out[8] = min(1.0, _mobility(board, player) / _N_POS)
+    out[9] = min(1.0, _mobility(board, opp) / _N_POS)
+    out[10] = min(1.0, _double_mill_pieces(board, player) / 9.0)
+    out[11] = min(1.0, _double_mill_pieces(board, opp) / 9.0)
+    out[12] = min(1.0, board.pieces_placed.get(player, 0) / 9.0)
+    out[13] = min(1.0, board.pieces_placed.get(opp, 0) / 9.0)
+    out[14] = min(1.0, _potential_mills(board, player) / 8.0)
+    out[15] = min(1.0, _potential_mills(board, opp) / 8.0)
+    out[16] = 0.0 if player == "W" else 1.0
+    # [17:20) reserved
     return out
 
 
-def counterfactual_features(all_moves: List[Dict[str, Any]], played_move) -> List[float]:
-    """Derive the 9 counterfactual features from all legal moves' WDL.
+# ── move-specific ─────────────────────────────────────────────────────────────
 
-    ``all_moves`` is the list returned by ``ExternalSolvedDB.query_all_moves``:
-    dicts with keys ``move`` and ``wdl`` ("win"|"draw"|"loss"|"unknown").
-    ``played_move`` is the apply-move dict actually played, compared against
-    each ``all_moves[i]["move"]`` to find the played move's WDL.
+def _would_block_opponent_mill(board, move: Dict[str, Any], player: str) -> bool:
+    """True if the destination square fills an opponent 2-of-3 mill line."""
+    opp = _opponent(player)
+    to = move.get("to")
+    if to is None:
+        return False
+    for ml in MILLS:
+        if to not in ml:
+            continue
+        vals = [board.positions[p] for p in ml]
+        if vals.count(opp) == 2 and vals.count("") == 1:
+            return True
+    return False
 
-    Returns 9 floats in [0, 1]. Returns 9 zeros when ``all_moves`` is empty
-    (DB unavailable), so old examples still work with no counterfactual signal.
+
+def _opens_new_mill_threat(after, player: str) -> bool:
+    for ml in MILLS:
+        vals = [after.positions[p] for p in ml]
+        if vals.count(player) == 2 and vals.count("") == 1:
+            return True
+    return False
+
+
+def move_features(board, move: Dict[str, Any], player: str) -> np.ndarray:
+    """20-float move-specific block for ``move`` applied by ``player``."""
+    opp = _opponent(player)
+    out = np.zeros(MOVE_DIM, dtype=np.float32)
+
+    frm = move.get("from")
+    to = move.get("to")
+    cap = move.get("capture")
+
+    out[0] = (_POS_INDEX.get(frm, 0) / _N_POS) if frm is not None else 0.0
+    out[1] = (_POS_INDEX.get(to, 0) / _N_POS) if to is not None else 0.0
+    out[2] = 1.0 if frm is None else 0.0          # is_placement
+    out[4] = 1.0 if cap else 0.0                  # is_capture
+    out[5] = (_POS_INDEX.get(cap, 0) / _N_POS) if cap else 0.0
+
+    apply_dict = {"from": frm, "to": to, "capture": cap}
+    after = None
+    try:
+        after = board.apply_move(apply_dict)
+    except Exception:
+        after = None
+
+    is_mill_closing = False
+    if after is not None and to is not None:
+        try:
+            is_mill_closing = after.is_mill(to, player)
+        except Exception:
+            is_mill_closing = False
+    out[3] = 1.0 if is_mill_closing else 0.0
+
+    # would_create_double_mill: closing produces a piece in >=2 mills.
+    would_double = False
+    if after is not None and is_mill_closing:
+        would_double = _double_mill_pieces(after, player) > _double_mill_pieces(board, player)
+    out[6] = 1.0 if would_double else 0.0
+
+    out[7] = 1.0 if _would_block_opponent_mill(board, move, player) else 0.0
+
+    if after is not None:
+        out[8] = min(1.0, _piece_count(after, player) / 9.0)
+        out[9] = min(1.0, _piece_count(after, opp) / 9.0)
+        out[10] = min(1.0, _mobility(after, player) / _N_POS)
+        out[11] = min(1.0, _mobility(after, opp) / _N_POS)
+        out[12] = min(1.0, _mills_count(after, player) / 3.0)
+        out[13] = min(1.0, _mills_count(after, opp) / 3.0)
+    else:
+        out[8] = min(1.0, _piece_count(board, player) / 9.0)
+        out[9] = min(1.0, _piece_count(board, opp) / 9.0)
+
+    deg = _DEGREE.get(to, 0) if to is not None else 0
+    out[14] = 1.0 if deg >= 3 else 0.0            # strong / junction
+    out[15] = 1.0 if deg == 2 else 0.0            # corner
+
+    reduces_mobility = False
+    if after is not None:
+        reduces_mobility = _mobility(after, player) < _mobility(board, player)
+    out[16] = 1.0 if reduces_mobility else 0.0
+
+    out[17] = 1.0 if (after is not None and _opens_new_mill_threat(after, player)) else 0.0
+    # [18:20) reserved
+    return out
+
+
+# ── counterfactual context ──────────────────────────────────────────────────────
+
+def _move_key(mv: Dict[str, Any]):
+    return (mv.get("from"), mv.get("to"), mv.get("capture"))
+
+
+def counterfactual_features(
+    move: Dict[str, Any],
+    all_moves: Optional[List[Dict[str, Any]]],
+    heuristic_rank: int = 0,
+    n_legal: int = 0,
+    heuristic_score_norm: float = 0.5,
+) -> np.ndarray:
+    """18-float counterfactual block for ``move`` within its candidate set.
+
+    ``all_moves`` is the list from ``ExternalSolvedDB.query_all_moves`` (dicts
+    with ``move`` and ``wdl``). When None/empty the DB-derived slots stay zero.
     """
-    n_legal = len(all_moves)
-    if n_legal == 0:
-        return [0.0] * COUNTERFACTUAL_DIM
+    out = np.zeros(COUNTERFACTUAL_DIM, dtype=np.float32)
+    moves = list(all_moves or [])
+    n_db = len(moves)
+    n = n_legal if n_legal > 0 else n_db
 
-    wdl_counts = {"win": 0, "draw": 0, "loss": 0, "unknown": 0}
-    for m in all_moves:
-        wdl_counts[m.get("wdl", "unknown")] = wdl_counts.get(m.get("wdl", "unknown"), 0) + 1
+    out[0] = min(1.0, n / _N_POS) if n > 0 else 0.0
 
-    n_win = wdl_counts["win"]
-    n_loss = wdl_counts["loss"]
-    n_draw = wdl_counts["draw"]
+    if n_db > 0:
+        n_win = sum(1 for m in moves if m.get("wdl") == "win")
+        n_loss = sum(1 for m in moves if m.get("wdl") == "loss")
+        n_draw = sum(1 for m in moves if m.get("wdl") == "draw")
+        out[1] = n_win / n_db
+        out[2] = n_loss / n_db
+        out[3] = n_draw / n_db
+        # best/worst available WDL
+        if n_win > 0:
+            out[4] = 1.0
+        elif n_draw > 0:
+            out[4] = 0.5
+        else:
+            out[4] = 0.0
+        if n_loss > 0:
+            out[5] = 0.0
+        elif n_draw > 0:
+            out[5] = 0.5
+        else:
+            out[5] = 1.0
+        out[8] = 1.0 if n_win > 0 else 0.0
+        out[9] = 1.0 if n_loss > 0 else 0.0
 
-    winning_move_available = float(n_win > 0)
-    losing_move_available = float(n_loss > 0)
-    frac_winning = n_win / n_legal
-    frac_losing = n_loss / n_legal
+        played_wdl = next(
+            (m.get("wdl") for m in moves if _move_key(m.get("move", {})) == _move_key(move)),
+            "unknown",
+        )
+        out[10] = 1.0 if played_wdl == "win" else 0.0
+        out[11] = 1.0 if played_wdl == "loss" else 0.0
+        out[12] = 1.0 if played_wdl == "draw" else 0.0
+        out[13] = 1.0 if played_wdl in ("win", "draw", "loss") else 0.0
+        out[14] = 1.0  # db_available
+        played_v = _WDL_SCALAR.get(played_wdl, 0.0)
+        out[15] = 1.0 if out[4] > played_v else 0.0  # a strictly better DB move existed
 
-    played_wdl = next(
-        (m["wdl"] for m in all_moves if m.get("move") == played_move), "unknown"
+    if n > 0:
+        out[6] = min(1.0, heuristic_rank / float(max(1, n)))
+    out[7] = float(min(1.0, max(0.0, heuristic_score_norm)))
+    # [16:18) reserved
+    return out
+
+
+# ── public assembly ─────────────────────────────────────────────────────────────
+
+def build_move_features(
+    board,
+    move: Dict[str, Any],
+    player: str,
+    move_ctx: Optional[Dict[str, Any]] = None,
+) -> np.ndarray:
+    """Return the FEATURE_DIM-float per-move feature vector.
+
+    ``move`` is an apply-move dict {from,to,capture}. ``player`` is the mover.
+    ``move_ctx`` may carry (all optional):
+      all_moves:            query_all_moves() output for counterfactual block
+      heuristic_rank:       int rank of this move (0 = top)
+      n_legal:              int number of legal moves
+      heuristic_score_norm: float [0,1] heuristic score across candidates
+    """
+    ctx = move_ctx or {}
+    board_block = board_context_features(board, player)
+    mv_block = move_features(board, move, player)
+    cf_block = counterfactual_features(
+        move,
+        ctx.get("all_moves"),
+        heuristic_rank=int(ctx.get("heuristic_rank", 0) or 0),
+        n_legal=int(ctx.get("n_legal", 0) or 0),
+        heuristic_score_norm=float(ctx.get("heuristic_score_norm", 0.5)),
     )
-    played_is_win = float(played_wdl == "win")
-    played_is_loss = float(played_wdl == "loss")
-    played_is_draw = float(played_wdl == "draw")
-
-    missed_win = float(n_win > 0 and played_wdl != "win")
-    missed_safety = float((n_win + n_draw) > 0 and played_wdl == "loss")
-
-    return [
-        winning_move_available,   # [0] win move existed
-        losing_move_available,    # [1] loss move existed
-        frac_winning,             # [2] proportion of moves that win
-        frac_losing,              # [3] proportion of moves that lose
-        played_is_win,            # [4] played move was a win
-        played_is_loss,           # [5] played move was a loss
-        played_is_draw,           # [6] played move was a draw
-        missed_win,               # [7] better move existed, not taken
-        missed_safety,            # [8] safer move existed, not taken
-    ]
-
-
-def build_features(board_state, move_context: Optional[Dict[str, Any]] = None) -> np.ndarray:
-    """Return the 129-float sentinel feature vector for a board + decision context.
-
-    The first 84 values come from the shared state encoder; the next 36 encode
-    the move-decision context; the final 9 are counterfactual features. At
-    inference time the DB is not queried, so the counterfactual block is
-    zero-padded here. Training enriches it via ``counterfactual_features`` and
-    appends the real values (see the trajectory builder). Robust to a missing
-    or empty context dict.
-    """
-    base_t = encode_state(board_state)            # torch.Tensor (84,)
-    base = np.asarray(base_t.detach().cpu().numpy(), dtype=np.float32)
-    ctx = _build_context(move_context or {})
-    cf = np.zeros(COUNTERFACTUAL_DIM, dtype=np.float32)
-    return np.concatenate([base, ctx, cf]).astype(np.float32)
+    return np.concatenate([board_block, mv_block, cf_block]).astype(np.float32)

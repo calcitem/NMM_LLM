@@ -503,101 +503,76 @@ class GameAI:
         """
         self._llm_move_fn = fn
 
-    def _build_sentinel_context(self, board: BoardState, moves: list) -> dict:
-        """Package board + candidate moves into the dict feature_builder expects.
-
-        Lightweight: scores the candidate moves with the fast score_move() ranking
-        only when a small number of moves remain, otherwise leaves scores at 0.0.
-        Never raises — returns a best-effort dict.
-        """
-        candidates: list[dict] = []
-        try:
-            ranked = list(moves or [])
-            # Cap scoring work; score_move can be expensive on wide branching.
-            for mv in ranked[:5]:
-                candidates.append({"move": mv, "score": 0.0, "type": mv.get("type")})
-        except Exception:
-            candidates = []
-        return {
-            "candidates": candidates,
-            "chosen_rank": 0,
-            "closes_mill": False,
-            "opens_mill_threat": False,
-            "reduces_own_mobility": False,
-            "trajectory_scores": list(self._sentinel_trajectory[-4:]),
-            "game_source": "ai_vs_ai",
-        }
-
     def _consult_sentinel(self, board: BoardState, moves: list) -> None:
-        """Run the sentinel advisory pass. Fully guarded — never breaks the loop.
+        """Deprecated pre-selection hook — retained as a no-op.
 
-        In advisory mode this only logs a warning when a turning point is flagged;
-        the heuristic engine retains full control of the move.
+        The move-level sentinel needs the chosen move to score it against its
+        alternatives, so all sentinel work now happens in
+        :meth:`_apply_sentinel_intervention` after the engine has picked a move.
+        """
+        return
+
+    def _sentinel_advise(self, board: BoardState, move: dict, moves: list):
+        """Score every candidate with the sentinel and return its SentinelAdvice.
+
+        ``move`` is the engine's chosen move; its index within ``moves`` becomes
+        ``played_move_idx`` so the advice reports the played move's quality and
+        opportunity gap. Never raises — returns None on any failure.
         """
         if self.sentinel is None:
-            return
+            return None
         try:
-            move_context = self._build_sentinel_context(board, moves)
-            advice = self.sentinel.advise(board, move_context)
-            self.last_sentinel_advice = advice
-            if getattr(advice, "is_turning_point", False):
-                _logger.warning(
-                    "[Sentinel] %s at phase=%s (tp_confidence=%.2f, "
-                    "mistake_risk=%.2f, opportunity=%.2f)",
-                    getattr(advice, "advisory_message", "?"),
-                    board.phase,
-                    getattr(advice, "turning_point_confidence", 0.0),
-                    getattr(advice, "mistake_risk", 0.0),
-                    getattr(advice, "opportunity_score", 0.0),
-                )
-        except Exception as exc:  # never crash the game loop
+            candidates = list(moves or [])
+            if not candidates:
+                return None
+            try:
+                played_idx = candidates.index(move)
+            except ValueError:
+                played_idx = 0
+            advice = self.sentinel.advise(
+                board, candidates, self.color, played_move_idx=played_idx
+            )
+            return advice
+        except Exception as exc:
             try:
                 _logger.debug("[Sentinel] advise() failed: %s", exc)
             except Exception:
                 pass
-
-    def _sentinel_scored_candidates(
-        self, board: BoardState, moves: list, chosen: dict
-    ) -> list[tuple[dict, int]]:
-        """Return [(move, score), ...] for `moves`, sorted best-first.
-
-        Uses the shallow score_move depth so the active-intervention re-ranking is
-        cheap relative to the main search. The chosen move is guaranteed present.
-        Never raises — returns a single-entry list on failure.
-        """
-        try:
-            from game.rules import get_game_phase
-            total_on_board = sum(board.pieces_on_board.values())
-            if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
-                    and get_game_phase(board, board.turn) == "place"):
-                depth = 3
-            else:
-                depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
-            self._deadline = time.time() + self._SCORE_TIME
-            scored = self._score_all(board, list(moves), depth)
-            self._deadline = math.inf
-            scored.sort(key=lambda x: x[1], reverse=True)
-            if scored:
-                return scored
-        except Exception:
-            self._deadline = math.inf
-        return [(chosen, 0)]
+            return None
 
     def _apply_sentinel_intervention(
         self, board: BoardState, move: dict, moves: list
     ) -> dict:
-        """Actively change the chosen move per sentinel_mode. Fully guarded.
+        """Score the chosen move against its alternatives and intervene per mode.
 
-        Reuses the SentinelAdvice already stored by _consult_sentinel this turn
-        (no second forward pass). On ANY error the original heuristic move is
-        returned unchanged. Only moves from `moves` (the legal candidate list)
-        are ever returned. The final advice (with intervention fields) is stored
-        in self.last_sentinel_advice.
+        Runs one batched forward pass over all candidates, stores the resulting
+        SentinelAdvice in ``self.last_sentinel_advice`` (advisory logging always
+        happens), then — unless in advisory mode — may swap to a better move. On
+        ANY error the original heuristic move is returned unchanged. Only moves
+        from ``moves`` are ever returned.
         """
-        if self.sentinel is None or self.sentinel_mode == "advisory":
+        if self.sentinel is None:
             return move
-        advice = self.last_sentinel_advice
+        advice = self._sentinel_advise(board, move, moves)
+        self.last_sentinel_advice = advice
         if advice is None:
+            return move
+
+        # Advisory logging (all modes): record the chosen move's quality.
+        try:
+            self._sentinel_trajectory.append(advice.played_move_quality)
+            if advice.advisory_message != "safe":
+                _logger.warning(
+                    "[Sentinel] %s for %s at phase=%s "
+                    "(played_q=%.2f, best_q=%.2f, gap=%.2f)",
+                    advice.advisory_message, advice.player, board.phase,
+                    advice.played_move_quality, advice.best_available_quality,
+                    advice.opportunity_gap,
+                )
+        except Exception:
+            pass
+
+        if self.sentinel_mode == "advisory":
             return move
         try:
             if self.sentinel_mode == "score_adjust":
@@ -614,41 +589,44 @@ class GameAI:
     def _sentinel_score_adjust(
         self, board: BoardState, move: dict, moves: list, advice
     ) -> dict:
-        """score_adjust mode: penalise/boost the top candidate and re-sort."""
-        mistake = float(getattr(advice, "mistake_risk", 0.0))
-        opportunity = float(getattr(advice, "opportunity_score", 0.0))
-        if mistake <= 0.6 and opportunity <= 0.6:
+        """score_adjust mode: blend heuristic rank with the sentinel score.
+
+        Final score = 0.6 * heuristic_norm + 0.4 * sentinel_quality, per move.
+        Only swaps when the blend prefers a different move; otherwise the
+        heuristic move is kept.
+        """
+        scores = list(getattr(advice, "move_scores", []) or [])
+        if len(scores) < 2 or len(scores) != len(moves):
             return move
-        scored = self._sentinel_scored_candidates(board, moves, move)
-        if len(scored) < 2:
-            return move
-        scores = [s for _, s in scored]
-        span = max(scores) - min(scores)
-        # Scale the delta to be meaningful relative to the heuristic score range.
-        # Floor on a minimum magnitude so a flat ranking still re-orders.
-        magnitude = max(abs(span), float(self._weights.close_mill)) * self._sentinel_score_scale
-        adjusted = list(scored)
-        if mistake > 0.6:
-            top_mv, top_sc = adjusted[0]
-            adjusted[0] = (top_mv, top_sc - magnitude)
-        if opportunity > 0.6:
-            top_mv, top_sc = adjusted[0]
-            adjusted[0] = (top_mv, top_sc + magnitude)
-        adjusted.sort(key=lambda x: x[1], reverse=True)
-        new_move = adjusted[0][0]
+
+        # Heuristic ordering proxy: candidates arrive best-first, so rank 0 is the
+        # heuristic's top pick. Convert rank → normalised [0,1] (1.0 = best).
+        n = len(moves)
+        heuristic_norm = [1.0 - (i / (n - 1)) for i in range(n)]
+        blended = [0.6 * heuristic_norm[i] + 0.4 * scores[i] for i in range(n)]
+        best_i = max(range(n), key=lambda i: blended[i])
+        new_move = moves[best_i]
         if new_move != move:
             advice.intervention_applied = "score_adjust"
             advice.intervention_detail = (
-                f"Score adjust — re-ranked (risk={mistake:.0%}, opp={opportunity:.0%})"
+                f"Score adjust — blended re-rank "
+                f"(played_q={advice.played_move_quality:.0%}, "
+                f"new_q={scores[best_i]:.0%})"
             )
-        return new_move
+            return new_move
+        return move
 
     def _sentinel_reconsider(
         self, board: BoardState, move: dict, moves: list, advice
     ) -> dict:
-        """reconsider mode: LLM override → deepened search → rank-1 fallback."""
-        tp_conf = float(getattr(advice, "turning_point_confidence", 0.0))
-        if tp_conf <= self._sentinel_reconsider_threshold:
+        """reconsider mode: act on a meaningful opportunity gap.
+
+        When ``opportunity_gap > 0.3`` the chosen move is materially worse than
+        the sentinel's best alternative. Prefer an LLM recommendation when one is
+        available; otherwise fall back to the sentinel's best move.
+        """
+        gap = float(getattr(advice, "opportunity_gap", 0.0))
+        if gap <= 0.3:
             return move
 
         # 1. Try the LLM first (reuses the Coordinator's recommender via callback).
@@ -660,40 +638,20 @@ class GameAI:
             if llm_move is not None and llm_move in moves:
                 advice.intervention_applied = "llm_override"
                 advice.intervention_detail = (
-                    f"LLM override — {advice.advisory_message} (conf={tp_conf:.0%})"
+                    f"LLM override — {advice.advisory_message} (gap={gap:.0%})"
                 )
                 return llm_move
 
-        # 2. LLM unavailable / None → re-run the search 1 ply deeper.
-        try:
-            base_depth = _DEPTH_TABLE.get(self.difficulty, 5)
-            deeper = min(base_depth + 1, base_depth + 2)
-            self._tt.clear()
-            self._deadline = time.time() + max(self._SCORE_TIME, _TIME_LIMIT.get(self.difficulty, 6.0))
-            deep_move, _ = self._root_search(board, deeper, top_n=1, moves=list(moves))
-            self._deadline = math.inf
-        except Exception:
-            self._deadline = math.inf
-            deep_move = move
-        if deep_move is not None and deep_move in moves and deep_move != move:
-            advice.intervention_applied = "deepened_search"
-            advice.intervention_detail = (
-                f"Deepened search — changed move ({advice.advisory_message}, conf={tp_conf:.0%})"
-            )
-            return deep_move
-
-        # 3. Deeper search returned the same move AND message is concerning →
-        #    take the rank-1 (second-best) candidate.
-        if advice.advisory_message in ("critical", "possible_mistake"):
-            scored = self._sentinel_scored_candidates(board, moves, move)
-            if len(scored) >= 2:
-                rank1 = scored[1][0]
-                if rank1 != move:
-                    advice.intervention_applied = "rank1_fallback"
-                    advice.intervention_detail = (
-                        f"Rank-1 fallback — {advice.advisory_message} (conf={tp_conf:.0%})"
-                    )
-                    return rank1
+        # 2. LLM unavailable → take the sentinel's best-scoring candidate.
+        best_idx = int(getattr(advice, "best_sentinel_move_idx", 0))
+        if 0 <= best_idx < len(moves):
+            best_move = moves[best_idx]
+            if best_move != move:
+                advice.intervention_applied = "sentinel_best"
+                advice.intervention_detail = (
+                    f"Sentinel best move — {advice.advisory_message} (gap={gap:.0%})"
+                )
+                return best_move
         return move
 
     def ban_move(self, notation: str, board_fen: str) -> None:

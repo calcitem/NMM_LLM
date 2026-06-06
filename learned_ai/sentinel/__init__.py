@@ -1,18 +1,18 @@
-"""Strategic Sentinel Overlay — a learned advisory model for the NMM heuristic engine.
+"""Strategic Sentinel Overlay — a learned move-level scorer for the NMM engine.
 
-The sentinel watches game trajectories, learns to flag strategic turning points
-across all phases, and provides lightweight advisory signals to the existing
-heuristic GameAI at runtime. It does NOT replace GameAI — advisory only.
+The sentinel scores each candidate move (quality in [0, 1] from the mover's
+perspective) and provides lightweight advisory signals to the existing heuristic
+GameAI at runtime. It does NOT replace GameAI — advisory by default.
 
 Public surface (imported lazily to keep `import learned_ai.sentinel` cheap and
 free of heavy torch import side-effects for callers that only need the config):
 
     from learned_ai.sentinel.config import SentinelConfig, load_config
-    from learned_ai.sentinel.feature_builder import build_features
+    from learned_ai.sentinel.feature_builder import build_move_features, FEATURE_DIM
     from learned_ai.sentinel.db_teacher import ExternalSolvedDB
-    from learned_ai.sentinel.labels import backward_label_trajectory, LabelledExample
+    from learned_ai.sentinel.labels import label_move, MoveExample
     from learned_ai.sentinel.dataset import SentinelDataset
-    from learned_ai.sentinel.model import SentinelNet, SentinelOutput
+    from learned_ai.sentinel.model import SentinelNet, sentinel_loss
     from learned_ai.sentinel.infer import SentinelAdvisor, SentinelAdvice
 """
 

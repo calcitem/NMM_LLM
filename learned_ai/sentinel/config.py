@@ -20,30 +20,19 @@ except Exception:  # pragma: no cover - yaml is a declared dependency
 @dataclass
 class SentinelConfig:
     # ── Model ────────────────────────────────────────────────────────────────
-    input_dim: int = 129                       # 84 base + 36 context + 9 counterfactual
-    hidden_dims: List[int] = field(default_factory=lambda: [256, 128, 64])
-    dropout: float = 0.1
+    # Move-level scorer: input is the per-move feature vector (FEATURE_DIM=58).
+    input_dim: int = 58
+    hidden_dims: List[int] = field(default_factory=lambda: [128, 64, 32])
+    dropout: float = 0.2
 
     # ── Training ─────────────────────────────────────────────────────────────
     lr: float = 1e-3
     batch_size: int = 64
     epochs: int = 50
     val_fraction: float = 0.15
-    class_weights: Dict[str, float] = field(default_factory=lambda: {
-        "safe_continuation": 0.5,
-        "mistake_start": 2.0,
-        "missed_opportunity": 2.0,
-        "critical_turning_point": 3.0,
-        "neutral_state": 0.3,
-    })
     seed: int = 42
     checkpoint_dir: str = "learned_ai/sentinel/checkpoints"
     log_dir: str = "learned_ai/sentinel/logs"
-
-    # ── Backward labelling ───────────────────────────────────────────────────
-    # backward_decay[i] = weight for the state i plies before a confirmed
-    # turning point. Distances beyond the list reuse the final entry.
-    backward_decay: List[float] = field(default_factory=lambda: [1.0, 0.8, 0.6, 0.4, 0.2])
 
     # ── External DB (training-time teacher only) ─────────────────────────────
     external_db_path: str = ""                 # e.g. /mnt/windows/NMM_DB/Entire DB
@@ -51,17 +40,8 @@ class SentinelConfig:
 
     # ── Runtime ──────────────────────────────────────────────────────────────
     sentinel_mode: str = "advisory"            # "advisory" | "score_adjust" | "reconsider"
-    score_adjust_scale: float = 0.05           # max heuristic score delta in score_adjust mode
-    reconsider_threshold: float = 0.8          # turning_point_confidence to trigger reconsider
-    turning_point_threshold: float = 0.5       # is_turning_point cutoff for advisory flags
-
-    # ── Loss weighting (per-head multipliers) ────────────────────────────────
-    loss_weights: Dict[str, float] = field(default_factory=lambda: {
-        "mistake_risk": 1.0,
-        "opportunity_score": 1.0,
-        "trajectory_value_delta": 1.0,
-        "turning_point_confidence": 1.0,
-    })
+    score_adjust_scale: float = 0.05           # reserved tunable for score_adjust mode
+    reconsider_threshold: float = 0.3          # opportunity_gap to trigger reconsider
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SentinelConfig":

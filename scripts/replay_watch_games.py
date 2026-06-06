@@ -49,19 +49,14 @@ def main() -> int:
         for path in paths:
             for record in _iter_game_records(path):
                 n_games += 1
-                for ex in examples_from_game(
-                    record, db=db, backward_decay=config.backward_decay
-                ):
+                for ex in examples_from_game(record, db=db):
                     row = {
-                        "label": ex.label,
-                        "turning_point_confidence": ex.turning_point_confidence,
-                        "value_delta": ex.value_delta,
-                        "mistake_risk": ex.mistake_risk,
-                        "opportunity_score": ex.opportunity_score,
+                        "move_quality": ex.move_quality,
                         "training_weight": ex.training_weight,
                         "supervision_source": ex.supervision_source,
                         "ply": ex.ply,
-                        "features": ex.state_features.tolist(),
+                        "move_notation": ex.move_notation,
+                        "features": ex.features.tolist(),
                     }
                     out.write(json.dumps(row) + "\n")
                     n_examples += 1
