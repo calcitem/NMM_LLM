@@ -1,0 +1,18 @@
+# Sentinel overlay — smoke configuration. Tiny arch + 3 epochs for CI/quick runs.
+input_dim: 120
+hidden_dims: [64, 32]
+dropout: 0.0
+lr: 0.001
+batch_size: 16
+epochs: 3
+val_fraction: 0.15
+seed: 0
+checkpoint_dir: learned_ai/sentinel/checkpoints
+log_dir: learned_ai/sentinel/logs
+backward_decay: [1.0, 0.8, 0.6, 0.4, 0.2]
+external_db_path: ""
+external_db_enabled: false
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.8
+turning_point_threshold: 0.5
