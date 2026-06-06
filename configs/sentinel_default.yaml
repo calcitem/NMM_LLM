@@ -16,8 +16,8 @@ seed: 42
 checkpoint_dir: learned_ai/sentinel/checkpoints
 log_dir: learned_ai/sentinel/logs
 backward_decay: [1.0, 0.8, 0.6, 0.4, 0.2]
-external_db_path: ""
-external_db_enabled: false
+external_db_path: "/mnt/windows/NMM_DB/strong"
+external_db_enabled: true
 sentinel_mode: advisory
 score_adjust_scale: 0.05
 reconsider_threshold: 0.8

@@ -953,18 +953,52 @@ turning points, optionally taught by an external solved database when available
 (`db_teacher.py`), and otherwise by game-outcome proxy supervision.
 
 ```bash
-# Train (falls back to proxy supervision if the external DB is absent)
-python scripts/train_sentinel.py --config configs/sentinel_default.yaml
+# Train from game logs (proxy supervision — works without the external DB)
+python scripts/train_sentinel.py --config configs/sentinel_default.yaml \
+  --game-dir data/games
+
+# Train with the Malom solved DB as ground-truth teacher (once hash is implemented)
+python scripts/train_sentinel.py --config configs/sentinel_default.yaml \
+  --game-dir data/games \
+  --db-path "/mnt/windows/NMM_DB/strong"
 
 # Evaluate turning-point precision/recall and calibration
-python scripts/evaluate_sentinel.py --checkpoint learned_ai/sentinel/checkpoints/best.pt
+python scripts/evaluate_sentinel.py \
+  --checkpoint learned_ai/sentinel/checkpoints/best.pt
 
-# Attach the overlay at play time (advisory — never changes AI moves)
+# Attach the overlay at play time (advisory — never changes AI moves, no checkpoint = no-op)
 python main.py --sentinel-checkpoint learned_ai/sentinel/checkpoints/best.pt
 ```
 
-See [`docs/SENTINEL_ARCHITECTURE.md`](docs/SENTINEL_ARCHITECTURE.md) for the full
-design, feature layout, label scheme, external-DB adapter, and safety guarantees.
+### External solved database (Malom)
+
+The sentinel can use the Gévay–Danner Malom perfect-play database as ground-truth
+supervision during training. The adapter (`ai/malom_db.py`) reads `.sec2` sector files:
+
+```
+/mnt/windows/NMM_DB/strong/   ← partial database (~200 sectors, 49 MB)
+  std_3_3_0_0.sec2
+  std_3_4_0_0.sec2
+  std.secval
+  ...
+```
+
+Configure in `configs/sentinel_default.yaml`:
+```yaml
+external_db_path: "/mnt/windows/NMM_DB/strong"
+external_db_enabled: true
+```
+
+**Current status:** file format fully parsed (header, entries, em_set, sym-redirects,
+`std.secval`). The **board→index hash function** is not yet ported from the Malom C++
+source (`hash.cpp`), so `MalomDB.query()` returns `None` for all positions and training
+falls back to game-outcome proxy supervision. Once the hash is implemented the adapter
+becomes a fully functional per-position teacher. The full 77.8 GB database (all sectors)
+is the complete version — update the path when it arrives.
+
+See [`docs/SENTINEL_ARCHITECTURE.md`](docs/SENTINEL_ARCHITECTURE.md) and
+[`sentinel_overlay_plan.md`](sentinel_overlay_plan.md) for full design, feature layout,
+label scheme, and next steps.
 
 
 ## Board Coordinate System
