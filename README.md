@@ -936,6 +936,36 @@ Each line includes episode count, stage name, `heuristic_difficulty` (stage 3 on
 - [`docs/AI_INTERFACE_MAPPING.md`](docs/AI_INTERFACE_MAPPING.md) — the exact engine
   interface the learned AI implements.
 
+## Strategic Sentinel Overlay (advisory)
+
+The **sentinel** (`learned_ai/sentinel/`) is an opt-in learned overlay that
+watches game trajectories and flags strategic turning points — moments where a
+single choice swings the outcome. It is **advisory only**: it never replaces or
+changes the move the heuristic `GameAI` selects. With no checkpoint attached the
+game plays exactly as before.
+
+A small multi-head MLP (reusing the `learned_ai/models/backbone.py` pattern)
+predicts four signals per position — mistake risk, missed-opportunity score,
+trajectory value delta, and turning-point confidence — from a 120-float feature
+vector (84 base features from `encode_state()` + 36 move-context features).
+Training is trajectory-supervised: labels are propagated backward from confirmed
+turning points, optionally taught by an external solved database when available
+(`db_teacher.py`), and otherwise by game-outcome proxy supervision.
+
+```bash
+# Train (falls back to proxy supervision if the external DB is absent)
+python scripts/train_sentinel.py --config configs/sentinel_default.yaml
+
+# Evaluate turning-point precision/recall and calibration
+python scripts/evaluate_sentinel.py --checkpoint learned_ai/sentinel/checkpoints/best.pt
+
+# Attach the overlay at play time (advisory — never changes AI moves)
+python main.py --sentinel-checkpoint learned_ai/sentinel/checkpoints/best.pt
+```
+
+See [`docs/SENTINEL_ARCHITECTURE.md`](docs/SENTINEL_ARCHITECTURE.md) for the full
+design, feature layout, label scheme, external-DB adapter, and safety guarantees.
+
 
 ## Board Coordinate System
 

@@ -1,0 +1,29 @@
+# Sentinel overlay — default training/runtime configuration.
+input_dim: 120
+hidden_dims: [256, 128, 64]
+dropout: 0.1
+lr: 0.001
+batch_size: 64
+epochs: 50
+val_fraction: 0.15
+class_weights:
+  safe_continuation: 0.5
+  mistake_start: 2.0
+  missed_opportunity: 2.0
+  critical_turning_point: 3.0
+  neutral_state: 0.3
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints
+log_dir: learned_ai/sentinel/logs
+backward_decay: [1.0, 0.8, 0.6, 0.4, 0.2]
+external_db_path: ""
+external_db_enabled: false
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.8
+turning_point_threshold: 0.5
+loss_weights:
+  mistake_risk: 1.0
+  opportunity_score: 1.0
+  trajectory_value_delta: 1.0
+  turning_point_confidence: 1.0

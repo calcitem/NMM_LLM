@@ -133,6 +133,7 @@ def run_game(
     blunder_probability: float = 0.0,
     vs_human: bool = False,
     use_llm: bool = True,
+    sentinel_checkpoint: str | None = None,
 ) -> None:
     settings = _load_settings()
     ollama_url = settings.get("ollama_url", "http://localhost:11434")
@@ -161,6 +162,19 @@ def run_game(
                 difficulty=difficulty,
                 blunder_probability=blunder_probability,
             )
+        # Sentinel overlay (optional, advisory-only). Attaches to the heuristic
+        # GameAI; never alters play. Failure to load is non-fatal.
+        if sentinel_checkpoint and isinstance(game_ai, GameAI):
+            try:
+                from learned_ai.sentinel.infer import load_advisor
+                advisor = load_advisor(sentinel_checkpoint)
+                if advisor is not None and advisor.is_loaded():
+                    game_ai.set_sentinel(advisor, mode="advisory")
+                    print(f"[NMM] Sentinel overlay attached ({sentinel_checkpoint})")
+                else:
+                    print(f"[NMM] Sentinel checkpoint not loaded: {sentinel_checkpoint}")
+            except Exception as exc:
+                print(f"[NMM] Sentinel load failed ({exc}); continuing without overlay.")
         if use_llm and learned_ai is None:
             memory = MemoryManager(
                 ollama_url=ollama_url,
@@ -298,6 +312,9 @@ def _parse_args() -> argparse.Namespace:
                    help="Human vs Human (no AI)")
     p.add_argument("--no-llm", action="store_true",
                    help="Disable LLM commentary (faster startup)")
+    p.add_argument("--sentinel-checkpoint", default=None, metavar="PATH",
+                   help="Attach the sentinel advisory overlay from this checkpoint "
+                        "(advisory only — never changes AI play)")
     return p.parse_args()
 
 
@@ -309,4 +326,5 @@ if __name__ == "__main__":
         blunder_probability=args.blunder,
         vs_human=args.hvh,
         use_llm=not args.no_llm,
+        sentinel_checkpoint=args.sentinel_checkpoint,
     )

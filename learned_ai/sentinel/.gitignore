@@ -1,0 +1,6 @@
+# Generated sentinel artifacts — keep the dirs (via .gitkeep) but not contents.
+checkpoints/*
+!checkpoints/.gitkeep
+logs/*
+!logs/.gitkeep
+*.npz

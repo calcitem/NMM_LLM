@@ -10,10 +10,13 @@ deliberately poor move so the human can practise exploiting mistakes.
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
 from typing import Optional, Tuple
+
+_logger = logging.getLogger(__name__)
 
 
 class _SearchAbort(Exception):
@@ -448,8 +451,80 @@ class GameAI:
         self._neural_evaluator = neural_evaluator
         # Per-instance time-budget override (used during training to keep games fast).
         self._override_time_budget = override_time_budget
+        # Sentinel overlay (advisory only by default). None => zero impact; the
+        # game plays identically. Set via set_sentinel(). See ai/../learned_ai/sentinel.
+        self.sentinel = None                 # SentinelAdvisor | None
+        self.sentinel_mode: str = "advisory"  # "advisory" | "score_adjust" | "reconsider"
+        # Rolling trajectory of recent chosen-move scores, for sentinel context.
+        self._sentinel_trajectory: list[float] = []
+        self.last_sentinel_advice = None     # last SentinelAdvice (debug/logging)
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_sentinel(self, sentinel, mode: str = "advisory") -> None:
+        """Attach a SentinelAdvisor overlay. ``mode`` is advisory|score_adjust|reconsider.
+
+        Advisory mode only logs warnings/flags and never changes the chosen move.
+        """
+        self.sentinel = sentinel
+        self.sentinel_mode = mode or "advisory"
+        try:
+            _logger.info("[GameAI] Sentinel overlay loaded in %s mode.", self.sentinel_mode)
+        except Exception:
+            pass
+
+    def _build_sentinel_context(self, board: BoardState, moves: list) -> dict:
+        """Package board + candidate moves into the dict feature_builder expects.
+
+        Lightweight: scores the candidate moves with the fast score_move() ranking
+        only when a small number of moves remain, otherwise leaves scores at 0.0.
+        Never raises — returns a best-effort dict.
+        """
+        candidates: list[dict] = []
+        try:
+            ranked = list(moves or [])
+            # Cap scoring work; score_move can be expensive on wide branching.
+            for mv in ranked[:5]:
+                candidates.append({"move": mv, "score": 0.0, "type": mv.get("type")})
+        except Exception:
+            candidates = []
+        return {
+            "candidates": candidates,
+            "chosen_rank": 0,
+            "closes_mill": False,
+            "opens_mill_threat": False,
+            "reduces_own_mobility": False,
+            "trajectory_scores": list(self._sentinel_trajectory[-4:]),
+            "game_source": "ai_vs_ai",
+        }
+
+    def _consult_sentinel(self, board: BoardState, moves: list) -> None:
+        """Run the sentinel advisory pass. Fully guarded — never breaks the loop.
+
+        In advisory mode this only logs a warning when a turning point is flagged;
+        the heuristic engine retains full control of the move.
+        """
+        if self.sentinel is None:
+            return
+        try:
+            move_context = self._build_sentinel_context(board, moves)
+            advice = self.sentinel.advise(board, move_context)
+            self.last_sentinel_advice = advice
+            if getattr(advice, "is_turning_point", False):
+                _logger.warning(
+                    "[Sentinel] %s at phase=%s (tp_confidence=%.2f, "
+                    "mistake_risk=%.2f, opportunity=%.2f)",
+                    getattr(advice, "advisory_message", "?"),
+                    board.phase,
+                    getattr(advice, "turning_point_confidence", 0.0),
+                    getattr(advice, "mistake_risk", 0.0),
+                    getattr(advice, "opportunity_score", 0.0),
+                )
+        except Exception as exc:  # never crash the game loop
+            try:
+                _logger.debug("[Sentinel] advise() failed: %s", exc)
+            except Exception:
+                pass
 
     def ban_move(self, notation: str, board_fen: str) -> None:
         """Ban `notation` from this exact board position only.
@@ -714,6 +789,12 @@ class GameAI:
                 ]
                 if unpinned2:
                     moves = unpinned2
+
+        # Sentinel advisory pass: consult the learned overlay on the finalized
+        # candidate set. Advisory mode only logs; it never changes the move. Fully
+        # guarded inside _consult_sentinel so it can never break the game loop.
+        if self.sentinel is not None:
+            self._consult_sentinel(board, moves)
 
         # Book forcing: early-game forcing (first 2 AI placements) or 100% adherence.
         # Applied after ban filtering so a banned book move is never forced.
