@@ -197,13 +197,21 @@ document.addEventListener("DOMContentLoaded", () => {
     _loadPersonality(personality);
   }).catch(() => _loadPersonality("balanced"));
 
-  // Sentinel chip availability check
+  // Sentinel chip availability check + perfect DB checkbox availability
   fetch("/api/sentinel_status").then(r => r.json()).then(s => {
     const chip   = $("diag-btn-sentinel");
     const status = $("diag-sentinel-status");
     if (!s.available) {
       if (chip)   { chip.disabled = true; chip.title = "Sentinel model not loaded"; }
       if (status) status.style.display = "inline";
+    }
+    const chkPerfect = $("chk-perfect-db");
+    const rowPerfect = $("row-perfect-db");
+    if (!s.malom_db) {
+      if (chkPerfect) { chkPerfect.disabled = true; chkPerfect.checked = false; }
+      if (rowPerfect) rowPerfect.style.opacity = "0.45";
+      const hint = $("perfect-db-hint");
+      if (hint) hint.textContent = "(Malom DB not loaded)";
     }
   }).catch(() => {});
 
@@ -220,6 +228,23 @@ document.addEventListener("DOMContentLoaded", () => {
     chkSentinel.addEventListener("change", () => {
       const modeRow = $("row-sentinel-mode");
       if (modeRow) modeRow.style.display = chkSentinel.checked ? "" : "none";
+    });
+  }
+
+  const chkPerfectDB = $("chk-perfect-db");
+  if (chkPerfectDB) {
+    chkPerfectDB.addEventListener("change", () => {
+      const sentinelRow = $("row-sentinel");
+      const modeRow     = $("row-sentinel-mode");
+      if (chkPerfectDB.checked) {
+        // Malom DB overrides sentinel — dim sentinel controls
+        if (sentinelRow) sentinelRow.style.opacity = "0.45";
+        if (modeRow)     modeRow.style.display = "none";
+      } else {
+        if (sentinelRow) sentinelRow.style.opacity = "";
+        if (modeRow && chkSentinel && chkSentinel.checked)
+          modeRow.style.display = "";
+      }
     });
   }
 
@@ -632,6 +657,7 @@ function startNewGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       ai_weights:   _getWeights(),
       player_name:  playerName,
     }));
@@ -894,6 +920,9 @@ function startSetupGame() {
       difficulty:   diff,
       vs_human:     vs,
       use_llm:      useLlm,
+      use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
+      sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       ai_weights:   _getWeights(),
       positions:    positions,
       phase:        $("sel-setup-phase").value,
@@ -2251,6 +2280,7 @@ function _handleTournamentNext(msg) {
       use_llm:        $("chk-llm").checked,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
     }));
   }
 }

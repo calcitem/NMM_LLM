@@ -400,6 +400,7 @@ class GameAI:
         value_net=None,
         fullgame_db=None,           # ai.fullgame_db.FullGameDB | None
         endgame_solved_db=None,     # ai.endgame_solved_db.EndgameSolvedDB | None
+        malom_db=None,              # learned_ai.sentinel.db_teacher.ExternalSolvedDB | None
         neural_evaluator=None,      # ai.neural_evaluator.NeuralEvaluator | None
         override_time_budget: float | None = None,  # seconds; overrides _TIME_LIMIT for training
     ) -> None:
@@ -409,6 +410,7 @@ class GameAI:
         self._weights: HeuristicWeights = weights if weights is not None else DEFAULT_WEIGHTS
         self._fullgame_db = fullgame_db
         self._endgame_solved_db = endgame_solved_db
+        self._malom_db = malom_db
         self._nodes = 0
         self._deadline: float = math.inf   # set by _iterative_deepen; checked in _negamax
         self.use_mcts = use_mcts
@@ -470,6 +472,9 @@ class GameAI:
         # Probability gate: fraction of moves where sentinel (or DB fallback) fires.
         # 1.0 = always (default, preserves existing use_sentinel=True behaviour).
         self._sentinel_activation_prob: float = 1.0
+        # When True, the AI uses the Malom perfect DB (via _db_score_adjust) instead of
+        # the sentinel model for move selection.  Probability gating still applies.
+        self.use_perfect_db: bool = False
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -554,6 +559,13 @@ class GameAI:
         ANY error the original heuristic move is returned unchanged. Only moves
         from ``moves`` are ever returned.
         """
+        # Perfect DB mode: use Malom DB directly, bypassing the sentinel model.
+        if self.use_perfect_db:
+            import random as _random
+            if self._sentinel_activation_prob >= 1.0 or _random.random() <= self._sentinel_activation_prob:
+                return self._db_score_adjust(board, move, moves)
+            return move
+
         if self.sentinel is None:
             # DB fallback when sentinel unavailable but probability gate would fire
             if (self._sentinel_activation_prob > 0.0
@@ -668,32 +680,38 @@ class GameAI:
         return move
 
     def _db_score_adjust(self, board: BoardState, move: dict, moves: list) -> dict:
-        """Fallback: use Malom/endgame DB WDL to pick the best move when sentinel is unavailable."""
-        esdb = self._endgame_solved_db
-        fgdb = self._fullgame_db
-        if not esdb and not (fgdb and fgdb.is_available()):
+        """Pick the best move using perfect/solved DB WDL.  Query order (highest authority first):
+        Malom perfect DB → endgame solved DB → fullgame DB.  Falls back to the original move if
+        no DB is available or no position is found."""
+        malom = self._malom_db
+        esdb  = self._endgame_solved_db
+        fgdb  = self._fullgame_db
+        malom_ok = malom is not None and malom.is_available()
+        if not malom_ok and not esdb and not (fgdb and fgdb.is_available()):
             return move
         try:
             wdl_map = {"W": 2, "D": 1, "L": 0}
-            best_move = move
+            _flip   = {"W": "L", "L": "W", "D": "D"}
+            best_move  = move
             best_score = -1
             for m in moves:
                 try:
                     after = board.apply_move(m)
                 except Exception:
                     continue
-                # Query from opponent's POV (after move it's their turn), then flip
+                # Query from opponent's POV (after the move it's their turn), then flip
                 res = None
-                if esdb:
+                if malom_ok:
+                    res = malom.query(after)
+                if res is None and esdb:
                     res = esdb.query(after)
                 if res is None and fgdb and fgdb.is_available():
                     res = fgdb.query(after)
                 if res:
-                    flipped = {"W": "L", "L": "W", "D": "D"}.get(res)
-                    score = wdl_map.get(flipped, -1) if flipped else -1
+                    score = wdl_map.get(_flip.get(res), -1)
                     if score > best_score:
                         best_score = score
-                        best_move = m
+                        best_move  = m
             return best_move
         except Exception:
             return move

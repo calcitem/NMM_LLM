@@ -652,8 +652,9 @@ async def get_vn_status():
 @app.get("/api/sentinel_status")
 async def sentinel_status():
     return {
-        "available": _sentinel_advisor is not None and _sentinel_advisor.is_loaded(),
-        "checkpoint": str(_sentinel_ckpt) if _sentinel_advisor else "",
+        "available":    _sentinel_advisor is not None and _sentinel_advisor.is_loaded(),
+        "checkpoint":   str(_sentinel_ckpt) if _sentinel_advisor else "",
+        "malom_db":     _malom_db is not None and _malom_db.is_available(),
     }
 
 
@@ -1286,6 +1287,7 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         blunder_probability=hw.make_mistakes / 100.0,
         fullgame_db=_fullgame_db,
         endgame_solved_db=_endgame_solved_db,
+        malom_db=_malom_db,
         value_net=_value_net,
     )
 
@@ -1699,8 +1701,9 @@ async def ws_endpoint(websocket: WebSocket):
                     _t_pers = ""
                 vs_human  = bool(msg.get("vs_human", False))
                 use_llm   = bool(msg.get("use_llm", True))
-                use_sentinel  = bool(msg.get("use_sentinel", False))
-                sentinel_mode = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
+                use_sentinel   = bool(msg.get("use_sentinel", False))
+                sentinel_mode  = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
+                use_perfect_db = bool(msg.get("use_perfect_db", False))
                 settings  = _load_settings()
 
                 engine   = GameEngine(human_color=hc)
@@ -1745,6 +1748,7 @@ async def ws_endpoint(websocket: WebSocket):
                         blunder_probability=min(1.0, base_blunder + adaptive.extra_blunder),
                         fullgame_db=_fullgame_db,
                         endgame_solved_db=_endgame_solved_db,
+                        malom_db=_malom_db,
                         value_net=_value_net,
                     )
                     log.info(
@@ -1753,7 +1757,12 @@ async def ws_endpoint(websocket: WebSocket):
                     )
 
                     _sent_prob = SENTINEL_PROB_BY_DIFF.get(eff_diff, 0.0)
-                    if (_sent_prob > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                    if use_perfect_db:
+                        game_ai.use_perfect_db = True
+                        game_ai.sentinel_mode = "score_adjust"
+                        game_ai._sentinel_activation_prob = _sent_prob
+                        log.info("Malom perfect DB guidance enabled (diff=%d, prob=%.0f%%)", eff_diff, _sent_prob * 100)
+                    elif (_sent_prob > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
                         _sent_mode = sentinel_mode if use_sentinel else "score_adjust"
                         game_ai.set_sentinel(_sentinel_advisor, mode=_sent_mode)
                         game_ai._sentinel_activation_prob = _sent_prob if not use_sentinel else 1.0
@@ -1825,7 +1834,10 @@ async def ws_endpoint(websocket: WebSocket):
                 hc       = _random.choice(["W", "B"]) if hc_raw == "R" else hc_raw
                 diff     = max(1, min(10, int(msg.get("difficulty", 3))))
                 vs_human = bool(msg.get("vs_human", False))
-                use_llm  = bool(msg.get("use_llm", True))
+                use_llm        = bool(msg.get("use_llm", True))
+                use_sentinel   = bool(msg.get("use_sentinel", False))
+                sentinel_mode  = msg.get("sentinel_mode", "advisory")
+                use_perfect_db = bool(msg.get("use_perfect_db", False))
                 setup_phase = msg.get("phase", "move")   # "place" | "move"
                 setup_turn  = msg.get("turn", "W")        # "W" | "B"
                 setup_pos   = msg.get("positions", {})    # {pos: "W"|"B"|""}
@@ -1869,11 +1881,17 @@ async def ws_endpoint(websocket: WebSocket):
                         blunder_probability=_hw.make_mistakes / 100.0,
                         fullgame_db=_fullgame_db,
                         endgame_solved_db=_endgame_solved_db,
+                        malom_db=_malom_db,
                         value_net=_value_net,
                     )
 
                     _sent_prob_s = SENTINEL_PROB_BY_DIFF.get(diff, 0.0)
-                    if (_sent_prob_s > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                    if use_perfect_db:
+                        game_ai.use_perfect_db = True
+                        game_ai.sentinel_mode = "score_adjust"
+                        game_ai._sentinel_activation_prob = _sent_prob_s
+                        log.info("Malom perfect DB guidance enabled (diff=%d, prob=%.0f%%)", diff, _sent_prob_s * 100)
+                    elif (_sent_prob_s > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
                         _sent_mode_s = sentinel_mode if use_sentinel else "score_adjust"
                         game_ai.set_sentinel(_sentinel_advisor, mode=_sent_mode_s)
                         game_ai._sentinel_activation_prob = _sent_prob_s if not use_sentinel else 1.0
@@ -2309,7 +2327,7 @@ async def ws_endpoint(websocket: WebSocket):
                     value_net_blend=_w("value_net_blend", 0),
                     cross_mill_cycling=_w("cross_mill_cycling", 300),
                 )
-                new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
+                new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
 
                 new_coord = None
                 if use_llm:
@@ -2671,8 +2689,8 @@ async def ws_endpoint(websocket: WebSocket):
                     # _run_ai_vs_ai_loop safely handles None coordinators.
                     _ava_diff = 3
                     _ava_hw = HeuristicWeights()
-                    _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
-                    _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, value_net=_value_net)
+                    _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
+                    _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
                     session.ai_vs_ai = True
                     session.vs_human = False
                     session.game_ai_white = _ai_w
