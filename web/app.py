@@ -186,6 +186,29 @@ try:
 except Exception as _e:
     log.warning("Sentinel overlay unavailable: %s", _e)
 
+# ── Malom perfect DB (ExternalSolvedDB) — used for DB Lines overlay and DB fallback ──
+# Path is read from settings.json "malom_db_path" (user-configurable via Tools page);
+# falls back to the sentinel config's external_db_path when the setting is absent.
+_malom_db = None
+try:
+    from learned_ai.sentinel.db_teacher import ExternalSolvedDB as _ExternalSolvedDB
+    _malom_path = _load_settings().get("malom_db_path") or ""
+    if not _malom_path:
+        from learned_ai.sentinel.config import load_config as _load_sentinel_config_malom
+        _mcfg = _load_sentinel_config_malom()
+        _malom_path = getattr(_mcfg, "external_db_path", "") or ""
+    if _malom_path:
+        _malom_db = _ExternalSolvedDB(_malom_path)
+        if _malom_db.is_available():
+            log.info("Malom perfect DB loaded from %s", _malom_path)
+        else:
+            log.warning("Malom DB path configured but unavailable: %s", _malom_path)
+            _malom_db = None
+    else:
+        log.info("Malom DB not configured (no malom_db_path in settings)")
+except Exception as _e:
+    log.warning("Malom DB load failed (non-fatal): %s", _e)
+
 # Probability that sentinel (or DB fallback) intervenes, by difficulty level.
 SENTINEL_PROB_BY_DIFF: dict[int, float] = {
     1: 0.0, 2: 0.0, 3: 0.10, 4: 0.22, 5: 0.33,
@@ -822,6 +845,11 @@ async def tool_status():
 
     busy = _TOOLS_LOCK.locked()
 
+    # Malom perfect DB
+    malom_info = {"status": "not loaded", "path": str(_load_settings().get("malom_db_path", ""))}
+    if _malom_db is not None and _malom_db.is_available():
+        malom_info["status"] = "loaded"
+
     return _JSONResponse({
         "fullgame_db":    fgdb_info,
         "endgame_solved": esdb_info,
@@ -836,6 +864,7 @@ async def tool_status():
             "after_games": _load_settings().get("auto_evolve_after_games", 0),
             "games_since": _games_since_evolve,
         },
+        "malom_db":       malom_info,
     })
 
 
@@ -856,6 +885,30 @@ async def set_auto_evolve(request: Request):
     settings["auto_evolve_after_games"] = after
     _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
     return _JSONResponse({"ok": True, "after_games": after})
+
+
+@app.get("/api/db_settings")
+async def get_db_settings():
+    settings = _load_settings()
+    return _JSONResponse({
+        "fullgame_db_path":   settings.get("fullgame_db_path", ""),
+        "endgame_solved_dir": settings.get("endgame_solved_dir", ""),
+        "malom_db_path":      settings.get("malom_db_path", ""),
+    })
+
+
+@app.post("/api/db_settings")
+async def set_db_settings(request: Request):
+    body = await request.json()
+    settings = _load_settings()
+    changed = False
+    for key in ("fullgame_db_path", "endgame_solved_dir", "malom_db_path"):
+        if key in body:
+            settings[key] = str(body[key]).strip()
+            changed = True
+    if changed:
+        _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    return _JSONResponse({"ok": True})
 
 
 @app.websocket("/ws/tools")
@@ -2130,6 +2183,38 @@ async def ws_endpoint(websocket: WebSocket):
                                         )
                                 except Exception:
                                     pass
+
+                # Malom perfect DB: fill eg_flags for any move not covered above
+                if _malom_db is not None and _malom_db.is_available():
+                    _flip = {"W": "L", "L": "W", "D": "D"}
+                    if diag_mode == "capture":
+                        for mv_e in moves_out:
+                            cap_pos = mv_e.get("to")
+                            if cap_pos and not eg_flags.get(cap_pos):
+                                try:
+                                    after_ml = diag_board.apply_move(
+                                        {"from": None, "to": None, "capture": cap_pos})
+                                    res_ml = _malom_db.query(after_ml)
+                                    if res_ml:
+                                        eg_flags[cap_pos] = _flip.get(res_ml)
+                                except Exception:
+                                    pass
+                    else:
+                        try:
+                            legal_ml = get_all_legal_moves(diag_board)
+                        except Exception:
+                            legal_ml = []
+                        for mv_ml in legal_ml:
+                            ntn_ml = _diag_ntn(mv_ml)
+                            if eg_flags.get(ntn_ml):
+                                continue  # already set by endgame_solved_db
+                            try:
+                                after_ml = diag_board.apply_move(mv_ml)
+                                res_ml = _malom_db.query(after_ml)
+                                if res_ml:
+                                    eg_flags[ntn_ml] = _flip.get(res_ml)
+                            except Exception:
+                                pass
 
                 for mv_e in moves_out:
                     ntn = _diag_ntn(mv_e)

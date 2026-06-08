@@ -74,6 +74,12 @@ async function refreshStatus() {
   setText("ob-total", fmt(ob.total || 0));
   setText("ob-named", fmt(ob.named || 0));
 
+  // Malom perfect DB
+  const ml = data.malom_db || {};
+  setText("ml-status", ml.status === "loaded" ? "Loaded" : "Not loaded",
+          ml.status === "loaded" ? "status-ok" : "status-missing");
+  setText("ml-path", ml.path || "—");
+
   // Auto-evolve status
   const ae = data.auto_evolve || {};
   if (ae.after_games > 0) {
@@ -320,6 +326,41 @@ document.getElementById("btn-ae-save").addEventListener("click", async () => {
   }
 });
 
+// ── DB Path Settings ──────────────────────────────────────────────────────────
+
+async function loadDbSettings() {
+  try {
+    const r = await fetch("/api/db_settings");
+    const d = await r.json();
+    document.getElementById("dbs-fullgame").value = d.fullgame_db_path || "";
+    document.getElementById("dbs-endgame").value  = d.endgame_solved_dir || "";
+    document.getElementById("dbs-malom").value    = d.malom_db_path || "";
+  } catch (e) {
+    console.error("db_settings fetch failed", e);
+  }
+}
+
+document.getElementById("btn-dbs-save").addEventListener("click", async () => {
+  const statusEl = document.getElementById("dbs-status");
+  try {
+    await fetch("/api/db_settings", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        fullgame_db_path:   document.getElementById("dbs-fullgame").value.trim(),
+        endgame_solved_dir: document.getElementById("dbs-endgame").value.trim(),
+        malom_db_path:      document.getElementById("dbs-malom").value.trim(),
+      }),
+    });
+    statusEl.textContent = "Saved — restart server to apply";
+    statusEl.style.color = "var(--accent, #4caf50)";
+  } catch (e) {
+    statusEl.textContent = "Save failed";
+    statusEl.style.color = "var(--danger, #e53935)";
+    console.error("db_settings save failed", e);
+  }
+});
+
 // ── Name Openings ─────────────────────────────────────────────────────────────
 
 document.getElementById("btn-nameopenings").addEventListener("click", () => {
@@ -370,4 +411,5 @@ document.getElementById("btn-refresh-status").addEventListener("click", refreshS
 
 refreshStatus();
 loadAutoEvolve();
+loadDbSettings();
 setInterval(refreshStatus, 15_000);

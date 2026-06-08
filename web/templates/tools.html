@@ -190,6 +190,22 @@
       <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
     </section>
 
+    <!-- ── DB Path Settings ─────────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Database Paths</h2>
+      <p class="tool-desc">Configure paths to external database files. Changes take effect on next server restart.</p>
+      <div class="tool-form">
+        <label title="Path to fullgame.bin binary file (NMM_FGDB format)">FullGame DB path
+          <input type="text" id="dbs-fullgame" style="width:36em"></label>
+        <label title="Directory containing endgame_N_M.wdl files">Endgame solved dir
+          <input type="text" id="dbs-endgame" style="width:36em"></label>
+        <label title="Path to Malom perfect DB directory (Std_DD_89adjusted)">Malom DB path
+          <input type="text" id="dbs-malom" style="width:36em"></label>
+      </div>
+      <button id="btn-dbs-save" class="btn-refresh">&#x2714; Save DB Paths</button>
+      <span id="dbs-status" style="margin-left:1em; color:#888"></span>
+    </section>
+
     <!-- ── Auto-Evolve ────────────────────────────────────────────────── -->
     <section class="tools-section">
       <h2>Auto-Evolve After N Games</h2>
@@ -271,6 +287,14 @@
           <div class="card-title">WDL Tables</div>
           <div class="card-body" id="es-tables-body">
             <div class="stat-row"><span style="color:var(--text-dim)">No tables built yet</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-malom">
+          <div class="card-title">Malom Perfect DB</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Status</span><span id="ml-status">—</span></div>
+            <div class="stat-row"><span>Path</span><span id="ml-path" style="font-size:.75rem;word-break:break-all">—</span></div>
           </div>
         </div>
 
