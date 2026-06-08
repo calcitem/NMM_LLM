@@ -2170,6 +2170,7 @@ async def ws_endpoint(websocket: WebSocket):
                     "eval_w":  eval_w,
                     "eval_b":  eval_b,
                     "moves":   moves_out,
+                    "fen":     fen_override or diag_board.to_fen_string(),
                 })
 
             # ── good_game — elevate a draw to win-like status in trajectory ────

@@ -52,6 +52,7 @@ let currentDifficulty = 3;          // updated from state messages; gates overla
 let _diagStaticData  = null;        // last received static diagnostic response
 let _diagNegamaxData = null;        // last received negamax diagnostic response
 let _diagSeq        = 0;            // sequence counter for in-flight requests
+let _diagFenCache   = new Map();    // fen → {static?: msg, negamax?: msg} — reset on new game
 let _diagPending    = 0;            // expected seq for current request pair
 let _diagDebounce   = null;         // debounce timer handle
 let _diagCaptureFen = null;         // FEN of projected board in capture mode
@@ -594,6 +595,7 @@ function startNewGame() {
   forceAggressive = false;
   replayMoves = [];
   replayIdx   = -1;
+  _diagFenCache = new Map();
   _updateReplayLabel();
   _setReplayButtonsDisabled(true);
   $("btn-force-cap").classList.remove("btn-active");
@@ -666,6 +668,7 @@ function startAiVsAi() {
   forceAggressive = false;
   replayMoves = [];
   replayIdx   = -1;
+  _diagFenCache = new Map();
   _updateReplayLabel();
   _setReplayButtonsDisabled(true);
   $("btn-force-cap").disabled = true;
@@ -856,6 +859,7 @@ function startSetupGame() {
   forceAggressive = false;
   replayMoves = [];
   replayIdx   = -1;
+  _diagFenCache = new Map();
   _updateReplayLabel();
   _setReplayButtonsDisabled(true);
   $("btn-force-cap").classList.remove("btn-active");
@@ -2375,6 +2379,13 @@ function _diagOnReceive(msg) {
   if (msg.mode === "static")  { _diagStaticData  = msg; }
   if (msg.mode === "negamax") { _diagNegamaxData = msg; }
   if (msg.mode === "capture") { _diagStaticData  = msg; }
+  // Cache by FEN (skip capture mode — live-board only, not replay-addressable)
+  if (msg.fen && msg.mode !== "capture") {
+    const entry = _diagFenCache.get(msg.fen) || {};
+    if (msg.mode === "static")  entry.static  = msg;
+    if (msg.mode === "negamax") entry.negamax = msg;
+    _diagFenCache.set(msg.fen, entry);
+  }
   _diagRender();
 }
 
@@ -2471,9 +2482,25 @@ function _diagRefreshForReplay(idx) {
     fen = replayMoves[idx] && replayMoves[idx].fen;
     prefix = replayMoves.slice(0, idx).map(m => m.notation).filter(Boolean);
   } else {
-    // After last move: use live board (no FEN override)
+    // After last move: use live board — always request fresh (no cached key)
     fen = null; prefix = null;
   }
+
+  // Cache-first: serve from cache when all needed data is available
+  if (fen) {
+    const cached = _diagFenCache.get(fen);
+    if (cached) {
+      const haveStatic  = !diagStatic  || !!cached.static;
+      const haveNegamax = !diagNegamax || !!cached.negamax;
+      if (haveStatic && haveNegamax) {
+        if (cached.static)  _diagStaticData  = cached.static;
+        if (cached.negamax) _diagNegamaxData = cached.negamax;
+        _diagRender();
+        return;  // skip server round-trip
+      }
+    }
+  }
+
   _diagStaticData  = null;
   _diagNegamaxData = null;
   _diagRequestAll(fen || undefined, prefix || undefined);
