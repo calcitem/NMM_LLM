@@ -15,6 +15,7 @@ from game.board import BoardState
 def _make_db(*records: dict) -> TrajectoryDB:
     db = TrajectoryDB.__new__(TrajectoryDB)
     db._games_dir = pathlib.Path("data/games")
+    db._extra_dirs = []
     db._index = {}
     db._game_count = 0
     for rec in records:
@@ -22,7 +23,7 @@ def _make_db(*records: dict) -> TrajectoryDB:
     return db
 
 
-def _minimal_game(moves: list[dict], winner: str | None, source_type: str = "ai_vs_ai") -> dict:
+def _minimal_game(moves: list[dict], winner: str | None, source_type: str = "human_involved") -> dict:
     """Build a minimal game record that _index_game() can parse."""
     return {
         "winner": winner,
@@ -167,22 +168,24 @@ class TestConfidenceScaling:
 # ── Source type separation ────────────────────────────────────────────────────
 
 class TestSourceTypeSeparation:
-    def test_ai_wins_stored_separately_from_human_wins(self):
+    def test_ai_games_skipped_human_games_indexed(self):
+        """AI vs AI games are skipped entirely; only human-involved games are indexed."""
         empty_fen = "........................|W|0|0"
-        ai_game = _minimal_game([_move(empty_fen, "W", "d6")], winner="W", source_type="ai_vs_ai")
+        ai_game    = _minimal_game([_move(empty_fen, "W", "d6")], winner="W", source_type="ai_vs_ai")
         human_game = _minimal_game([_move(empty_fen, "W", "d6")], winner="W", source_type="human_involved")
         db = _make_db(ai_game, human_game)
 
         b = BoardState.new_game()
         key, sym_idx = make_board_state_key(b)
-        from ai.board_symmetry import transform_notation, SYM_INVERSE
         entries = db._index.get(key, {})
         assert entries, "Expected entries at start state"
 
         total_ai_wins    = sum(e["wins_ai"]    for e in entries.values())
         total_human_wins = sum(e["wins_human"] for e in entries.values())
-        assert total_ai_wins == 1
-        assert total_human_wins == 1
+        # ai_vs_ai game is skipped so wins_ai stays 0; only the human game is counted
+        assert total_ai_wins == 0,    f"Expected 0 ai wins (ai_vs_ai skipped), got {total_ai_wins}"
+        assert total_human_wins == 1, f"Expected 1 human win, got {total_human_wins}"
+        assert db.game_count == 1,    f"Expected 1 indexed game (ai game skipped), got {db.game_count}"
 
 
 # ── Full load integration ─────────────────────────────────────────────────────
