@@ -104,6 +104,8 @@ const WEIGHT_DEFAULTS = [
   { key: "block_cycling_priority", group: "Positional", label: "Block cycling fork arm",   def: 120, min: 0,   max: 300,  step: 10,
     tip: "Bonus for blocking the fork arm with higher cycling freedom — surrendering the arm the opponent cannot easily exploit" },
   // ── Behaviour ─────────────────────────────────────────────────────────
+  { key: "value_net_blend",      group: "Behaviour",  label: "Value network blend %",       def: 0,   min: 0,   max: 100,  step: 5,
+    tip: "How much the trained value network influences leaf evaluation (0 = heuristic only, 100 = value net only). Requires data/value_net.npz to be present. 30–50 is recommended." },
   { key: "make_mistakes",        group: "Behaviour",  label: "Make mistakes %",             def: 0,   min: 0,   max: 100,  step: 5,
     tip: "Probability (%) of playing a deliberately bad move each turn" },
   { key: "opening_adherence",    group: "Behaviour",  label: "Opening book adherence %",    def: 50,  min: 0,   max: 100,  step: 5,
