@@ -190,6 +190,24 @@
       <button class="btn-run" id="btn-evolve" data-tool="evolve_weights_v2">&#9654; Evolve Weights</button>
     </section>
 
+    <!-- ── Import PlayOK Games ──────────────────────────────────────── -->
+    <section class="tools-section">
+      <h2>Import PlayOK Games</h2>
+      <p class="tool-desc">Converts PlayOK Nine Men's Morris .txt archive files into project JSONL format for sentinel training and trajectory guidance. Already-imported games are skipped via a manifest. Script: <code>tools/import_playok.py</code></p>
+      <div class="tool-form">
+        <label title="Root of the PlayOK archive tree (year/month/player/mlXXXX.txt)">Archive path
+          <input type="text" id="po-archive" style="width:32em" placeholder="~/playok_archive/games"></label>
+        <label title="Output directory for JSONL files (default: data/human_games)">Output dir
+          <input type="text" id="po-output" value="data/human_games" style="width:18em"></label>
+        <label title="--dry-run: Count games without writing files"><input type="checkbox" id="po-dryrun"> Dry run</label>
+        <label title="--validate-only: Check all moves are legal, no files written"><input type="checkbox" id="po-validate"> Validate only</label>
+        <label title="--limit N: Stop after N new games (for testing)">Limit
+          <input type="number" id="po-limit" value="" placeholder="all" min="1" style="width:6em"></label>
+        <label title="--verbose: Print per-game status"><input type="checkbox" id="po-verbose"> Verbose</label>
+      </div>
+      <button class="btn-run" id="btn-import-playok" data-tool="import_playok">&#9654; Import PlayOK Games</button>
+    </section>
+
     <!-- ── DB Path Settings ─────────────────────────────────────────── -->
     <section class="tools-section">
       <h2>Database Paths</h2>
@@ -201,6 +219,8 @@
           <input type="text" id="dbs-endgame" style="width:36em"></label>
         <label title="Path to Malom perfect DB directory (Std_DD_89adjusted)">Malom DB path
           <input type="text" id="dbs-malom" style="width:36em"></label>
+        <label title="Root directory of the PlayOK archive (for Import PlayOK tool)">PlayOK archive path
+          <input type="text" id="dbs-playok" style="width:36em"></label>
       </div>
       <button id="btn-dbs-save" class="btn-refresh">&#x2714; Save DB Paths</button>
       <span id="dbs-status" style="margin-left:1em; color:#888"></span>
@@ -307,11 +327,21 @@
         </div>
 
         <div class="status-card" id="card-games">
-          <div class="card-title">Game Records</div>
+          <div class="card-title">Game Records (AI)</div>
           <div class="card-body">
             <div class="stat-row"><span>Total games</span><span id="gm-count">—</span></div>
             <div class="stat-row"><span>Earliest</span><span id="gm-earliest">—</span></div>
             <div class="stat-row"><span>Latest</span><span id="gm-latest">—</span></div>
+          </div>
+        </div>
+
+        <div class="status-card" id="card-human-games">
+          <div class="card-title">Human Games (PlayOK)</div>
+          <div class="card-body">
+            <div class="stat-row"><span>Imported games</span><span id="hg-count">—</span></div>
+            <div class="stat-row"><span>Earliest</span><span id="hg-earliest">—</span></div>
+            <div class="stat-row"><span>Latest</span><span id="hg-latest">—</span></div>
+            <div class="stat-row"><span>Players (sample)</span><span id="hg-players">—</span></div>
           </div>
         </div>
 

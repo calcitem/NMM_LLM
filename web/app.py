@@ -77,7 +77,11 @@ def _persist_game_record(record: dict) -> None:
 
 
 # Load trajectory DB once at startup — updated incrementally as games complete.
-_trajectory_db    = TrajectoryDB(_ROOT / "data" / "games")
+_human_games_dir = _ROOT / "data" / "human_games"
+_trajectory_db   = TrajectoryDB(
+    _ROOT / "data" / "games",
+    extra_dirs=[_human_games_dir] if _human_games_dir.exists() else [],
+)
 try:
     _trajectory_db.load()
     log.info(
@@ -240,7 +244,10 @@ async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
     global _trajectory_db, _endgame_db
     try:
         log.info("Library consolidation: %d games", game_count)
-        new_tdb = TrajectoryDB(_ROOT / "data" / "games")
+        new_tdb = TrajectoryDB(
+            _ROOT / "data" / "games",
+            extra_dirs=[_human_games_dir] if _human_games_dir.exists() else [],
+        )
         await asyncio.to_thread(new_tdb.load)
         _trajectory_db = new_tdb
 
@@ -844,6 +851,25 @@ async def tool_status():
     games_earliest = games_files[0].split("game_")[1][:10] if games_files else None
     games_latest   = games_files[-1].split("game_")[1][:10] if games_files else None
 
+    # Human games dir stats
+    hg_files = sorted(_glob.glob(str(_ROOT / "data" / "human_games" / "human_*.jsonl")))
+    hg_count = len(hg_files)
+    hg_players: set = set()
+    hg_earliest: str | None = None
+    hg_latest:   str | None = None
+    if hg_files:
+        for hgf in hg_files[:5] + hg_files[-5:]:
+            try:
+                rec = json.loads(Path(hgf).read_text(encoding="utf-8"))
+                if rec.get("date") and (hg_earliest is None or rec["date"] < hg_earliest):
+                    hg_earliest = rec["date"]
+                if rec.get("date") and (hg_latest is None or rec["date"] > hg_latest):
+                    hg_latest = rec["date"]
+                if rec.get("white_player"): hg_players.add(rec["white_player"])
+                if rec.get("black_player"): hg_players.add(rec["black_player"])
+            except Exception:
+                pass
+
     busy = _TOOLS_LOCK.locked()
 
     # Malom perfect DB
@@ -860,6 +886,7 @@ async def tool_status():
         "value_net":      vnet_info,
         "opening_book":   {"total": ob_total, "named": ob_named},
         "games":          {"count": games_count, "earliest": games_earliest, "latest": games_latest},
+        "human_games":    {"count": hg_count, "earliest": hg_earliest, "latest": hg_latest, "players": len(hg_players)},
         "busy":           busy,
         "auto_evolve":    {
             "after_games": _load_settings().get("auto_evolve_after_games", 0),
@@ -892,9 +919,10 @@ async def set_auto_evolve(request: Request):
 async def get_db_settings():
     settings = _load_settings()
     return _JSONResponse({
-        "fullgame_db_path":   settings.get("fullgame_db_path", ""),
-        "endgame_solved_dir": settings.get("endgame_solved_dir", ""),
-        "malom_db_path":      settings.get("malom_db_path", ""),
+        "fullgame_db_path":    settings.get("fullgame_db_path", ""),
+        "endgame_solved_dir":  settings.get("endgame_solved_dir", ""),
+        "malom_db_path":       settings.get("malom_db_path", ""),
+        "playok_archive_path": settings.get("playok_archive_path", "~/playok_archive/games"),
     })
 
 
@@ -903,7 +931,7 @@ async def set_db_settings(request: Request):
     body = await request.json()
     settings = _load_settings()
     changed = False
-    for key in ("fullgame_db_path", "endgame_solved_dir", "malom_db_path"):
+    for key in ("fullgame_db_path", "endgame_solved_dir", "malom_db_path", "playok_archive_path"):
         if key in body:
             settings[key] = str(body[key]).strip()
             changed = True
@@ -932,7 +960,7 @@ async def ws_tools(websocket: WebSocket):
         _ALLOWED = {
             "build_fullgame_db", "build_endgame_db", "self_play",
             "evolve_weights", "evolve_weights_v2", "name_openings", "purge_ai_learning",
-            "endgame_play", "train_value_net",
+            "endgame_play", "train_value_net", "import_playok",
         }
         if tool not in _ALLOWED:
             await _send_line(f"Unknown tool: {tool!r}", "error")

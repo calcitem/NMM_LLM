@@ -1137,6 +1137,109 @@ The **AI Tuning** panel exposes the most user-visible weights. All fields corres
 
 > **Tip:** Increasing `cycling\\\_mill` and `mill\\\_wrapping` together produces a slow, suffocating style. Maximising `close\\\_mill` and `cardinal\\\_block` produces an aggressive attacking style. Setting `make\\\_mistakes` to 10–20 % creates a forgiving training partner.
 
+## Human Game Database (PlayOK Import)
+
+The AI can be trained on human-vs-human Nine Men's Morris games from PlayOK. The importer converts `.txt` archive files into project JSONL format, then the sentinel and value network can be retrained on human game data.
+
+### Import PlayOK games
+
+```bash
+python tools/import_playok.py \
+    --archive ~/playok_archive/games \
+    --output  data/human_games
+```
+
+Options:
+- `--dry-run` — count games without writing files
+- `--validate-only` — check all moves are legal, no files written
+- `--limit N` — import at most N new games (for testing)
+- `--verbose` — print per-game status
+
+Already-imported games are tracked in `data/human_games/imported.json` and skipped on re-runs. The archive can be expanded and re-run incrementally.
+
+The Tools page (`/tools`) also provides a GUI import button under **Import PlayOK Games**.
+
+### Verify imported games with sentinel review
+
+```bash
+.venv/bin/python scripts/sentinel_review.py \
+    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+    --game-dir   data/human_games
+```
+
+---
+
+## Training the Sentinel
+
+The sentinel is a move-quality MLP that scores legal moves by their historical win probability. It is trained on JSONL game records with per-move Malom DB WDL labels when available.
+
+### Train on AI self-play games
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+    --game-dir data/games \
+    --output   learned_ai/sentinel/checkpoints/best.pt
+```
+
+### Train on human games (recommended for human-like play)
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+    --game-dir data/human_games \
+    --output   learned_ai/sentinel/checkpoints/best.pt
+```
+
+### Review sentinel predictions
+
+```bash
+# Single game with full move table
+.venv/bin/python scripts/sentinel_review.py \
+    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+    --game-file  data/human_games/human_ml11756018.jsonl \
+    --all-moves
+
+# Batch review — top 5 most-flagged games in a directory
+.venv/bin/python scripts/sentinel_review.py \
+    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+    --game-dir   data/human_games \
+    --top 5
+```
+
+The sentinel is activated in the game UI via **Settings → Use Sentinel overlay**. At difficulty ≥ 5 it intervenes on moves the model classifies as poor quality.
+
+---
+
+## Training the Value Network
+
+The value network is a lightweight MLP (numpy) that predicts the winner from a board position feature vector. It is used as a leaf evaluator in the negamax search when `value_net_blend > 0`.
+
+### Train on AI self-play games
+
+```bash
+.venv/bin/python tools/train_value_net.py \
+    --games-dir data/games \
+    --output    data/value_net.npz \
+    --epochs    30
+```
+
+### Train on human games (recommended for strategic accuracy)
+
+```bash
+.venv/bin/python tools/train_value_net.py \
+    --games-dir data/human_games \
+    --output    data/value_net.npz \
+    --epochs    30
+```
+
+Options:
+- `--epochs N` — training epochs (default 30)
+- `--lr FLOAT` — learning rate (default 0.001)
+- `--batch-size N` — mini-batch size (default 256)
+
+The value network blend weight is adjustable per-game via the AI settings panel (`value_net_blend` 0–100). A starting value of 30–50 is recommended when using a human-trained network alongside the heuristic AI.
+
+---
+
 ## Project Structure
 
 ```

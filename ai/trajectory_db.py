@@ -177,29 +177,32 @@ class TrajectoryDB:
     Confidence-weighted: low-sample positions return smaller deltas.
     """
 
-    def __init__(self, games_dir: Path | str) -> None:
+    def __init__(self, games_dir: Path | str, extra_dirs: list[Path | str] | None = None) -> None:
         self._games_dir = Path(games_dir)
+        self._extra_dirs: list[Path] = [Path(d) for d in (extra_dirs or [])]
         self._index: dict[str, dict[str, dict]] = {}
         self._game_count = 0
 
     # ── Build / update ────────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Index every *.jsonl file in the games directory from scratch."""
+        """Index every *.jsonl file in all configured directories from scratch."""
         self._index.clear()
         self._game_count = 0
-        if not self._games_dir.exists():
-            logger.warning("TrajectoryDB: games directory not found: %s", self._games_dir)
-            return
-        for path in sorted(self._games_dir.rglob("*.jsonl")):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    self._index_game(json.loads(line))
-                except Exception as exc:
-                    logger.debug("TrajectoryDB: skipping line in %s — %s", path.name, exc)
+        all_dirs = [self._games_dir] + self._extra_dirs
+        for games_dir in all_dirs:
+            if not games_dir.exists():
+                logger.warning("TrajectoryDB: games directory not found: %s", games_dir)
+                continue
+            for path in sorted(games_dir.rglob("*.jsonl")):
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        self._index_game(json.loads(line))
+                    except Exception as exc:
+                        logger.debug("TrajectoryDB: skipping line in %s — %s", path.name, exc)
         logger.info(
             "TrajectoryDB: indexed %d games → %d state entries.",
             self._game_count, len(self._index),
@@ -229,6 +232,9 @@ class TrajectoryDB:
             else:
                 source_type = "human_involved"
         is_ai = (source_type == "ai_vs_ai")
+
+        if is_ai:
+            return
 
         self._game_count += 1
 

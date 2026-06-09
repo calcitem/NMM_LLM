@@ -74,6 +74,13 @@ async function refreshStatus() {
   setText("ob-total", fmt(ob.total || 0));
   setText("ob-named", fmt(ob.named || 0));
 
+  // Human games
+  const hg = data.human_games || {};
+  setText("hg-count",    fmt(hg.count   || 0));
+  setText("hg-earliest", hg.earliest || "—");
+  setText("hg-latest",   hg.latest   || "—");
+  setText("hg-players",  hg.players != null ? String(hg.players) + "+" : "—");
+
   // Malom perfect DB
   const ml = data.malom_db || {};
   setText("ml-status", ml.status === "loaded" ? "Loaded" : "Not loaded",
@@ -335,6 +342,10 @@ async function loadDbSettings() {
     document.getElementById("dbs-fullgame").value = d.fullgame_db_path || "";
     document.getElementById("dbs-endgame").value  = d.endgame_solved_dir || "";
     document.getElementById("dbs-malom").value    = d.malom_db_path || "";
+    document.getElementById("dbs-playok").value   = d.playok_archive_path || "";
+    // Pre-fill the import section archive field too
+    const poArchive = document.getElementById("po-archive");
+    if (poArchive && !poArchive.value) poArchive.value = d.playok_archive_path || "";
   } catch (e) {
     console.error("db_settings fetch failed", e);
   }
@@ -347,9 +358,10 @@ document.getElementById("btn-dbs-save").addEventListener("click", async () => {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        fullgame_db_path:   document.getElementById("dbs-fullgame").value.trim(),
-        endgame_solved_dir: document.getElementById("dbs-endgame").value.trim(),
-        malom_db_path:      document.getElementById("dbs-malom").value.trim(),
+        fullgame_db_path:    document.getElementById("dbs-fullgame").value.trim(),
+        endgame_solved_dir:  document.getElementById("dbs-endgame").value.trim(),
+        malom_db_path:       document.getElementById("dbs-malom").value.trim(),
+        playok_archive_path: document.getElementById("dbs-playok").value.trim(),
       }),
     });
     statusEl.textContent = "Saved — restart server to apply";
@@ -359,6 +371,24 @@ document.getElementById("btn-dbs-save").addEventListener("click", async () => {
     statusEl.style.color = "var(--danger, #e53935)";
     console.error("db_settings save failed", e);
   }
+});
+
+// ── Import PlayOK Games ───────────────────────────────────────────────────────
+
+document.getElementById("btn-import-playok").addEventListener("click", () => {
+  const archive = document.getElementById("po-archive").value.trim()
+                  || document.getElementById("dbs-playok").value.trim()
+                  || "~/playok_archive/games";
+  const args = [
+    "--archive", archive,
+    "--output",  document.getElementById("po-output").value.trim() || "data/human_games",
+  ];
+  if (document.getElementById("po-dryrun").checked)   args.push("--dry-run");
+  if (document.getElementById("po-validate").checked)  args.push("--validate-only");
+  if (document.getElementById("po-verbose").checked)   args.push("--verbose");
+  const limit = document.getElementById("po-limit").value.trim();
+  if (limit) args.push("--limit", limit);
+  runTool("import_playok", args);
 });
 
 // ── Name Openings ─────────────────────────────────────────────────────────────
