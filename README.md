@@ -479,6 +479,10 @@ Self-play games are saved to `data/games/` and are read by the AI before each fu
 | - | - |
 | `--games N` | Number of games to play |
 | `--white D` / `--black D` | AI difficulty 1–10 per side |
+| `--random-difficulty` | Randomise both sides' difficulty independently each game |
+| `--min-difficulty D` | Minimum difficulty when `--random-difficulty` is active (default 1) |
+| `--max-difficulty D` | Maximum difficulty when `--random-difficulty` is active (default 9) |
+| `--game-dir PATH` | Output directory for saved game files (default `data/games/self_play`) |
 | `--blunder P` | Blunder probability for White (0.0–1.0) |
 | `--swap` | Alternate which side plays White each game |
 | `--parallel N` | Run N games simultaneously (fast/no-llm mode only) |
@@ -774,11 +778,12 @@ Trains a tiny 3-layer MLP (79 inputs → 128 → 64 → 1 tanh output) as a posi
 
 | Flag | Default | Description |
 | - | - | - |
-| `--games-dir PATH` | `data/games` | Source directory for JSONL game files |
-| `--output PATH` | `data/value\\\\\\\_net.npz` | Where to write the trained weights |
+| `--games-dir PATH [PATH …]` | `data/games` | One or more source directories of JSONL game files |
+| `--output PATH` | `data/value_net.npz` | Where to write the trained weights |
 | `--epochs N` | 30 | Training epochs |
 | `--lr F` | 0.001 | Learning rate |
 | `--batch-size N` | 256 | Mini-batch size |
+| `--decisive-only` | off | Exclude draw/unknown games (not recommended — draws add calibration signal) |
 
 
 Recommended: accumulate at least 200 self-play games before training for useful signal. Retrain after each major batch of new games — the whole run takes under a minute.
@@ -922,125 +927,122 @@ Each line includes episode count, stage name, `heuristic\\\_difficulty` (stage 3
 
 - [`docs/AI\\\_INTERFACE\\\_MAPPING.md`](file:///home/benbrandwood/Documents/dev/NMM_ollama/docs/AI_INTERFACE_MAPPING.md) — the exact engine interface the learned AI implements.
 
-## Strategic Sentinel Overlay (advisory)
+## Strategic Sentinel Overlay
 
-The **sentinel** (`learned\\\_ai/sentinel/`) is an opt-in learned overlay that watches game trajectories and flags strategic turning points — moments where a single choice swings the outcome. It is **advisory only**: it never replaces or changes the move the heuristic `GameAI` selects. With no checkpoint attached the game plays exactly as before.
+The **sentinel** (`learned_ai/sentinel/`) is an opt-in move-quality overlay trained on game records with per-move Malom DB WDL supervision. For every candidate move in a position it predicts a quality score in **[0, 1]** from the mover's perspective (1.0 = DB win, 0.5 = draw, 0.0 = loss). It flags errors in real time, shows an advisory badge in the overlay, and can optionally steer AI move selection.
 
-A small multi-head MLP predicts four signals per position — mistake risk, missed-opportunity score, trajectory value delta, and turning-point confidence — from a 120-float feature vector (84 board features + 36 move-context features). Training is trajectory-supervised: labels are propagated backward from confirmed turning points, optionally taught by the Malom perfect-play database for ground-truth WDL supervision, or by game-outcome proxy when the DB is absent.
+**Architecture:** single-output sigmoid MLP, **58-feature** per-move input:
+- 20 board-context features (phase, piece counts, mills, mobility — mover-normalised)
+- 20 move-specific features (from/to squares, mill closure, capture, double-mill detection, block detection)
+- 18 counterfactual context features (fraction of winning/losing/drawing moves available from DB, heuristic rank, best/worst available quality)
+
+**Trained performance** (Malom DB, 3.6 M examples, 83% DB-labelled):
+- Move-quality accuracy vs Malom DB: **99.6%** — MAE **0.002**
+- Winning-trajectory accuracy: **100%** — mean score **0.891**
+- Losing-trajectory accuracy: **99.2%** — mean score **0.460**
+- Game-level trajectory polarity: **90%** of games — winner's mean score > loser's
+
+### Advisory thresholds
+
+`_advisory_message()` in `learned_ai/sentinel/infer.py` assigns one of four labels after scoring every candidate:
+
+| Label | Condition | Overlay badge |
+| - | - | - |
+| `safe` | No significant gap | 🟢 |
+| `possible_mistake` | Played quality < 0.4 and gap ≥ 8% | 🟡 |
+| `missed_opportunity` | Gap ≥ 15% and played quality ≥ 0.4 | 🔵 |
+| `critical` | Played quality < 0.4 and gap ≥ 20% | 🔴 |
+
+`reconsider_threshold` (default **0.15**) controls the gap at which reconsider mode redirects the AI.
 
 ### Training guide
 
-**Prerequisites**
-
-- Python venv activated (`.venv/bin/python`) and `data/games/` populated with played games (human vs AI or AI vs AI — any `.jsonl` files work).
-
-- Optional but strongly recommended: the Malom Ultra-Strong database (see below).
+**Prerequisites:** `.venv/bin/python` activated; `data/games/` or `data/human_games/` populated with `.jsonl` game records; Malom DB strongly recommended for best label quality.
 
 **Step 1 — Train**
 
-```
-\\\# With Malom DB (ground-truth WDL supervision — best results)    
-python scripts/train\\\_sentinel.py \\\\    
-  --config configs/sentinel\\\_default.yaml \\\\    
-  --game-dir data/games    
-    
-\\\# Without DB (game-outcome proxy supervision — still useful)    
-python scripts/train\\\_sentinel.py \\\\    
-  --config configs/sentinel\\\_default.yaml \\\\    
-  --game-dir data/games \\\\    
-  --db-path ""
-```
+```bash
+# With Malom DB — ground-truth WDL labels (recommended)
+.venv/bin/python scripts/train_sentinel.py \
+    --config configs/sentinel_default.yaml \
+    --game-dir data/human_games
 
-Checkpoints are written to `learned\\\_ai/sentinel/checkpoints/` (`best.pt` = lowest validation loss, `latest.pt` = most recent epoch). Training 350 games for 50 epochs takes ~2–5 minutes on CPU.
+# Without DB — game-outcome proxy labels (still useful)
+.venv/bin/python scripts/train_sentinel.py \
+    --config configs/sentinel_default.yaml \
+    --game-dir data/games \
+    --db-path ""
 
-**Step 2 — Evaluate**
-
-```
-python scripts/evaluate\\\_sentinel.py \\\\    
-  --checkpoint learned\\\_ai/sentinel/checkpoints/best.pt
+# Decisive games only (exclude draws — not recommended; draws add calibration signal)
+.venv/bin/python scripts/train_sentinel.py \
+    --config configs/sentinel_default.yaml \
+    --game-dir data/human_games \
+    --decisive-only
 ```
 
-Reports turning-point precision/recall and per-class accuracy on the held-out validation split.
+Checkpoints → `learned_ai/sentinel/checkpoints/` (`best.pt` = lowest val loss, `latest.pt` = last epoch). To retrain from scratch, delete both files. Convergence typically occurs by epoch 1–5 with the Malom DB; 50 epochs is safe.
+
+**Step 2 — Evaluate (trajectory-level)**
+
+```bash
+.venv/bin/python scripts/evaluate_sentinel.py \
+    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+    --game-dir data/human_games \
+    --db-path "/mnt/windows/NMM_DB/Entire DB"
+```
+
+Reports two sections:
+
+- **Trajectory evaluation** — every played move in every decisive game scored and grouped into winning-trajectory (moves by the eventual winner) and losing-trajectory. Metrics: per-trajectory accuracy vs Malom DB, mean sentinel scores, fraction of games where winner's mean score > loser's (game-level polarity).
+- **Flat statistics** — all legal-move candidates per position (matches training distribution): overall accuracy, win/draw/loss breakdown, calibration bins.
+
+Target metrics for a well-trained model: trajectory accuracy ≥ 0.99, game-level polarity ≥ 85%, winner mean ≥ 0.85, loser mean ≈ 0.45–0.50.
 
 **Step 3 — Attach at play time**
 
-Add `--sentinel-checkpoint` to any game launch:
-
-```
-python main.py --sentinel-checkpoint learned\\\_ai/sentinel/checkpoints/best.pt
-```
-
-Or set `sentinel\\\_mode` in `configs/sentinel\\\_default.yaml`:
+Enable via **Settings → Use Sentinel overlay** in the game UI, or set `sentinel_mode` in `configs/sentinel_default.yaml`:
 
 | Mode | Effect |
 | - | - |
-| `advisory` | Logs flags only — never changes moves (default, safe) |
-| `score\\\_adjust` | Nudges heuristic scores by ±`score\\\_adjust\\\_scale` (≤5%) |
-| `reconsider` | Triggers a deeper search when `turning\\\_point\\\_confidence ≥ reconsider\\\_threshold` |
+| `advisory` | Overlay badge only — never changes AI moves (default, safe) |
+| `score_adjust` | Nudges heuristic scores by ±`score_adjust_scale` (≤5%) |
+| `reconsider` | Redirects AI to sentinel's preferred move when gap ≥ `reconsider_threshold` (0.15) |
 
+**Resume training**
 
-**Continuing training / re-training**
-
-```
-\\\# Resume from a checkpoint    
-python scripts/train\\\_sentinel.py \\\\    
-  --config configs/sentinel\\\_default.yaml \\\\    
-  --game-dir data/games \\\\    
-  --resume learned\\\_ai/sentinel/checkpoints/latest.pt \\\\    
-  --epochs 20    
-    
-\\\# Save preprocessed dataset to skip replay next time    
-python scripts/replay\\\_watch\\\_games.py \\\\    
-  --game-dir data/games \\\\    
-  --output supervised\\\_dataset.jsonl    
-python scripts/train\\\_sentinel.py \\\\    
-  --config configs/sentinel\\\_default.yaml \\\\    
-  --dataset supervised\\\_dataset.jsonl
-```
-
-**Tuning the config** (`configs/sentinel\\\_default.yaml`)
-
-```
-epochs: 50          \\\# increase to 100+ when DB supervision is available    
-batch\\\_size: 64    
-lr: 0.001    
-backward\\\_decay: \\\[1.0, 0.8, 0.6, 0.4, 0.2\\\]   \\\# label decay per ply before turning point    
-class\\\_weights:    
-  critical\\\_turning\\\_point: 3.0   \\\# upweight rare turning-point labels    
-  mistake\\\_start: 2.0    
-  missed\\\_opportunity: 2.0    
-  safe\\\_continuation: 0.5    
-  neutral\\\_state: 0.3
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+    --config configs/sentinel_default.yaml \
+    --game-dir data/human_games \
+    --resume learned_ai/sentinel/checkpoints/latest.pt \
+    --epochs 20
 ```
 
 ### External solved database (Malom)
 
-The sentinel uses the Gévay–Danner **Malom Ultra-Strong** perfect-play database as ground-truth supervision during training. The adapter (`ai/malom\\\_db.py`) reads the `.sec2` sector files and returns exact WDL (`W`/`L`/`D`) for any queried position, replacing game-outcome proxy labels with per-position ground truth.
+The sentinel uses the Gévay–Danner **Malom Ultra-Strong** perfect-play database as ground-truth WDL supervision. The adapter (`learned_ai/sentinel/db_teacher.py`) reads `.sec2` sector files and returns exact WDL for any queried position.
 
-**Current status:** fully working. The board→index hash (D4 × ring-swap 16-symmetry canonical form + combinadic ranking) is ported from [Sanmill](https://github.com/calcitem/Sanmill). Hash count validated: 210,140 entries in `std\\\_3\\\_3\\\_0\\\_0.sec2` ✓. All 498 sectors in the full database are queryable. Supervision source is `direct\\\_solved` (not proxy) for every position the DB covers.
-
-**Database location**
-
-Download the Malom Standard Ultra-strong v1.1.0 database from the Malom project (ggevay/malom, GPL-3) and extract the `Std\\\_DD\\\_89adjusted/` directory.
+**Download:** Malom Standard Ultra-strong v1.1.0 (`ggevay/malom`, GPL-3). Extract the `Std_DD_89adjusted/` directory.
 
 ```
-Std\\\_DD\\\_89adjusted/    
-  std\\\_3\\\_3\\\_0\\\_0.sec2   ← one file per (W, B, WF, BF) sector    
-  std\\\_3\\\_4\\\_0\\\_0.sec2    
-  std.secval          ← virtual win/loss thresholds    
-  ...                 (498 sector files total)
+Std_DD_89adjusted/
+  std_3_3_0_0.sec2   ← one file per (W, B, WF, BF) sector
+  std_3_4_0_0.sec2
+  std.secval          ← win/loss thresholds
+  ...                (498 sector files total)
 ```
 
-Update `configs/sentinel\\\_default.yaml` to point at the extracted directory:
+Update `configs/sentinel_default.yaml`:
 
+```yaml
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
 ```
-external\\\_db\\\_path: "/mnt/windows/NMM\\\_DB/Malom\\\_Standard\\\_Ultra-strong\\\_1.1.0/Std\\\_DD\\\_89adjusted"    
-external\\\_db\\\_enabled: true
-```
 
-With the DB enabled, every position in the training set that appears in any sector is labelled with exact WDL from perfect play rather than inferred from the game outcome. This dramatically improves label quality for positions that were decided long before the game ended.
+With the DB enabled, 83%+ of training labels are exact WDL from perfect play, dramatically improving label quality for positions decided well before the game ended. The board→index hash uses D4 × ring-swap 16-symmetry canonical form + combinadic ranking, ported from [Sanmill](https://github.com/calcitem/Sanmill). All 498 sectors are queryable.
 
-See [`sentinel\\\_overlay\\\_plan.md`](file:///home/benbrandwood/Documents/dev/NMM_ollama/sentinel_overlay_plan.md) for full design, feature layout, label scheme, and training pipeline details.
+See `docs/DATABASES.md` for a full reference on all databases used by the AI.
+
 
 ## Board Coordinate System
 

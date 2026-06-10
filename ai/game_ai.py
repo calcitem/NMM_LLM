@@ -24,7 +24,7 @@ class _SearchAbort(Exception):
 
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_all_legal_moves, is_terminal
-from .heuristics import INF, evaluate, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert
+from .heuristics import INF, evaluate, clear_eval_cache, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert, _closeable_mills
 from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
@@ -190,7 +190,7 @@ def _squeeze_targets(board: BoardState) -> set[str]:
     return targets
 
 
-def _order_moves(board: BoardState, moves: list, killers=None, history=None) -> list:
+def _order_moves(board: BoardState, moves: list, killers=None, history=None, _is_beginner: bool = False) -> list:
     """Sort moves so the most urgent are tried first (better alpha-beta pruning).
 
     Priority 0 — close own mill (immediate win/capture) OR create a fork
@@ -247,7 +247,8 @@ def _order_moves(board: BoardState, moves: list, killers=None, history=None) -> 
     # complete a second mill sharing a square with an already-closed opponent mill.
     # Two interconnected cycling mills are nearly unbeatable; block the second formation
     # with the same urgency as blocking any direct mill threat.
-    if get_game_phase(board, color) == "place":
+    # B-95: skip complex ordering heuristics at beginner difficulty.
+    if not _is_beginner and get_game_phase(board, color) == "place":
         block |= set(_dual_connected_mill_alert(board, opp))
 
     if not close and not block and not killer_set and not history:
@@ -257,8 +258,9 @@ def _order_moves(board: BoardState, moves: list, killers=None, history=None) -> 
     # Only computed in move phase when there are no direct mill closes (P0) — those
     # dominate regardless, and the extra apply_move calls would be wasted.
     # Covers all 16 MILLS (not just inner ring): any sealed pattern is elevated.
+    # B-95: skip at beginner difficulty.
     sealed_creates: set = set()  # stores (from, to) tuples
-    if get_game_phase(board, color) == "move" and not close:
+    if not _is_beginner and get_game_phase(board, color) == "move" and not close:
         sealed_before = _sealed_two_configs(board, color)
         if sealed_before < len(MILLS):  # skip if already at max — nothing to gain
             for m in moves:
@@ -408,6 +410,7 @@ class GameAI:
         self.difficulty = max(1, min(10, difficulty))
         self.blunder_probability = max(0.0, min(1.0, blunder_probability))
         self._weights: HeuristicWeights = weights if weights is not None else DEFAULT_WEIGHTS
+        self._beginner_weights: HeuristicWeights | None = None  # lazily built in _is_beginner
         self._fullgame_db = fullgame_db
         self._endgame_solved_db = endgame_solved_db
         self._malom_db = malom_db
@@ -460,7 +463,7 @@ class GameAI:
         # score_adjust scale + reconsider threshold: read from the advisor's config
         # when present (set in set_sentinel), else fall back to documented defaults.
         self._sentinel_score_scale: float = 0.05
-        self._sentinel_reconsider_threshold: float = 0.8
+        self._sentinel_reconsider_threshold: float = 0.15
         # Optional LLM move recommender for reconsider mode. The LLM lives in the
         # Coordinator, not in GameAI, so it is injected as a callback to avoid
         # duplicating any LLM logic here. Signature: fn(board, legal_moves) -> move|None.
@@ -475,6 +478,14 @@ class GameAI:
         # When True, the AI uses the Malom perfect DB (via _db_score_adjust) instead of
         # the sentinel model for move selection.  Probability gating still applies.
         self.use_perfect_db: bool = False
+        # When True, feeder_diamond and capture_creates_diamond are zeroed in
+        # _active_weights() to prevent the AI from always playing fork-creating
+        # placements. Set randomly per game (~50%) by the web server for variety.
+        # Within such games, suppression fires on ~50% of individual moves
+        # (_suppress_fork_this_move is re-rolled each choose_move() call).
+        self.suppress_fork_variety: bool = False
+        self._suppress_fork_this_move: bool = False
+        self._variety_weights: HeuristicWeights | None = None  # lazily built
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -501,6 +512,35 @@ class GameAI:
             _logger.info("[GameAI] Sentinel overlay loaded in %s mode.", self.sentinel_mode)
         except Exception:
             pass
+
+    @property
+    def _is_beginner(self) -> bool:
+        return self.difficulty <= 2
+
+    def _active_weights(self) -> HeuristicWeights:
+        """Return weights adjusted for difficulty and per-game/per-move variety suppression."""
+        _suppress = self.suppress_fork_variety and self._suppress_fork_this_move
+        if not self._is_beginner and not _suppress:
+            return self._weights
+        if self._is_beginner and self._beginner_weights is None:
+            import dataclasses
+            self._beginner_weights = dataclasses.replace(
+                self._weights,
+                fork_anticipation=0,
+                black_fork_anticipation_early=0,
+                defer_for_chain=0,
+            )
+        base = self._beginner_weights if self._is_beginner else self._weights
+        if not _suppress:
+            return base
+        if self._variety_weights is None:
+            import dataclasses
+            self._variety_weights = dataclasses.replace(
+                base,
+                feeder_diamond=0,
+                capture_creates_diamond=0,
+            )
+        return self._variety_weights
 
     def set_llm_move_fn(self, fn) -> None:
         """Inject an LLM move recommender for reconsider mode.
@@ -639,6 +679,12 @@ class GameAI:
                 f"(played_q={advice.played_move_quality:.0%}, "
                 f"new_q={scores[best_i]:.0%})"
             )
+            _logger.info(
+                "[Sentinel] intervened: engine intended %s → redirected to %s "
+                "(type: score_adjust, gap: %.2f)",
+                self._move_notation(move), self._move_notation(new_move),
+                advice.opportunity_gap,
+            )
             return new_move
         return move
 
@@ -647,12 +693,13 @@ class GameAI:
     ) -> dict:
         """reconsider mode: act on a meaningful opportunity gap.
 
-        When ``opportunity_gap > 0.3`` the chosen move is materially worse than
-        the sentinel's best alternative. Prefer an LLM recommendation when one is
-        available; otherwise fall back to the sentinel's best move.
+        When ``opportunity_gap > reconsider_threshold`` the chosen move is
+        materially worse than the sentinel's best alternative. Prefer an LLM
+        recommendation when one is available; otherwise fall back to the
+        sentinel's best move.
         """
         gap = float(getattr(advice, "opportunity_gap", 0.0))
-        if gap <= 0.3:
+        if gap <= self._sentinel_reconsider_threshold:
             return move
 
         # 1. Try the LLM first (reuses the Coordinator's recommender via callback).
@@ -667,6 +714,11 @@ class GameAI:
                 advice.intervention_detail = (
                     f"LLM override — {advice.advisory_message} (gap={gap:.0%})"
                 )
+                _logger.info(
+                    "[Sentinel] intervened: engine intended %s → redirected to %s "
+                    "(type: llm_override, gap: %.2f)",
+                    self._move_notation(move), self._move_notation(llm_move), gap,
+                )
                 return llm_move
 
         # 2. LLM unavailable → take the sentinel's best-scoring candidate.
@@ -678,6 +730,11 @@ class GameAI:
                 advice.intervention_applied = "sentinel_best"
                 advice.intervention_detail = (
                     f"Sentinel best move — {advice.advisory_message} (gap={gap:.0%})"
+                )
+                _logger.info(
+                    "[Sentinel] intervened: engine intended %s → redirected to %s "
+                    "(type: sentinel_best, gap: %.2f)",
+                    self._move_notation(move), self._move_notation(best_move), gap,
                 )
                 return best_move
         return move
@@ -715,6 +772,12 @@ class GameAI:
                     if score > best_score:
                         best_score = score
                         best_move  = m
+            if best_move != move:
+                _logger.info(
+                    "[Sentinel] DB override: engine intended %s → redirected to %s "
+                    "(type: db_score_adjust, best_wdl_score: %d)",
+                    self._move_notation(move), self._move_notation(best_move), best_score,
+                )
             return best_move
         except Exception:
             return move
@@ -761,6 +824,9 @@ class GameAI:
         self._force_stop = False
         self._deadline   = math.inf  # reset any prior force_stop() effect
         self.last_thinking = ""       # reset thinking trace
+        if self.suppress_fork_variety:
+            import random as _r
+            self._suppress_fork_this_move = _r.random() < 0.5
         self._tt.clear()
         self._killers = [[None, None] for _ in range(32)]
         self._history = {}
@@ -910,9 +976,21 @@ class GameAI:
                         and not any(board.positions.get(p) == board.turn for p in _ml if p != m["to"])
                     ) >= 2
                 ]
-                # Junction-rescue moves go to the FRONT of the list so they are
-                # always evaluated before the search deadline fires mid-depth.
-                moves = _rescued + non_dead
+                # Setup-rescue: also allow dead placements that gain a new
+                # closeable 2-config — the placed piece is immobile but anchors a
+                # mill that a different piece can close (e.g. placing at b2 with
+                # d2=own means d2 can close b2-d2-f2 without b2 ever moving).
+                _own = board.turn
+                _cb_rescue = _closeable_mills(board, _own)
+                _setup_rescued = [
+                    m for m in moves
+                    if m.get("from") is None and _is_dead_placement(board, m)
+                    and m not in _rescued
+                    and _closeable_mills(board.apply_move(m), _own) > _cb_rescue
+                ]
+                # Junction-rescue goes first (blocking priority), setup-rescue
+                # second; both evaluated before the search deadline fires.
+                moves = _rescued + _setup_rescued + non_dead
             else:
                 # All placements are dead (late placement phase, board is packed).
                 # Secondary filter: prefer squares with surviving mill potential —
@@ -950,7 +1028,8 @@ class GameAI:
         # 2-config when the opponent has an adjacent piece ready to slide in.
         # Harder constraint than fly-phase (adjacency required) but same spirit:
         # vacating the square hands the opponent an immediate mill closure.
-        if get_game_phase(board, self.color) == "move":
+        # B-95: skip pin rules at difficulty ≤ 1 so the AI can blunder into traps.
+        if get_game_phase(board, self.color) == "move" and self.difficulty > 1:
             pinned = _pinned_move_squares(board, self.color)
             if pinned:
                 # Mill-closing exemption: allow departure from a pinned square when
@@ -1329,7 +1408,7 @@ class GameAI:
         if moves is None:
             moves = get_all_legal_moves(board)
         killers = self._killers[depth] if depth < 32 else None
-        moves = _order_moves(board, moves, killers, self._history)
+        moves = _order_moves(board, moves, killers, self._history, _is_beginner=self._is_beginner)
 
         # Phase 4: promote top trajectory-line moves to the front of the root list.
         # Sort is stable: top-trajectory moves come first, existing order preserved within each tier.
@@ -1372,7 +1451,7 @@ class GameAI:
             # (score near INF via endgame DB or terminal).  Bonuses would otherwise favour
             # cycling moves over mill-closing captures, preventing actual conversion.
             if abs(score_raw) < INF // 2:
-                score = score_raw + tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+                score = score_raw + tactical_move_bonus(board, nb, self.color, self._active_weights(), self._opp_last_weak)
             else:
                 score = score_raw
             if top_n > 1:
@@ -1516,7 +1595,7 @@ class GameAI:
         # Sort at upper levels only — biggest benefit to alpha-beta, negligible overhead
         if depth >= 2:
             killers = self._killers[depth] if depth < 32 else None
-            moves = _order_moves(board, moves, killers, self._history)
+            moves = _order_moves(board, moves, killers, self._history, _is_beginner=self._is_beginner)
 
         # SE-11b/11c: classify node and prepare trajectory/VN extension state.
         is_opp_node = (board.turn != self.color)
@@ -1710,7 +1789,7 @@ class GameAI:
             try:
                 score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _MAX_OPP_PLIES, 1)
                 if abs(score) < INF // 2:
-                    score += tactical_move_bonus(board, nb, self.color, self._weights, self._opp_last_weak)
+                    score += tactical_move_bonus(board, nb, self.color, self._active_weights(), self._opp_last_weak)
                 self._move_path_buf.pop()
                 results.append((move, score))
             except _SearchAbort:
@@ -1801,6 +1880,7 @@ class GameAI:
         """
         _ASP_MARGIN = 175
         self._deadline = time.time() + time_limit
+        clear_eval_cache()  # SE-12: fresh cache per depth iteration
         if moves is None:
             moves = get_all_legal_moves(board)
         best_move     = moves[0]

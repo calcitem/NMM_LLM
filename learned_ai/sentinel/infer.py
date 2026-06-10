@@ -53,11 +53,11 @@ class SentinelAdvice:
 
 def _advisory_message(played_quality: float, opportunity_gap: float) -> str:
     """Map (played move quality, opportunity gap) to an advisory label."""
-    if played_quality < 0.3 and opportunity_gap >= 0.3:
+    if played_quality < 0.4 and opportunity_gap >= 0.2:
         return "critical"
-    if opportunity_gap >= 0.2 and played_quality >= 0.4:
+    if opportunity_gap >= 0.15 and played_quality >= 0.4:
         return "missed_opportunity"
-    if opportunity_gap >= 0.1 and played_quality < 0.4:
+    if opportunity_gap >= 0.08 and played_quality < 0.4:
         return "possible_mistake"
     return "safe"
 

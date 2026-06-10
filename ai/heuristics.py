@@ -7,9 +7,22 @@ Positive = good for color, negative = bad.
 
 from __future__ import annotations
 import math
+import threading
 from dataclasses import dataclass, field
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_game_phase, is_terminal
+
+# SE-12: thread-local eval cache — keyed by (hash_key, color_bit, id(weights), force_aggressive).
+# Only active when endgame_state is None and strength_mode is False.
+# Bounded at _EVAL_CACHE_LIMIT entries; cleared per _iterative_deepen call.
+_eval_local = threading.local()
+_EVAL_CACHE_LIMIT = 100_000
+
+
+def clear_eval_cache() -> None:
+    """Clear this thread's eval cache (call at the start of each _iterative_deepen)."""
+    if hasattr(_eval_local, "cache"):
+        _eval_local.cache.clear()
 
 
 @dataclass
@@ -86,6 +99,8 @@ class HeuristicWeights:
     near_dead_placement_penalty: int = 400  # penalty for 1 free adjacent square
     # ── B-40: Self-cycle-lost penalty ────────────────────────────────────────
     # Uses cycling_mill weight — no separate field needed (mirrors cycling_gain).
+    # ── Cycling-exit unguard penalty ─────────────────────────────────────────
+    cycling_exit_unguard: int = 200  # penalty for vacating the only free exit of an opp closed mill when own move doesn't close/capture
     # ── B-33: Forcing placement quality ──────────────────────────────────────
     dead_block_bonus: int = 60   # bonus per new own 2-config whose closing sq is a corner
                                  # node (2 connections) — opponent is forced to a passive sq
@@ -234,6 +249,20 @@ def evaluate(
         if strength_mode:
             return 1.0 if winner == color else -1.0
         return INF if winner == color else -INF
+
+    # SE-12: thread-local eval cache.  Skip for strength_mode (tanh-normalized),
+    # when endgame_state is active (extra term added to score), and when hash_key
+    # is 0 (directly-constructed boards without a proper Zobrist initialization).
+    _use_cache = not strength_mode and endgame_state is None and board.hash_key != 0
+    if _use_cache:
+        _cache_key = (board.hash_key, 0 if color == "W" else 1, id(weights), force_aggressive)
+        _cache = getattr(_eval_local, "cache", None)
+        if _cache is None:
+            _eval_local.cache = {}
+            _cache = _eval_local.cache
+        _cached = _cache.get(_cache_key)
+        if _cached is not None:
+            return _cached
 
     opp   = "B" if color == "W" else "W"
     phase = get_game_phase(board, color)
@@ -473,6 +502,10 @@ def evaluate(
     if strength_mode:
         scale = _STRENGTH_SCALE.get(phase, 1500.0)
         return math.tanh(total / scale)
+    if _use_cache:
+        if len(_cache) >= _EVAL_CACHE_LIMIT:
+            _cache.clear()
+        _cache[_cache_key] = total
     return total
 
 
@@ -2148,6 +2181,25 @@ def tactical_move_bonus(
         closeable_gained = max(0, _closeable_mills(after, color) - _closeable_mills(before, color))
         setup_mill_bonus = int(weights.setup_mill * 1.3) * closeable_gained
 
+    # B-97: 2-config dissolution penalty — penalise movement moves that vacate a
+    # square belonging to the AI's own closeable 2-config without closing a mill.
+    # Symmetric to setup_mill_bonus; sized similarly (~weights.setup_mill).
+    dissolution_penalty = 0
+    non_closeable_penalty = 0
+    if before_phase == "move":
+        mills_closed_this_move = max(0, _closed_mills(after, color) - _closed_mills(before, color))
+        if mills_closed_this_move == 0:
+            _closeable_b = _closeable_mills(before, color)
+            _closeable_a = _closeable_mills(after, color)
+            closeable_lost = max(0, _closeable_b - _closeable_a)
+            dissolution_penalty = int(weights.setup_mill * 1.2) * closeable_lost
+            # B-98: penalise creating a non-closeable 2-config (2-config where the
+            # closing square is permanently blocked — no own piece can reach it).
+            before_nc = max(0, own_two_before - _closeable_b)
+            after_nc  = max(0, own_two_after  - _closeable_a)
+            nc_gained = max(0, after_nc - before_nc)
+            non_closeable_penalty = 60 * nc_gained
+
     # B-59: root-level bonus for moves that create a new sealed 2-config.
     # Supplements the static eval term so the AI selects sealed-threat-creating
     # moves decisively at the root.  Only fires in move phase; covers all MILLS.
@@ -2155,6 +2207,41 @@ def tactical_move_bonus(
     if before_phase == "move":
         sealed_gained = max(0, _sealed_two_configs(after, color) - _sealed_two_configs(before, color))
         sealed_setup_bonus = int(weights.close_mill * 0.75) * sealed_gained
+
+    # B-92: relay bonus — reward moves that make a sealed 2-config closeable in
+    # one more step.  A "sealed" 2-config already has no opponent adjacent to the
+    # closing square; when the moved piece lands adjacent to that square (a relay
+    # position), the mill is a guaranteed close next turn.  This is stronger than
+    # a generic closeable gain, so it gets a separate larger bonus.
+    # Guard: suppress when self_cycle_lost > 0 to avoid cancelling the B-40 penalty.
+    relay_seal_bonus = 0
+    if before_phase == "move" and self_cycle_lost == 0:
+        # Find squares where own piece just arrived (after but not before).
+        new_own_sq = next(
+            (sq for sq in POSITIONS
+             if after.positions[sq] == color and before.positions[sq] != color),
+            None,
+        )
+        if new_own_sq is not None:
+            for _mill in MILLS:
+                _vals_b = [before.positions[p] for p in _mill]
+                _vals_a = [after.positions[p]  for p in _mill]
+                # 2-config BEFORE the move (sealed), closing square not yet reachable
+                if (_vals_b.count(color) == 2 and _vals_b.count("") == 1):
+                    _closing = next(p for p in _mill if before.positions[p] == "")
+                    _mill_set = set(_mill)
+                    _was_closeable = any(
+                        before.positions[nb] == color
+                        for nb in ADJACENCY[_closing] if nb not in _mill_set
+                    )
+                    # Was sealed (no opponent adjacent to closing) but not yet closeable
+                    _was_sealed = all(
+                        before.positions[nb] != opp for nb in ADJACENCY[_closing]
+                    )
+                    if (not _was_closeable and _was_sealed
+                            and new_own_sq not in _mill_set
+                            and new_own_sq in ADJACENCY.get(_closing, [])):
+                        relay_seal_bonus += int(weights.close_mill * 0.6)
 
     # B-39: penalise creating a (own, own, opp) dead-mill pattern.
     # Two own pieces in a mill already blocked by an opponent piece can never close
@@ -2194,6 +2281,40 @@ def tactical_move_bonus(
                 mill_open_bonus = raw_open_bonus
         else:
             mill_open_bonus = raw_open_bonus
+
+    # Cycling-exit unguard penalty: fires when own piece vacates the only free
+    # exit square of an opponent closed mill, on a move that neither closes own
+    # mill nor captures.  Before the move the piece was blocking the exit (opponent
+    # mill-piece had no free non-mill neighbour); after, the exit is open and the
+    # opponent can cycle (slide out → capture → slide back).
+    cycling_exit_unguard_penalty = 0
+    _no_capture_ceu = after.pieces_on_board[opp] == before.pieces_on_board[opp]
+    # Exception: if own side already has a closeable mill elsewhere, the move may be
+    # justified (trading guard for own mill closure next turn is acceptable).
+    _has_own_closeable = _closeable_mills(after, color) > 0
+    if before_phase == "move" and _no_capture_ceu and mills_delta == 0 and not _has_own_closeable:
+        _from_sq_ceu = next(
+            (p for p in POSITIONS if before.positions[p] == color and after.positions[p] != color),
+            None,
+        )
+        if _from_sq_ceu is not None:
+            for _mill_ceu in MILLS:
+                if not all(before.positions[p] == opp for p in _mill_ceu):
+                    continue
+                for _mp in _mill_ceu:
+                    if _from_sq_ceu not in ADJACENCY.get(_mp, []):
+                        continue
+                    # Was from_sq the only available exit for this mill piece?
+                    _mill_set = set(_mill_ceu)
+                    _other_free = [
+                        nb for nb in ADJACENCY[_mp]
+                        if nb not in _mill_set and before.positions[nb] == ""
+                    ]
+                    if not _other_free:
+                        cycling_exit_unguard_penalty = weights.cycling_exit_unguard
+                        break
+                if cycling_exit_unguard_penalty:
+                    break
 
     capture_this_move = after.pieces_on_board[opp] < before.pieces_on_board[opp]
 
@@ -3025,8 +3146,12 @@ def tactical_move_bonus(
         ("Cardinal/cross control",         _cardinal_w * (our_cross_gained + opp_cross_lost)),
         ("Early scatter placement",        scatter),
         ("Setup mill (2-config gained)",   setup_mill_bonus),
+        ("2-config dissolution (B-97)",    -dissolution_penalty),
+        ("Non-closeable 2-config (B-98)", -non_closeable_penalty),
         ("Sealed 2-config bonus (B-59)",   sealed_setup_bonus),
+        ("Relay seal bonus (B-92)",        relay_seal_bonus),
         ("Mill opening bonus",             mill_open_bonus),
+        ("Cycling-exit unguard penalty",   -cycling_exit_unguard_penalty),
         ("Patience forcing",               patience_forcing_bonus),
         ("Late placement mill",            late_mill_bonus),
         ("Mill trap builder",              trap_build_bonus),

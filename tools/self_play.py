@@ -394,6 +394,7 @@ def _run_llm_game(
     black_ai: GameAI,
     settings: dict,
     verbose: bool = False,
+    game_dir: Path | None = None,
 ) -> dict:
     """
     Play one game using the Coordinator for the primary (White) AI.
@@ -406,7 +407,7 @@ def _run_llm_game(
     url   = settings.get("ollama_url",   "http://localhost:11434")
     model = settings.get("ollama_model", "llama3.1:8b")
 
-    _llm_self_play_dir = ROOT / "data" / "games" / "self_play"
+    _llm_self_play_dir = Path(game_dir) if game_dir else ROOT / "data" / "games" / "self_play"
     _llm_self_play_dir.mkdir(parents=True, exist_ok=True)
     mem  = MemoryManager(
         ollama_url=url, ollama_model=model,
@@ -513,6 +514,9 @@ def main() -> None:
                         help="Use LLM to name any novel openings discovered during the run")
     parser.add_argument("--parallel", "-p",  type=int,   default=1,   metavar="N",
                         help="Run N games simultaneously across CPU cores (fast mode only, default: 1)")
+    parser.add_argument("--game-dir",         type=Path,
+                        default=ROOT / "data" / "games" / "self_play",
+                        help="Directory to write game records (default: data/games/self_play)")
     parser.add_argument("--personalities",    type=str,   default=None, metavar="LIST",
                         help="Comma-separated personality pool drawn randomly each game "
                              "(default: balanced,aggressive,defensive,positional,scholar)")
@@ -520,6 +524,13 @@ def main() -> None:
                         help="Fix White to this personality for every game")
     parser.add_argument("--black-personality", type=str,  default=None, metavar="NAME",
                         help="Fix Black to this personality for every game")
+    parser.add_argument("--random-difficulty", action="store_true",
+                        help="Pick random difficulty for each side each game "
+                             "(overrides --white/--black)")
+    parser.add_argument("--min-difficulty", type=int, default=1, metavar="D",
+                        help="Lower bound for random difficulty (default: 1)")
+    parser.add_argument("--max-difficulty", type=int, default=9, metavar="D",
+                        help="Upper bound for random difficulty (default: 9)")
     parser.add_argument("--verbose",  "-v",  action="store_true",
                         help="Print each move with board display and per-move timing")
     args = parser.parse_args()
@@ -530,6 +541,13 @@ def main() -> None:
     b_diff    = max(1, min(10, args.black))
     use_llm   = not args.no_llm
     n_workers = max(1, args.parallel)
+    _diff_min = max(1, min(10, args.min_difficulty))
+    _diff_max = max(_diff_min, min(10, args.max_difficulty))
+
+    def _pick_diff() -> tuple[int, int]:
+        if args.random_difficulty:
+            return random.randint(_diff_min, _diff_max), random.randint(_diff_min, _diff_max)
+        return w_diff, b_diff
 
     if n_workers > 1 and use_llm:
         print("Note: --parallel is only available in fast mode (--no-llm). Ignoring --parallel.")
@@ -567,7 +585,10 @@ def main() -> None:
 
     print(f"\nNine Men's Morris — Self-Play Training")
     print(f"  Games:       {n_games}")
-    print(f"  White diff:  {w_diff}  |  Black diff: {b_diff}")
+    if args.random_difficulty:
+        print(f"  Difficulty:  random {_diff_min}–{_diff_max} per game")
+    else:
+        print(f"  White diff:  {w_diff}  |  Black diff: {b_diff}")
     print(f"  Mode:        {'LLM commentary' if use_llm else 'fast (no LLM)'}")
     print(f"  Blunder:     {args.blunder:.0%}  |  Swap colours: {args.swap}")
     if fixed_w or fixed_b:
@@ -597,9 +618,7 @@ def main() -> None:
     total_time  = 0.0
     all_records: list[dict] = []
 
-    # Self-play games go to data/games/self_play/ — separate from human games
-    # so the opening book and human game context stay clean.
-    _SELF_PLAY_DIR = ROOT / "data" / "games" / "self_play"
+    _SELF_PLAY_DIR = Path(args.game_dir)
     _SELF_PLAY_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── Shared objects for sequential fast mode ───────────────────────────────
@@ -625,10 +644,9 @@ def main() -> None:
         # Build worker params for every game upfront
         worker_params: list[dict] = []
         for game_num in range(1, n_games + 1):
+            wd, bd = _pick_diff()
             if args.swap and game_num % 2 == 0:
-                wd, bd = b_diff, w_diff
-            else:
-                wd, bd = w_diff, b_diff
+                wd, bd = bd, wd
             wp, bp = _pick_pair()
             worker_params.append({
                 "game_num":         game_num,
@@ -682,10 +700,9 @@ def main() -> None:
     # ── Sequential mode (fast or LLM) ────────────────────────────────────────
     else:
         for game_num in range(1, n_games + 1):
+            wd, bd = _pick_diff()
             if args.swap and game_num % 2 == 0:
-                wd, bd = b_diff, w_diff
-            else:
-                wd, bd = w_diff, b_diff
+                wd, bd = bd, wd
 
             wp, bp = _pick_pair()
             w_blunder = args.blunder if args.blunder > 0 else None
@@ -693,13 +710,14 @@ def main() -> None:
             black_ai  = _make_ai("B", bd, bp)
 
             t0 = time.perf_counter()
-            print(f"  Game {game_num:3d}/{n_games}  W:{wp} vs B:{bp} …")
+            print(f"  Game {game_num:3d}/{n_games}  W:{wp}(d{wd}) vs B:{bp}(d{bd}) …")
             if args.verbose:
                 print()
 
             try:
                 if use_llm:
-                    record = _run_llm_game(white_ai, black_ai, settings, verbose=args.verbose)
+                    record = _run_llm_game(white_ai, black_ai, settings, verbose=args.verbose,
+                                           game_dir=_SELF_PLAY_DIR)
                     record.setdefault("white_personality", wp)
                     record.setdefault("black_personality", bp)
                 else:
@@ -764,7 +782,7 @@ def main() -> None:
     print(f"  Avg time   : {avg_t:.1f}s / game  (wall clock)")
     print(f"  Total time : {total_time:.0f}s")
     print()
-    print(f"  Game records  → data/games/self_play/")
+    print(f"  Game records  → {_SELF_PLAY_DIR}")
 
     # ── Optional LLM batch summary ────────────────────────────────────────────
     if args.summary and all_records:

@@ -1086,7 +1086,7 @@ function handleMessage(msg) {
           }
 
           // Commentary line whenever there's a non-trivial opportunity gap.
-          if (s.advisory_message !== "safe" || gapPct > 15) {
+          if (s.advisory_message !== "safe" || gapPct > 10) {
             addCommentary(
               "Sentinel",
               `${player} · ${(s.advisory_message || "safe").replace(/_/g, " ")} · move quality ${qualityPct}% · gap ${gapPct}%`,

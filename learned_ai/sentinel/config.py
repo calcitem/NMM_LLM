@@ -41,7 +41,7 @@ class SentinelConfig:
     # ── Runtime ──────────────────────────────────────────────────────────────
     sentinel_mode: str = "advisory"            # "advisory" | "score_adjust" | "reconsider"
     score_adjust_scale: float = 0.05           # reserved tunable for score_adjust mode
-    reconsider_threshold: float = 0.3          # opportunity_gap to trigger reconsider
+    reconsider_threshold: float = 0.15         # opportunity_gap to trigger reconsider
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SentinelConfig":

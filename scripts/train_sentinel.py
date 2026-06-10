@@ -97,6 +97,8 @@ def main() -> int:
     p.add_argument("--epochs", type=int, default=None)
     p.add_argument("--device", default="cpu")
     p.add_argument("--limit", type=int, default=None, help="max game files")
+    p.add_argument("--decisive-only", action="store_true",
+                   help="Exclude draw/unknown games; train only on win/loss outcomes")
     args = p.parse_args()
 
     config = load_config(args.config)
@@ -142,6 +144,7 @@ def main() -> int:
             config=config,
             seed=config.seed,
             limit=args.limit,
+            decisive_only=args.decisive_only,
         )
         n = len(train_ds)
         if n == 0:

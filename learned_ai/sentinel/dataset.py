@@ -219,19 +219,29 @@ class SentinelDataset(_TorchDataset):
         config=None,
         limit: Optional[int] = None,
         paths: Optional[List[str]] = None,
+        decisive_only: bool = False,
     ) -> "SentinelDataset":
-        """Build a dataset by replaying ``*.jsonl`` files in ``game_dir``."""
+        """Build a dataset by replaying ``*.jsonl`` files in ``game_dir``.
+
+        decisive_only: skip games with no winner (draws/unknowns).
+        """
         if paths is None:
             paths = sorted(glob.glob(os.path.join(game_dir, "**", "*.jsonl"), recursive=True))
         if limit is not None:
             paths = paths[:limit]
         all_examples: List[MoveExample] = []
+        skipped = 0
         for path in paths:
             for record in _iter_game_records(path):
+                if decisive_only and record.get("winner") is None:
+                    skipped += 1
+                    continue
                 try:
                     all_examples.extend(examples_from_game(record, db=db))
                 except Exception as exc:
                     logger.warning("[SentinelDataset] failed on %s: %s", path, exc)
+        if decisive_only and skipped:
+            logger.info("[SentinelDataset] skipped %d draw/unknown games (decisive_only)", skipped)
         logger.info(
             "[SentinelDataset] loaded %d move examples from %d files",
             len(all_examples), len(paths),
@@ -247,6 +257,7 @@ class SentinelDataset(_TorchDataset):
         config=None,
         seed: int = 42,
         limit: Optional[int] = None,
+        decisive_only: bool = False,
     ) -> "Tuple[SentinelDataset, SentinelDataset]":
         """Return (train, val) split at the game-file level (no per-ply leakage)."""
         import random as _random
@@ -259,8 +270,8 @@ class SentinelDataset(_TorchDataset):
         n_val = max(1, int(len(shuffled) * val_fraction))
         val_paths = shuffled[:n_val]
         train_paths = shuffled[n_val:]
-        train_ds = cls.load_from_games(game_dir, db=db, config=config, paths=train_paths)
-        val_ds = cls.load_from_games(game_dir, db=db, config=config, paths=val_paths)
+        train_ds = cls.load_from_games(game_dir, db=db, config=config, paths=train_paths, decisive_only=decisive_only)
+        val_ds = cls.load_from_games(game_dir, db=db, config=config, paths=val_paths, decisive_only=decisive_only)
         logger.info(
             "[SentinelDataset] game-level split: %d train games / %d val games → %d / %d examples",
             len(train_paths), len(val_paths), len(train_ds), len(val_ds),

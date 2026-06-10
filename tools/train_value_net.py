@@ -56,18 +56,20 @@ def fen_to_board(fen: str) -> BoardState:
 
 # ── Dataset extraction ────────────────────────────────────────────────────────
 
-def extract_samples(games_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+def extract_samples(games_dirs: list[Path], decisive_only: bool = False) -> tuple[np.ndarray, np.ndarray, int]:
     """
-    Read all JSONL files and build feature matrix X and label vector y.
+    Read all JSONL files from one or more directories and build feature matrix X and label vector y.
 
     For each position in a game:
       color  = board.turn (the player about to move)
       label  = +1.0 if color wins, -1.0 if color loses, 0.0 for draw/unknown.
-    Features are encoded from color's perspective so the network is side-invariant.
+
+    decisive_only: if True, skip games with no winner (draws/unknowns) entirely.
     """
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
-    files = sorted(games_dir.rglob("game_*.jsonl"))
+    files = sorted({f for d in games_dirs for f in d.rglob("*.jsonl")})
+    skipped = 0
 
     for fpath in files:
         try:
@@ -77,6 +79,9 @@ def extract_samples(games_dir: Path) -> tuple[np.ndarray, np.ndarray]:
         winner = record.get("winner")          # "W", "B", or None
         moves  = record.get("moves", [])
         if not moves:
+            continue
+        if decisive_only and winner is None:
+            skipped += 1
             continue
 
         for entry in moves:
@@ -99,13 +104,17 @@ def extract_samples(games_dir: Path) -> tuple[np.ndarray, np.ndarray]:
             X_list.append(board_to_features(board, color))
             y_list.append(label)
 
+    if decisive_only and skipped:
+        print(f"  Skipped {skipped} draw/unknown games.")
+
     if not X_list:
-        print("No training samples found.  Ensure data/games/ contains JSONL files.")
+        dirs_label = ", ".join(str(d) for d in games_dirs)
+        print(f"No training samples found.  Ensure these directories contain JSONL files: {dirs_label}")
         sys.exit(1)
 
     X = np.stack(X_list).astype(np.float32)
     y = np.array(y_list, dtype=np.float32)
-    return X, y
+    return X, y, len(files)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -118,18 +127,21 @@ def main() -> None:
                         help="Learning rate (default: 0.001)")
     parser.add_argument("--batch-size",type=int,   default=256,
                         help="Mini-batch size (default: 256)")
-    parser.add_argument("--games-dir", type=Path,
-                        default=_ROOT / "data" / "games",
-                        help="Directory containing game_*.jsonl files")
+    parser.add_argument("--games-dir", type=Path, nargs='+',
+                        default=[_ROOT / "data" / "games"],
+                        help="One or more directories containing *.jsonl files")
     parser.add_argument("--output",    type=Path,
                         default=_ROOT / "data" / "value_net.npz",
                         help="Output .npz path")
+    parser.add_argument("--decisive-only", action="store_true",
+                        help="Exclude draw/unknown games; train only on win/loss outcomes")
     args = parser.parse_args()
 
-    print(f"Loading game records from {args.games_dir} ...")
-    X, y = extract_samples(args.games_dir)
+    dirs_str = ", ".join(str(d) for d in args.games_dir)
+    print(f"Loading game records from {dirs_str} ...")
+    X, y, n_files = extract_samples(args.games_dir, decisive_only=args.decisive_only)
     N = len(X)
-    print(f"  {N} positions extracted from {len(list(args.games_dir.rglob('game_*.jsonl')))} games.")
+    print(f"  {N} positions extracted from {n_files} games.")
 
     label_dist = {
         "+1 (win)":  int((y > 0.5).sum()),

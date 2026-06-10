@@ -14,4 +14,4 @@ external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_
 external_db_enabled: true
 sentinel_mode: advisory
 score_adjust_scale: 0.05
-reconsider_threshold: 0.3
+reconsider_threshold: 0.15

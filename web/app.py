@@ -52,6 +52,7 @@ from ai.opening_recognizer import OpeningRecognizer
 from ai.move_guidance import build_choose_move_kwargs, pick_target_opening
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
+from ai.ngram_opponent_model import NGramOpponentModel
 from ai.endgame_db import EndgameDB
 from ai.fullgame_db import FullGameDB
 from ai.endgame_solved_db import EndgameSolvedDB
@@ -90,6 +91,21 @@ try:
     )
 except Exception as _exc:
     log.warning("TrajectoryDB: load failed — %s", _exc)
+
+# SE-13: load n-gram opponent model from the same games directories.
+_ngram_model: NGramOpponentModel = NGramOpponentModel()
+try:
+    _ngram_model_path = _ROOT / "data" / "ngram_model.json"
+    if _ngram_model_path.exists():
+        _ngram_model.load(_ngram_model_path)
+        log.info("NGramOpponentModel: loaded %d games", _ngram_model.game_count)
+    else:
+        _ngram_model.load_from_games(_ROOT / "data" / "games")
+        if _human_games_dir.exists():
+            _ngram_model.load_from_games(_human_games_dir)
+        log.info("NGramOpponentModel: built from %d games", _ngram_model.game_count)
+except Exception as _exc:
+    log.warning("NGramOpponentModel: load failed — %s", _exc)
 
 # Load evolved weights if available — produced by tools/evolve_weights.py.
 _WEIGHTS_DIR = _ROOT / "data" / "weights"
@@ -1485,16 +1501,28 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         "expected_seconds": exp,
     })
 
-    # B-75: stop any running ponder; check if we pre-computed this position.
+    # B-75/B-94: stop any running ponder; check if we pre-computed this position.
     _ponder_hit: dict | None = None
+    _ponder_ai_done = None  # B-94: completed shadow AI with pre-warmed TT
     if session.ponder_manager is not None and not session.coordinator:
         session.ponder_manager.stop()
-        _ponder_hit = session.ponder_manager.get_result(board)
+        _ponder_result = session.ponder_manager.get_result(board)
+        if _ponder_result is not None:
+            _ponder_hit, _ponder_ai_done = _ponder_result
 
     t0 = _time.time()
     try:
         if _ponder_hit is not None:
-            move = _ponder_hit
+            if _ponder_ai_done is not None:
+                # B-94: deepen on pre-warmed TT from completed ponder search.
+                _ponder_ai_done._force_stop = False
+                _ponder_ai_done._deadline   = float("inf")
+                _deepen_budget = min(3.0, _expected_think_seconds(diff, total) * 0.3)
+                move = await asyncio.to_thread(
+                    _ponder_ai_done._iterative_deepen, board, _deepen_budget
+                )
+            else:
+                move = _ponder_hit
             if session.game_ai:
                 session.game_ai.last_was_blunder = False
                 session.game_ai.last_thinking    = "pondered"
@@ -1570,6 +1598,8 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
             game_ai=session.game_ai,
             game_notations=_game_notations,
             trajectory_db=_trajectory_db,
+            fullgame_db=_fullgame_db,
+            ngram_model=_ngram_model,
         )
 
     # Offer resignation after move + commentary — player decides whether to accept.
@@ -1780,6 +1810,7 @@ async def ws_endpoint(websocket: WebSocket):
                         malom_db=_malom_db,
                         value_net=_value_net,
                     )
+                    game_ai.suppress_fork_variety = _random.random() < 0.5
                     log.info(
                         "Adaptive: requested diff=%d effective diff=%d extra_blunder=%.2f",
                         diff, eff_diff, adaptive.extra_blunder,
@@ -1913,6 +1944,7 @@ async def ws_endpoint(websocket: WebSocket):
                         malom_db=_malom_db,
                         value_net=_value_net,
                     )
+                    game_ai.suppress_fork_variety = _random.random() < 0.5
 
                     _sent_prob_s = SENTINEL_PROB_BY_DIFF.get(diff, 0.0)
                     if use_perfect_db:

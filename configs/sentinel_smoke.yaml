@@ -13,4 +13,4 @@ external_db_path: ""
 external_db_enabled: false
 sentinel_mode: advisory
 score_adjust_scale: 0.05
-reconsider_threshold: 0.3
+reconsider_threshold: 0.15
