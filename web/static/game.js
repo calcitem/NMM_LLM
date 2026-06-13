@@ -1073,10 +1073,18 @@ function handleMessage(msg) {
             "possible_mistake":   { icon: "🟡", label: "Possible mistake",                      bg: "rgba(220,180,50,.15)" },
             "missed_opportunity": { icon: "🔵", label: "Missed opportunity",                    bg: "rgba(50,120,220,.15)" },
             "safe":               { icon: "🟢", label: "Move looks sound",                      bg: "rgba(50,180,80,.1)"  },
+            "refined":            { icon: "🔧", label: "Move refined by sentinel",              bg: "rgba(100,150,220,.12)" },
           };
-          const style = msgMap[s.advisory_message] || msgMap["safe"];
 
-          if (s.advisory_message && s.advisory_message !== "safe") {
+          const hasIntervention = !!s.intervention;
+          const isSafe = !s.advisory_message || s.advisory_message === "safe";
+          // Use "refined" style when sentinel intervened on a move that scores as safe
+          const displayKey = (isSafe && hasIntervention) ? "refined"
+                           : (s.advisory_message || "safe");
+          const style = msgMap[displayKey] || msgMap["safe"];
+
+          const showBadge = !isSafe || hasIntervention;
+          if (showBadge) {
             icon.textContent = style.icon;
             txt.textContent  = `${player}: ${style.label} (move quality ${qualityPct}%, gap ${gapPct}%)`;
             badge.style.background = style.bg;
@@ -1085,11 +1093,11 @@ function handleMessage(msg) {
             badge.style.display = "none";
           }
 
-          // Commentary line whenever there's a non-trivial opportunity gap.
-          if (s.advisory_message !== "safe" || gapPct > 10) {
+          // Commentary line for any non-safe signal or sentinel intervention
+          if (!isSafe || hasIntervention || gapPct > 10) {
             addCommentary(
               "Sentinel",
-              `${player} · ${(s.advisory_message || "safe").replace(/_/g, " ")} · move quality ${qualityPct}% · gap ${gapPct}%`,
+              `${player} · ${displayKey.replace(/_/g, " ")} · move quality ${qualityPct}% · gap ${gapPct}%`,
               "ai"
             );
           }

@@ -54,14 +54,18 @@ class TestPinnedMoveSquaresFix:
 
 
 class TestMultiThreatMillCloseCarveout:
-    def test_three_threats_detected(self, move11_board):
-        """Confirms the scenario: Black has 3 simultaneous threats."""
+    def test_threats_cleared_by_b66(self, move11_board):
+        """After the in-mill adjacency fix (_immediate_mill_threats now excludes
+        in-mill pieces when checking adjacency), d1 and a4 are no longer false
+        positives (their only adjacent Black pieces are inside the respective mills).
+        The one real threat — c3, closeable by d3→c3 — is then cleared by the
+        B-66 single-threat carveout (White can close a7-d7-g7 this turn).
+        Result: threats = {}, White is free to close the mill."""
         threats = _immediate_mill_threats(move11_board)
-        assert len(threats) == 3
-        assert "a4" in threats and "c3" in threats and "d1" in threats
+        assert len(threats) == 0, f"expected 0 after B-66 clears sole real threat, got {threats}"
 
     def test_stm_can_close_mill(self, move11_board):
-        """White can close (a7-d7-g7) this turn — prerequisite for the carveout."""
+        """White can close (a7-d7-g7) this turn — prerequisite for the B-66 carveout."""
         assert _stm_can_close_mill(move11_board, "W")
 
 

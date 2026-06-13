@@ -394,9 +394,9 @@ export class Board {
     // Helper: arrow/halo color from db_delta, eg_flag, or sentinel_score
     const dbColor = (delta, egFlag, sentinelScore) => {
       if (showSentinel && sentinelScore != null) {
-        if (sentinelScore >= 0.65) return "#4caf50";   // good move
-        if (sentinelScore <= 0.35) return "#e05050";   // bad move
-        return null;  // neutral — don't draw
+        if (sentinelScore >= 0.55) return "#4caf50";   // good move
+        if (sentinelScore <= 0.45) return "#e05050";   // bad move
+        return "#999";  // neutral — faint grey to show coverage
       }
       if (egFlag === "W") return "#4caf50";
       if (egFlag === "L") return "#e05050";
@@ -407,7 +407,13 @@ export class Board {
       return null;   // neutral FullGame delta — no display (not enough info)
     };
     const markerId = col =>
-      col === "#4caf50" ? "arr-green" : col === "#e05050" ? "arr-red" : col === "#888" || col === "#666" ? "arr-grey" : "arr-grey";
+      col === "#4caf50" ? "arr-green" : col === "#e05050" ? "arr-red" : "arr-grey";
+
+    // Helper: sentinel score label text ("S:63%"), or null when not applicable
+    const sentinelLabel = (sentinelScore) => {
+      if (!showSentinel || sentinelScore == null) return null;
+      return `S:${Math.round(sentinelScore * 100)}%`;
+    };
 
     if (phase === "place" || phase === "capture") {
       // Halos on destination squares — no arrows needed (no source)
@@ -418,22 +424,36 @@ export class Board {
         const col = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null,
                             showSentinel ? mv.sentinel_score : null);
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
+        const slbl = sentinelLabel(mv.sentinel_score);
 
         if (col) {
           const [x, y] = nodeXY(pos);
           this._dbGroup.appendChild(_el("circle", { cx:x, cy:y, r: PIECE_R + 9,
             fill: "none", stroke: col, "stroke-width": 2.5, opacity: 0.7 }));
         }
-        if (freq > 0) {
+        if (slbl || freq > 0) {
           const [x, y] = nodeXY(pos);
           const hasPiece = !!this.grid[pos];
-          const ty = hasPiece ? y - PIECE_R - 5 : y - NODE_R - 5;
-          const t = _el("text", { x, y: ty, "font-size":"9", fill:"#5a10c0",
-            "text-anchor":"middle", "font-family":"monospace",
-            stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
-            "paint-order":"stroke" });
-          t.textContent = `T:${Math.round(freq * 100)}%`;
-          this._dbGroup.appendChild(t);
+          let ty = hasPiece ? y - PIECE_R - 5 : y - NODE_R - 5;
+          if (freq > 0) {
+            const t = _el("text", { x, y: ty, "font-size":"9", fill:"#5a10c0",
+              "text-anchor":"middle", "font-family":"monospace",
+              stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = `T:${Math.round(freq * 100)}%`;
+            this._dbGroup.appendChild(t);
+            ty -= 11;
+          }
+          if (slbl) {
+            const sentCol = (mv.sentinel_score >= 0.55) ? "#2e7d32"
+                          : (mv.sentinel_score <= 0.45) ? "#b71c1c" : "#666";
+            const t = _el("text", { x, y: ty, "font-size":"9", fill: sentCol,
+              "text-anchor":"middle", "font-family":"monospace",
+              stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = slbl;
+            this._dbGroup.appendChild(t);
+          }
         }
       }
     } else {
@@ -448,7 +468,8 @@ export class Board {
         const col = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null,
                             showSentinel ? mv.sentinel_score : null);
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
-        if (!col && freq === 0) continue;
+        const slbl = selSrc ? sentinelLabel(mv.sentinel_score) : null;
+        if (!col && freq === 0 && !slbl) continue;
 
         const [x1, y1] = nodeXY(mv.from);
         const [x2, y2] = nodeXY(mv.to);
@@ -467,19 +488,32 @@ export class Board {
               x1: sx, y1: sy, x2: ex, y2: ey,
               stroke: col, "stroke-width": 2,
               "marker-end": `url(#${markerId(col)})`,
-              opacity: 0.75,
+              opacity: col === "#999" ? 0.35 : 0.75,
             }));
           }
         }
-        if (freq > 0 && (!selSrc || mv.from === selSrc)) {
+        if (slbl || freq > 0) {
           const [x, y] = nodeXY(mv.to);
-          const t = _el("text", { x: x + 1, y: y - PIECE_R - 4,
-            "font-size":"8", fill:"#5a10c0",
-            "text-anchor":"middle", "font-family":"monospace",
-            stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
-            "paint-order":"stroke" });
-          t.textContent = `T:${Math.round(freq * 100)}%`;
-          this._dbGroup.appendChild(t);
+          let ty = y - PIECE_R - 4;
+          if (freq > 0 && (!selSrc || mv.from === selSrc)) {
+            const t = _el("text", { x: x + 1, y: ty, "font-size":"8", fill:"#5a10c0",
+              "text-anchor":"middle", "font-family":"monospace",
+              stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = `T:${Math.round(freq * 100)}%`;
+            this._dbGroup.appendChild(t);
+            ty -= 10;
+          }
+          if (slbl) {
+            const sentCol = (mv.sentinel_score >= 0.55) ? "#2e7d32"
+                          : (mv.sentinel_score <= 0.45) ? "#b71c1c" : "#666";
+            const t = _el("text", { x: x + 1, y: ty, "font-size":"8", fill: sentCol,
+              "text-anchor":"middle", "font-family":"monospace",
+              stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = slbl;
+            this._dbGroup.appendChild(t);
+          }
         }
       }
 
@@ -489,7 +523,7 @@ export class Board {
         for (const mv of moves) {
           const col = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null,
                               showSentinel ? mv.sentinel_score : null);
-          if (col && col !== "#888" && mv.from) {
+          if (col && col !== "#888" && col !== "#999" && mv.from) {
             if (!srcDB.has(mv.from) || col === "#4caf50")
               srcDB.set(mv.from, col);
           }

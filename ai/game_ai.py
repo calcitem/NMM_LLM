@@ -69,8 +69,12 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
             empty = next(p for p in mill if board.positions[p] == "")
             if opp_in_fly:
                 threats.add(empty)
-            elif opp_placed >= 9:  # move phase: need adjacent opp piece
-                if any(board.positions[nb] == opp for nb in ADJACENCY[empty]):
+            elif opp_placed >= 9:  # move phase: need adjacent EXTERNAL opp piece
+                mill_set = set(mill)
+                if any(
+                    board.positions[nb] == opp and nb not in mill_set
+                    for nb in ADJACENCY[empty]
+                ):
                     threats.add(empty)
 
     # Move phase: single threat + own mill available → do not restrict (B-66).
@@ -929,7 +933,8 @@ class GameAI:
         # adjacency; in move phase only 2-configs with an adjacent opponent piece count.
         threats = _immediate_mill_threats(board)
         if threats:
-            blocking = [m for m in moves if m["to"] in threats]
+            _base_blocking = [m for m in moves if m["to"] in threats]
+            blocking = list(_base_blocking)
             # B-66 extended: when in move phase and own player can close a mill this
             # turn, also include mill-closing moves even if there are multiple threats.
             # Closing + capturing may eliminate one of the opponent's threats; the
@@ -943,6 +948,26 @@ class GameAI:
                         and [board.positions[p] for p in _ml].count("") == 1)
                 }
                 blocking = [m for m in moves if m["to"] in threats or m["to"] in _close_sq]
+            # Cycling-mill exception: when STM has a closed mill and only ONE
+            # opponent threat square is actually reachable (STM cannot block the
+            # rest), allow cycling moves alongside the block.  Re-closing on the
+            # next turn creates a capture threat as urgent as the single block.
+            # Guard: STM must have > 3 pieces so it can absorb a capture.
+            if board.phase == "move" and board.pieces_on_board.get(board.turn, 0) > 3:
+                _reachable_threat_sqs = {m["to"] for m in _base_blocking if m["to"] in threats}
+                if len(_reachable_threat_sqs) == 1:
+                    _cycle_src: set[str] = set()
+                    for _ml in MILLS:
+                        if all(board.positions[p] == board.turn for p in _ml):
+                            _cycle_src.update(_ml)
+                    if _cycle_src:
+                        _already = {m["to"] for m in blocking}
+                        _cycling = [
+                            m for m in moves
+                            if m.get("from") in _cycle_src and m["to"] not in _already
+                        ]
+                        if _cycling:
+                            blocking = blocking + _cycling
             if blocking:
                 moves = blocking
 
