@@ -61,7 +61,8 @@ Counterfactual context (18 floats) — same for all moves in a position:
   [53]    this move WDL known (bool)
   [54]    db_available (bool)
   [55]    a better DB move existed than this one (bool)
-  [56:58) reserved padding (0.0)
+  [56]    best_win_dtm_quality: dtm_quality of fastest-winning move across all DB moves (0 if none)
+  [57]    this_move_dtm_quality: dtm_quality of this move (win/loss only, 0 if unknown/draw)
 
 At inference time the DB is not queried, so the DB-derived slots are populated
 from whatever the caller can compute cheaply (frac/best/worst left at 0 when the
@@ -80,6 +81,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from game.board import ADJACENCY, MILLS, POSITIONS
+from learned_ai.sentinel.labels import dtm_quality, DTM_WIN_SCALE
 
 BOARD_CTX_DIM = 20
 MOVE_DIM = 20
@@ -286,7 +288,8 @@ def counterfactual_features(
     """18-float counterfactual block for ``move`` within its candidate set.
 
     ``all_moves`` is the list from ``ExternalSolvedDB.query_all_moves`` (dicts
-    with ``move`` and ``wdl``). When None/empty the DB-derived slots stay zero.
+    with ``move``, ``wdl``, and ``dtm``). When None/empty the DB-derived slots
+    stay zero. Slots [16]/[17] carry DTM-graded features across all game phases.
     """
     out = np.zeros(COUNTERFACTUAL_DIM, dtype=np.float32)
     moves = list(all_moves or [])
@@ -330,10 +333,30 @@ def counterfactual_features(
         played_v = _WDL_SCALAR.get(played_wdl, 0.0)
         out[15] = 1.0 if out[4] > played_v else 0.0  # a strictly better DB move existed
 
+        # Slots [16:18) — DTM-graded features across all game phases.
+        best_win_dtm: Optional[int] = None
+        for m in moves:
+            if m.get("wdl") == "win":
+                d = m.get("dtm")
+                if d is not None:
+                    if best_win_dtm is None or abs(d) < abs(best_win_dtm):
+                        best_win_dtm = d
+        if best_win_dtm is not None:
+            out[16] = float(dtm_quality("win", best_win_dtm))
+
+        this_entry = next(
+            (m for m in moves if _move_key(m.get("move", {})) == _move_key(move)),
+            None,
+        )
+        if this_entry is not None:
+            this_wdl = this_entry.get("wdl")
+            this_dtm = this_entry.get("dtm")
+            if this_wdl in ("win", "loss") and this_dtm is not None:
+                out[17] = float(dtm_quality(this_wdl, this_dtm))
+
     if n > 0:
         out[6] = min(1.0, heuristic_rank / float(max(1, n)))
     out[7] = float(min(1.0, max(0.0, heuristic_score_norm)))
-    # [16:18) reserved
     return out
 
 

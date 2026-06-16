@@ -89,15 +89,18 @@ class SentinelAdvisor:
         ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         cfg_dict = None
         state_dict = ckpt
+        aux_wdl = False
         if isinstance(ckpt, dict) and "state_dict" in ckpt:
             state_dict = ckpt["state_dict"]
             cfg_dict = ckpt.get("config")
+            aux_wdl = bool(ckpt.get("aux_wdl", False))
         if cfg_dict:
             self.config = SentinelConfig.from_dict(cfg_dict)
         self.model = SentinelNet(
             input_dim=self.config.input_dim,
             hidden_dims=self.config.hidden_dims,
             dropout=self.config.dropout,  # match training arch; eval() disables dropout
+            aux_wdl=aux_wdl,
         ).to(self.device)
         self.model.load_state_dict(state_dict)
         self.model.eval()

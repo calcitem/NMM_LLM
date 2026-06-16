@@ -1,0 +1,22 @@
+# Stage 3 — Trajectory fine-tuning (DB labels + game-outcome weighting)
+# Resume from Stage 2.  DB still labels every legal move.  --trajectory-weight
+# additionally boosts the training weight of the move actually played in each
+# game by the outcome: win-played moves get 3x weight, loss-played moves 2x.
+# DB feature slots are restored (no --drop-db-features) so the model can learn
+# the relationship between DB quality and real player choices.
+# Very low LR to fine-tune without overwriting Stage 2 structural learning.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.1
+lr: 0.0001
+batch_size: 64
+epochs: 15
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/stage3
+log_dir: learned_ai/sentinel/logs
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15

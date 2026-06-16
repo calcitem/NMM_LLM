@@ -1,0 +1,20 @@
+# Stage 2 — DB calibration (Malom labels, structural features only)
+# Resume from Stage 1.  The Malom DB provides strong WDL+DTM labels for every
+# legal move, but --drop-db-features still zeros the DB indicator slots so the
+# model updates its structural weights toward DB ground truth rather than
+# memorising the oracle signal directly.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.2
+lr: 0.0003
+batch_size: 128
+epochs: 30
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/stage2
+log_dir: learned_ai/sentinel/logs
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15

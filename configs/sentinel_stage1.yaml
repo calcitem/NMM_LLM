@@ -1,0 +1,19 @@
+# Stage 1 — Structural foundation (no DB, heuristic labels)
+# The model learns purely from board structure: piece counts, mills, mobility,
+# move geometry.  DB feature slots are zeroed at batch time via --drop-db-features
+# so the model cannot shortcut on oracle signals absent at inference time.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.3
+lr: 0.001
+batch_size: 128
+epochs: 20
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/stage1
+log_dir: learned_ai/sentinel/logs
+external_db_path: ""
+external_db_enabled: false
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15

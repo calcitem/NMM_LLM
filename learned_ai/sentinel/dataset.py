@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover - torch is a declared dependency
 
 from game.board import BoardState
 from learned_ai.sentinel.feature_builder import FEATURE_DIM, build_move_features
-from learned_ai.sentinel.labels import MoveExample, label_move
+from learned_ai.sentinel.labels import MoveExample, label_move, TRAJECTORY_WIN_BOOST, TRAJECTORY_LOSS_BOOST
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +125,15 @@ def examples_from_position(
     player: str,
     ply: int,
     db=None,
+    played_move_key: Optional[tuple] = None,
+    trajectory_boost: float = 1.0,
 ) -> List[MoveExample]:
-    """Build one MoveExample per legal move at ``board`` for ``player``."""
+    """Build one MoveExample per legal move at ``board`` for ``player``.
+
+    ``played_move_key`` is ``(from, to, capture)`` of the move actually played.
+    When ``trajectory_boost != 1.0`` the training weight of that specific move
+    is multiplied by the boost (Stage 3 trajectory supervision).
+    """
     moves = _enumerate_legal_moves(board, player)
     if not moves:
         return []
@@ -145,10 +152,13 @@ def examples_from_position(
             all_moves = db.query_all_moves(board, player)
         except Exception:
             all_moves = []
-    wdl_by_key: Dict[tuple, str] = {}
+    wdl_by_key: Dict[tuple, tuple] = {}  # key → (wdl_str, dtm_int_or_None)
     for entry in all_moves:
         mv = entry.get("move", {})
-        wdl_by_key[(mv.get("from"), mv.get("to"), mv.get("capture"))] = entry.get("wdl", "unknown")
+        wdl_by_key[(mv.get("from"), mv.get("to"), mv.get("capture"))] = (
+            entry.get("wdl", "unknown"),
+            entry.get("dtm"),
+        )
 
     examples: List[MoveExample] = []
     for i, mv in enumerate(moves):
@@ -162,8 +172,18 @@ def examples_from_position(
             feat = build_move_features(board, mv, player, ctx)
         except Exception:
             continue
-        wdl = wdl_by_key.get((mv.get("from"), mv.get("to"), mv.get("capture")))
-        quality, weight, source = label_move(wdl, heuristic_score_norm=norm_scores[i])
+        mv_key = (mv.get("from"), mv.get("to"), mv.get("capture"))
+        wdl_dtm = wdl_by_key.get(mv_key, (None, None))
+        wdl, dtm = wdl_dtm
+        quality, weight, source = label_move(
+            wdl,
+            heuristic_score_norm=norm_scores[i],
+            dtm=dtm,
+        )
+        # Trajectory boost: the move actually played in a decisive game gets
+        # extra gradient weight so the sentinel learns real winning/losing patterns.
+        if played_move_key is not None and mv_key == played_move_key and trajectory_boost != 1.0:
+            weight = weight * trajectory_boost
         examples.append(
             MoveExample(
                 features=np.asarray(feat, dtype=np.float32),
@@ -178,8 +198,17 @@ def examples_from_position(
     return examples
 
 
-def examples_from_game(record: Dict[str, Any], db=None) -> List[MoveExample]:
-    """Replay one game record and return per-move MoveExamples for every ply."""
+def examples_from_game(
+    record: Dict[str, Any],
+    db=None,
+    trajectory_weight: bool = False,
+) -> List[MoveExample]:
+    """Replay one game record and return per-move MoveExamples for every ply.
+
+    When ``trajectory_weight=True`` the actually-played move at each position
+    receives a training-weight boost scaled by the game outcome (win/loss).
+    """
+    winner = record.get("winner")
     moves = record.get("moves") or []
     out: List[MoveExample] = []
     for ply, log_move in enumerate(moves):
@@ -190,8 +219,21 @@ def examples_from_game(record: Dict[str, Any], db=None) -> List[MoveExample]:
         if board is None:
             continue
         player = log_move.get("color") or getattr(board, "turn", "W")
+        played_key = (log_move.get("from"), log_move.get("to"), log_move.get("capture"))
+
+        traj_boost = 1.0
+        if trajectory_weight and winner is not None:
+            if winner == player:
+                traj_boost = TRAJECTORY_WIN_BOOST
+            else:
+                traj_boost = TRAJECTORY_LOSS_BOOST
+
         try:
-            out.extend(examples_from_position(board, player, ply, db=db))
+            out.extend(examples_from_position(
+                board, player, ply, db=db,
+                played_move_key=played_key,
+                trajectory_boost=traj_boost,
+            ))
         except Exception as exc:
             logger.debug("[SentinelDataset] position failed at ply %d: %s", ply, exc)
             continue
@@ -220,31 +262,56 @@ class SentinelDataset(_TorchDataset):
         limit: Optional[int] = None,
         paths: Optional[List[str]] = None,
         decisive_only: bool = False,
+        extra_dirs: Optional[List[str]] = None,
+        trajectory_weight: bool = False,
     ) -> "SentinelDataset":
         """Build a dataset by replaying ``*.jsonl`` files in ``game_dir``.
 
+        extra_dirs: additional directories (e.g. data/human_games) whose files
+            are appended before the limit is applied.
         decisive_only: skip games with no winner (draws/unknowns).
+        trajectory_weight: boost training weight of the played move based on
+            game outcome (Stage 3 curriculum).
         """
+        import time as _time
         if paths is None:
             paths = sorted(glob.glob(os.path.join(game_dir, "**", "*.jsonl"), recursive=True))
+            for d in (extra_dirs or []):
+                paths += sorted(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
         if limit is not None:
             paths = paths[:limit]
+        n_total = len(paths)
+        print(f"[dataset] loading {n_total} game files...", flush=True)
         all_examples: List[MoveExample] = []
         skipped = 0
-        for path in paths:
+        t0 = _time.time()
+        _REPORT_EVERY = max(1, n_total // 20)  # ~5% increments
+        for i, path in enumerate(paths):
             for record in _iter_game_records(path):
                 if decisive_only and record.get("winner") is None:
                     skipped += 1
                     continue
                 try:
-                    all_examples.extend(examples_from_game(record, db=db))
+                    all_examples.extend(examples_from_game(record, db=db, trajectory_weight=trajectory_weight))
                 except Exception as exc:
                     logger.warning("[SentinelDataset] failed on %s: %s", path, exc)
+            if (i + 1) % _REPORT_EVERY == 0 or (i + 1) == n_total:
+                elapsed = _time.time() - t0
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                eta = (n_total - i - 1) / rate if rate > 0 else 0
+                print(
+                    f"[dataset]  {i + 1}/{n_total} files"
+                    f"  {len(all_examples):,} examples"
+                    f"  {elapsed:.0f}s elapsed"
+                    f"  ETA {eta:.0f}s",
+                    flush=True,
+                )
         if decisive_only and skipped:
-            logger.info("[SentinelDataset] skipped %d draw/unknown games (decisive_only)", skipped)
-        logger.info(
-            "[SentinelDataset] loaded %d move examples from %d files",
-            len(all_examples), len(paths),
+            print(f"[dataset] skipped {skipped} draw/unknown games (decisive_only)", flush=True)
+        print(
+            f"[dataset] done — {len(all_examples):,} examples from {n_total} files"
+            f"  ({_time.time() - t0:.0f}s total)",
+            flush=True,
         )
         return cls(all_examples)
 
@@ -258,11 +325,19 @@ class SentinelDataset(_TorchDataset):
         seed: int = 42,
         limit: Optional[int] = None,
         decisive_only: bool = False,
+        extra_dirs: Optional[List[str]] = None,
+        trajectory_weight: bool = False,
     ) -> "Tuple[SentinelDataset, SentinelDataset]":
-        """Return (train, val) split at the game-file level (no per-ply leakage)."""
+        """Return (train, val) split at the game-file level (no per-ply leakage).
+
+        All directories (game_dir + extra_dirs) are pooled before the split so
+        the 15 % validation slice is drawn from the full combined corpus.
+        """
         import random as _random
         rng = _random.Random(seed)
         all_paths = sorted(glob.glob(os.path.join(game_dir, "**", "*.jsonl"), recursive=True))
+        for d in (extra_dirs or []):
+            all_paths += sorted(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
         if limit is not None:
             all_paths = all_paths[:limit]
         shuffled = list(all_paths)
@@ -270,8 +345,14 @@ class SentinelDataset(_TorchDataset):
         n_val = max(1, int(len(shuffled) * val_fraction))
         val_paths = shuffled[:n_val]
         train_paths = shuffled[n_val:]
-        train_ds = cls.load_from_games(game_dir, db=db, config=config, paths=train_paths, decisive_only=decisive_only)
-        val_ds = cls.load_from_games(game_dir, db=db, config=config, paths=val_paths, decisive_only=decisive_only)
+        train_ds = cls.load_from_games(
+            game_dir, db=db, config=config, paths=train_paths,
+            decisive_only=decisive_only, trajectory_weight=trajectory_weight,
+        )
+        val_ds = cls.load_from_games(
+            game_dir, db=db, config=config, paths=val_paths,
+            decisive_only=decisive_only, trajectory_weight=trajectory_weight,
+        )
         logger.info(
             "[SentinelDataset] game-level split: %d train games / %d val games → %d / %d examples",
             len(train_paths), len(val_paths), len(train_ds), len(val_ds),
@@ -288,7 +369,14 @@ class SentinelDataset(_TorchDataset):
         feat = ex.features.astype(np.float32)
         if torch is not None:
             feat = torch.from_numpy(feat)
-        return feat, (float(ex.move_quality), float(ex.training_weight))
+        q = float(ex.move_quality)
+        w = float(ex.training_weight)
+        # WDL class for optional auxiliary head: 2=win, 1=draw, 0=loss, -1=mask
+        if ex.supervision_source in ("solved_db", "solved_db_dtm"):
+            wdl_cls = 2 if q > 0.5 else (0 if q < 0.5 else 1)
+        else:
+            wdl_cls = -1
+        return feat, (q, w, wdl_cls)
 
     # ----- persistence ---------------------------------------------------------
 
@@ -330,18 +418,16 @@ class SentinelDataset(_TorchDataset):
     # ----- diagnostics ---------------------------------------------------------
 
     def quality_distribution(self) -> Dict[str, int]:
-        """Bucket examples into win / draw / loss / other by move_quality."""
-        dist = {"win": 0, "draw": 0, "loss": 0, "other": 0}
+        """Bucket examples by move_quality (works with binary and DTM-graded labels)."""
+        dist = {"win": 0, "draw": 0, "loss": 0}
         for e in self.examples:
             q = e.move_quality
-            if q >= 0.99:
-                dist["win"] += 1
-            elif abs(q - 0.5) < 1e-3:
+            if abs(q - 0.5) < 1e-3:
                 dist["draw"] += 1
-            elif q <= 0.01:
-                dist["loss"] += 1
+            elif q > 0.5:
+                dist["win"] += 1
             else:
-                dist["other"] += 1
+                dist["loss"] += 1
         return dist
 
     def source_distribution(self) -> Dict[str, int]:
@@ -385,11 +471,12 @@ def _iter_game_records(path: str):
             continue
 
 
-def collate_examples(batch: List[Tuple[Any, Tuple[float, float]]]):
-    """Collate fn for DataLoader: stack features, qualities, and weights."""
+def collate_examples(batch: List[Tuple[Any, Tuple[float, float, int]]]):
+    """Collate fn for DataLoader: stack features, qualities, weights, and WDL class."""
     if torch is None:  # pragma: no cover
         raise RuntimeError("torch required for collate_examples")
     feats = torch.stack([b[0] for b in batch]).float()
     quality = torch.tensor([b[1][0] for b in batch], dtype=torch.float32)
     weight = torch.tensor([b[1][1] for b in batch], dtype=torch.float32)
-    return feats, quality, weight
+    wdl_cls = torch.tensor([b[1][2] for b in batch], dtype=torch.long)
+    return feats, quality, weight, wdl_cls
