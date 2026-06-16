@@ -1,0 +1,20 @@
+# Stage 5 — DB feature fine-tuning (light; resumes from Stage 4)
+# DB feature slots are now VISIBLE to the model (no --drop-db-features).
+# At a very low LR the model learns to exploit DB quality signals (WDL, DTM,
+# win/loss fractions) when they are available, while retaining the structural
+# weights it built in Stage 4.  Few epochs to avoid overwriting structural learning.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.1
+lr: 0.00005
+batch_size: 256
+epochs: 8
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/stage5
+log_dir: learned_ai/sentinel/logs
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15

@@ -1,0 +1,19 @@
+# Stage 4 — Fixed training: --drop-db-features prevents feat[57]/label leakage.
+# Training from scratch (no resume) so the model learns to predict move quality
+# from board position alone; DTM-graded labels provide accurate supervision.
+# Includes human_games for broader coverage.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.2
+lr: 0.001
+batch_size: 256
+epochs: 30
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/stage4
+log_dir: learned_ai/sentinel/logs
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15
