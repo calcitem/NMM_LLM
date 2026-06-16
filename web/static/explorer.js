@@ -1,15 +1,16 @@
 /**
  * explorer.js — 3D NMM position explorer (Three.js ES module)
  *
- * Board positions are laid out in 3D space matching the NMM coordinate grid.
- * Win-% bars rise above each candidate next-move square.
- * Color: green = Malom says opponent loses (good move), red = opponent wins (bad move),
- *        amber = draw, grey = no Malom annotation (brightness = human win%).
- * Click a bar to advance the board. Back button rewinds.
+ * Bar height = how often humans played that move (most-played = tallest).
+ * Bar color  = human win-rate gradient: green (winning) → orange → red (losing).
+ * Arrows     = cylinder+cone from the piece's current square to its destination.
+ * Malom overlay (toggle) = colored rings + DTW numbers on candidate squares.
+ * Click a bar to advance; Back rewinds.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ── Board geometry data ───────────────────────────────────────────────────────
 
@@ -38,22 +39,16 @@ const EDGES = [
 // ── Colors ────────────────────────────────────────────────────────────────────
 
 const C = {
-  board:   0x6b4f22,
-  pad:     0x4a3518,
-  padHov:  0x7a5f2a,
-  lineWd:  0x8b6b3a,
-  white:   0xf5f0dc,
-  black:   0x1a1a1a,
-  barGood: 0x22c55e,   // Malom: opp loses → good for mover
-  barBad:  0xef4444,   // Malom: opp wins  → bad for mover
-  barDraw: 0xf59e0b,
-  barNone: 0x6b8eae,   // no Malom data
-  barHov:  0xffd700,
-  highlight: 0xffd700,
+  board:  0x6b4f22,
+  pad:    0x4a3518,
+  lineWd: 0x8b6b3a,
+  white:  0xf5f0dc,
+  black:  0x1a1a1a,
+  barHov: 0xffd700,
 };
 
+// Green (high win%) → orange → red (high loss%)
 function winPctColor(pct) {
-  // No Malom: interpolate red(0%) → amber(50%) → green(100%)
   const t = Math.max(0, Math.min(1, pct));
   if (t < 0.5) {
     const u = t * 2;
@@ -64,9 +59,6 @@ function winPctColor(pct) {
 }
 
 function barColor(moveData) {
-  if (moveData.malom_wdl_after === 'L') return new THREE.Color(C.barGood);
-  if (moveData.malom_wdl_after === 'W') return new THREE.Color(C.barBad);
-  if (moveData.malom_wdl_after === 'D') return new THREE.Color(C.barDraw);
   return winPctColor(moveData.win_pct);
 }
 
@@ -81,6 +73,11 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// CSS2D renderer — overlaid for coordinate labels and Malom DTW text
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+wrap.appendChild(labelRenderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1612);
@@ -112,7 +109,6 @@ scene.add(fillLight);
 // ── Static board geometry ─────────────────────────────────────────────────────
 
 function buildStaticBoard() {
-  // Ground plane
   const planeGeo = new THREE.PlaneGeometry(9, 9);
   const planeMat = new THREE.MeshLambertMaterial({ color: C.board });
   const plane = new THREE.Mesh(planeGeo, planeMat);
@@ -120,44 +116,70 @@ function buildStaticBoard() {
   plane.receiveShadow = true;
   scene.add(plane);
 
-  // Position pads
   const padGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.06, 16);
   for (const [pos, [x,, z]] of Object.entries(POS_COORDS)) {
-    const mat = new THREE.MeshLambertMaterial({ color: C.pad });
+    const mat  = new THREE.MeshLambertMaterial({ color: C.pad });
     const mesh = new THREE.Mesh(padGeo, mat);
     mesh.position.set(x, 0.03, z);
     mesh.receiveShadow = true;
-    mesh.userData.pos = pos;
+    mesh.userData.pos   = pos;
     mesh.userData.isPad = true;
     scene.add(mesh);
   }
 
-  // Edges
   const lineMat = new THREE.MeshLambertMaterial({ color: C.lineWd });
   for (const [a, b] of EDGES) {
     const [ax,, az] = POS_COORDS[a];
     const [bx,, bz] = POS_COORDS[b];
     const mid = new THREE.Vector3((ax+bx)/2, 0.02, (az+bz)/2);
-    const dir = new THREE.Vector3(bx-ax, 0, bz-az);
-    const len = dir.length();
+    const len = new THREE.Vector3(bx-ax, 0, bz-az).length();
     const geo = new THREE.CylinderGeometry(0.04, 0.04, len, 6);
     const mesh = new THREE.Mesh(geo, lineMat);
     mesh.position.copy(mid);
     mesh.rotation.z = Math.PI / 2;
-    const angle = Math.atan2(bz - az, bx - ax);
-    mesh.rotation.y = -angle;
+    mesh.rotation.y = -Math.atan2(bz - az, bx - ax);
     scene.add(mesh);
   }
 }
 
 buildStaticBoard();
 
+// ── Coordinate labels (CSS2D) ─────────────────────────────────────────────────
+
+function buildCoordLabels() {
+  // Column letters a–g along south edge (z = 4.2)
+  // a=-3, b=-2, c=-1, d=0, e=1, f=2, g=3
+  ['a','b','c','d','e','f','g'].forEach((letter, i) => {
+    const el = document.createElement('div');
+    el.className = 'coord-label';
+    el.textContent = letter;
+    const obj = new CSS2DObject(el);
+    obj.position.set(i - 3, 0.05, 4.2);
+    scene.add(obj);
+  });
+
+  // Row numbers 7–1 along west edge (x = -4.2)
+  // row 7 → z=-3, row 1 → z=3
+  ['7','6','5','4','3','2','1'].forEach((num, i) => {
+    const el = document.createElement('div');
+    el.className = 'coord-label';
+    el.textContent = num;
+    const obj = new CSS2DObject(el);
+    obj.position.set(-4.2, 0.05, i - 3);
+    scene.add(obj);
+  });
+}
+
+buildCoordLabels();
+
 // ── Dynamic layers ────────────────────────────────────────────────────────────
 
 const pieceGroup = new THREE.Group();
 const barGroup   = new THREE.Group();
-scene.add(pieceGroup);
-scene.add(barGroup);
+const arrowGroup = new THREE.Group();
+const malomGroup = new THREE.Group();
+malomGroup.visible = false;
+scene.add(pieceGroup, barGroup, arrowGroup, malomGroup);
 
 const pieceGeoW = new THREE.CylinderGeometry(0.26, 0.26, 0.4, 20);
 const pieceGeoB = new THREE.CylinderGeometry(0.26, 0.26, 0.4, 20);
@@ -178,32 +200,108 @@ function rebuildPieces(boardDict) {
   }
 }
 
-const barMeshMap = new Map(); // notation → { mesh, data }
+const barMeshMap = new Map();
+const MAX_BAR_HEIGHT = 4.5;
 
 function rebuildBars(movesArray) {
   barGroup.clear();
   barMeshMap.clear();
-
+  const maxTotal = Math.max(1, ...movesArray.map(m => m.total));
   for (const mv of movesArray) {
     const toSq = mv.to_sq;
     if (!toSq || !POS_COORDS[toSq]) continue;
-
-    const height = Math.max(0.15, mv.win_pct * 4);
-    const geo  = new THREE.BoxGeometry(0.38, height, 0.38);
+    const height = Math.max(0.12, (mv.total / maxTotal) * MAX_BAR_HEIGHT);
     const col  = barColor(mv);
     const mat  = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.88 });
-    const mesh = new THREE.Mesh(geo, mat);
-
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, height, 0.38), mat);
     const [x,, z] = POS_COORDS[toSq];
     mesh.position.set(x, height / 2 + 0.07, z);
     mesh.castShadow = true;
     mesh.userData.notation  = mv.notation;
     mesh.userData.moveData  = mv;
     mesh.userData.baseColor = col.clone();
-
     barGroup.add(mesh);
     barMeshMap.set(mv.notation, { mesh, data: mv });
   }
+}
+
+// ── Move arrows (from_sq → to_sq) ────────────────────────────────────────────
+
+const _up = new THREE.Vector3(0, 1, 0);
+
+function rebuildArrows(movesArray) {
+  arrowGroup.clear();
+  const maxTotal = Math.max(1, ...movesArray.map(m => m.total));
+
+  for (const mv of movesArray) {
+    if (!mv.from_sq || !POS_COORDS[mv.from_sq] || !POS_COORDS[mv.to_sq]) continue;
+    const [fx,, fz] = POS_COORDS[mv.from_sq];
+    const [tx,, tz] = POS_COORDS[mv.to_sq];
+
+    const from3 = new THREE.Vector3(fx, 0.58, fz);
+    const to3   = new THREE.Vector3(tx, 0.58, tz);
+    const dir   = new THREE.Vector3().subVectors(to3, from3);
+    const len   = dir.length();
+    if (len < 0.01) continue;
+    const dirN = dir.clone().normalize();
+    const q    = new THREE.Quaternion().setFromUnitVectors(_up, dirN);
+
+    const col     = barColor(mv).getHex();
+    const opacity = 0.22 + 0.65 * (mv.total / maxTotal);
+    const mat     = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity });
+
+    const headLen  = Math.min(0.38, len * 0.28);
+    const shaftLen = len - headLen - 0.04;
+
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, shaftLen, 6), mat);
+    shaft.position.copy(from3).addScaledVector(dirN, shaftLen / 2);
+    shaft.setRotationFromQuaternion(q);
+
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.115, headLen, 8), mat.clone());
+    head.position.copy(from3).addScaledVector(dirN, shaftLen + headLen / 2);
+    head.setRotationFromQuaternion(q);
+
+    arrowGroup.add(shaft, head);
+  }
+}
+
+// ── Malom overlay (rings + DTW labels) ───────────────────────────────────────
+
+const malomRingGeo = new THREE.RingGeometry(0.26, 0.41, 24);
+malomRingGeo.rotateX(-Math.PI / 2);   // lay flat on board plane
+
+function rebuildMalomOverlay(movesArray) {
+  malomGroup.clear();
+  for (const mv of movesArray) {
+    if (!mv.malom_wdl_after || !mv.to_sq || !POS_COORDS[mv.to_sq]) continue;
+    const col = mv.malom_wdl_after === 'L' ? 0x22c55e
+               : mv.malom_wdl_after === 'W' ? 0xef4444
+               : 0xf59e0b;
+    const mat  = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(malomRingGeo, mat);
+    const [x,, z] = POS_COORDS[mv.to_sq];
+    ring.position.set(x, 0.08, z);
+
+    if (mv.malom_dtw_after != null) {
+      const el = document.createElement('div');
+      el.className = 'malom-dtw-label';
+      el.textContent = Math.abs(mv.malom_dtw_after);
+      el.style.color = mv.malom_wdl_after === 'L' ? '#4ade80'
+                     : mv.malom_wdl_after === 'W' ? '#fca5a5'
+                     : '#fcd34d';
+      const lbl = new CSS2DObject(el);
+      lbl.position.set(0, 0.45, 0);
+      ring.add(lbl);
+    }
+    malomGroup.add(ring);
+  }
+}
+
+const malomToggle = document.getElementById('malom-toggle');
+if (malomToggle) {
+  malomToggle.addEventListener('change', () => {
+    malomGroup.visible = malomToggle.checked;
+  });
 }
 
 // ── Raycasting / hover / click ────────────────────────────────────────────────
@@ -214,41 +312,33 @@ let   hoveredBar = null;
 
 function onMouseMove(e) {
   const rect = canvas.getBoundingClientRect();
-  mouse.x = ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
   mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(barGroup.children);
 
+  const barHits = raycaster.intersectObjects(barGroup.children);
   if (hoveredBar) {
     hoveredBar.material.color.copy(hoveredBar.userData.baseColor);
     hoveredBar.material.opacity = 0.88;
     hoveredBar = null;
     tooltip.style.display = 'none';
   }
-
-  if (hits.length > 0) {
-    const mesh = hits[0].object;
+  if (barHits.length > 0) {
+    const mesh = barHits[0].object;
     hoveredBar = mesh;
     mesh.material.color.set(C.barHov);
     mesh.material.opacity = 1.0;
     showTooltip(e.clientX, e.clientY, mesh.userData.moveData);
-
-    // Highlight corresponding list item
-    document.querySelectorAll('.move-item').forEach(el => {
-      el.classList.toggle('highlighted', el.dataset.notation === mesh.userData.notation);
-    });
+    document.querySelectorAll('.move-item').forEach(el =>
+      el.classList.toggle('highlighted', el.dataset.notation === mesh.userData.notation));
   } else {
     document.querySelectorAll('.move-item.highlighted').forEach(el => el.classList.remove('highlighted'));
   }
 }
 
 canvas.addEventListener('mousemove', onMouseMove);
-canvas.addEventListener('click', e => {
-  if (hoveredBar) {
-    const notation = hoveredBar.userData.notation;
-    applyMove(notation);
-  }
+canvas.addEventListener('click', () => {
+  if (hoveredBar) applyMove(hoveredBar.userData.notation);
 });
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
@@ -265,11 +355,11 @@ function showTooltip(cx, cy, mv) {
     <div class="tt-row"><span class="tt-label">Avg plies left</span><span>${mv.avg_moves_to_end.toFixed(0)}</span></div>
     <div class="tt-row"><span class="tt-label">Malom (after)</span><span>${wdlText}</span></div>
   `;
-  const rect = wrap.getBoundingClientRect();
-  let tx = cx - rect.left + 14;
-  let ty = cy - rect.top  - 10;
-  if (tx + 180 > rect.width)  tx = cx - rect.left - 180;
-  if (ty + 140 > rect.height) ty = cy - rect.top  - 140;
+  const wr = wrap.getBoundingClientRect();
+  let tx = cx - wr.left + 14;
+  let ty = cy - wr.top  - 10;
+  if (tx + 180 > wr.width)  tx = cx - wr.left - 180;
+  if (ty + 140 > wr.height) ty = cy - wr.top  - 140;
   tooltip.style.left    = tx + 'px';
   tooltip.style.top     = ty + 'px';
   tooltip.style.display = 'block';
@@ -278,21 +368,19 @@ function showTooltip(cx, cy, mv) {
 // ── Side-panel updates ────────────────────────────────────────────────────────
 
 function updatePanel(data) {
-  // Turn badge
   const badge = document.getElementById('turn-badge');
   badge.textContent = data.turn === 'W' ? 'White' : 'Black';
   badge.className   = 'turn-badge ' + (data.turn === 'W' ? 'white' : 'black');
 
-  // Position stats
   const posEl = document.getElementById('pos-stats');
   const ps    = data.position_stats;
   if (!ps) {
     posEl.innerHTML = '<div id="no-data-notice">No HumanDB data for this position.</div>';
   } else {
     const tot = Math.max(1, ps.total_games);
-    const wp  = (ps.wins  / tot * 100).toFixed(1);
-    const dp  = (ps.draws / tot * 100).toFixed(1);
-    const lp  = (ps.losses/ tot * 100).toFixed(1);
+    const wp  = (ps.wins   / tot * 100).toFixed(1);
+    const dp  = (ps.draws  / tot * 100).toFixed(1);
+    const lp  = (ps.losses / tot * 100).toFixed(1);
     const malomHtml = ps.malom_wdl
       ? `<span class="malom-badge malom-${ps.malom_wdl.toLowerCase()}">${ps.malom_wdl}${ps.malom_dtw != null ? ` DTW ${ps.malom_dtw}` : ''}</span>`
       : '';
@@ -310,14 +398,13 @@ function updatePanel(data) {
     `;
   }
 
-  // Move list
   const listEl = document.getElementById('move-list');
   listEl.innerHTML = '';
   if (data.moves && data.moves.length > 0) {
     for (const mv of data.moves) {
-      const col   = barColor(mv);
+      const col    = barColor(mv);
       const colHex = '#' + col.getHexString();
-      const wdl   = mv.malom_wdl_after
+      const wdl    = mv.malom_wdl_after
         ? `<span class="move-malom" style="background:${mv.malom_wdl_after==='L'?'#16532a':mv.malom_wdl_after==='W'?'#7f1d1d':'#78350f'};color:${mv.malom_wdl_after==='L'?'#4ade80':mv.malom_wdl_after==='W'?'#fca5a5':'#fcd34d'}">${mv.malom_wdl_after}${mv.malom_dtw_after!=null?' '+mv.malom_dtw_after:''}</span>`
         : '';
       const item = document.createElement('div');
@@ -345,7 +432,6 @@ function updatePanel(data) {
     listEl.innerHTML = '<div style="padding:0.5rem 0.75rem;color:#8a7a5a;font-size:0.8rem">No move data.</div>';
   }
 
-  // Winning line
   const lineEl = document.getElementById('winning-line');
   lineEl.textContent = data.winning_line && data.winning_line.length > 0
     ? data.winning_line.join(' → ') : '—';
@@ -353,7 +439,7 @@ function updatePanel(data) {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-const history = [];  // stack of FEN strings
+const history = [];
 let   currentData = null;
 
 async function loadPosition(fen) {
@@ -366,6 +452,8 @@ async function loadPosition(fen) {
     document.getElementById('fen-input').value = data.fen;
     rebuildPieces(data.board);
     rebuildBars(data.moves || []);
+    rebuildArrows(data.moves || []);
+    rebuildMalomOverlay(data.moves || []);
     updatePanel(data);
     document.getElementById('btn-back').disabled = history.length === 0;
   } catch (err) {
@@ -389,8 +477,7 @@ async function fenAfterMove(fen, move) {
 
 document.getElementById('btn-back').addEventListener('click', () => {
   if (history.length === 0) return;
-  const prev = history.pop();
-  loadPosition(prev);
+  loadPosition(history.pop());
 });
 
 document.getElementById('btn-best').addEventListener('click', async () => {
@@ -414,6 +501,7 @@ function resize() {
   const w = wrap.clientWidth;
   const h = wrap.clientHeight;
   renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -426,6 +514,7 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
 }
 animate();
 

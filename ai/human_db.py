@@ -291,6 +291,15 @@ class HumanDB:
                 result[actual] = r[1] / total_all
         return result
 
+    def query_opponent_loss(
+        self,
+        board: "BoardState",
+        opponent_color: str,
+        min_samples: int = 3,
+    ) -> dict[str, float]:
+        """Compatibility shim — delegates to query() (same signal, different caller convention)."""
+        return self.query(board, board.turn, min_samples=min_samples)
+
     def query_line(
         self,
         board: "BoardState",

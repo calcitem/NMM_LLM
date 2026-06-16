@@ -95,6 +95,23 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 1rem; color: #c8a96e; pointer-events: none; z-index: 50;
     }
+
+    /* CSS2D overlay labels */
+    .coord-label {
+      color: #8a7a5a; font-size: 0.72rem; font-family: monospace; font-weight: 600;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.9); user-select: none; white-space: nowrap;
+    }
+    .malom-dtw-label {
+      font-size: 0.7rem; font-weight: 700; font-family: monospace;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.95); white-space: nowrap;
+    }
+
+    /* Malom toggle */
+    .toggle-label {
+      display: flex; align-items: center; gap: 0.3rem;
+      font-size: 0.8rem; color: #c8a96e; cursor: pointer; white-space: nowrap;
+    }
+    .toggle-label input[type="checkbox"] { accent-color: #c8a96e; }
   </style>
 </head>
 <body>
@@ -108,6 +125,8 @@
   <button class="btn-primary" id="btn-go">Go</button>
   <button class="btn-secondary" id="btn-back" disabled>&#8592; Back</button>
   <button class="btn-secondary" id="btn-best">Best move &#8594;</button>
+  <span class="hdr-sep">|</span>
+  <label class="toggle-label"><input type="checkbox" id="malom-toggle"> Malom overlay</label>
 </header>
 
 <div id="main">
