@@ -815,6 +815,93 @@ async def tools_page(request: Request):
     return templates.TemplateResponse(request, "tools.html", {"v": _static_ver()})
 
 
+@app.get("/explorer")
+async def explorer_page(request: Request):
+    return templates.TemplateResponse(request, "explorer.html", {"v": _static_ver()})
+
+
+def _parse_notation_squares(notation: str) -> tuple[str | None, str]:
+    """Return (from_sq, to_sq) from a move notation string."""
+    notation = notation.replace("×", "x")
+    if "x" in notation:
+        main = notation.split("x")[0]
+    else:
+        main = notation
+    if "-" in main:
+        parts = main.split("-", 1)
+        return parts[0], parts[1]
+    return None, main
+
+
+@app.get("/api/explorer/position")
+async def explorer_position(fen: str = "........................|W|0|0"):
+    """Return position stats + move stats + winning line for the 3D explorer."""
+    from game.board import BoardState, POSITIONS
+    try:
+        board = BoardState.from_fen_string(fen)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    board_dict = {p: board.positions.get(p, "") or "" for p in POSITIONS}
+
+    pos_stats = None
+    moves_out = []
+    winning_line: list[str] = []
+
+    if _human_db and _human_db.is_available():
+        ps = _human_db.query_position(board)
+        if ps:
+            pos_stats = {
+                "total_games": ps.total_games,
+                "wins": ps.wins,
+                "losses": ps.losses,
+                "draws": ps.draws,
+                "malom_wdl": ps.malom_wdl,
+                "malom_dtw": ps.malom_dtw,
+                "canonical_winning_move": ps.canonical_winning_move,
+            }
+        for ms in _human_db.query_moves(board):
+            from_sq, to_sq = _parse_notation_squares(ms.notation)
+            moves_out.append({
+                "notation": ms.notation,
+                "from_sq": from_sq,
+                "to_sq": to_sq,
+                "wins": ms.wins,
+                "losses": ms.losses,
+                "draws": ms.draws,
+                "total": ms.total,
+                "win_pct": round(ms.win_pct, 4),
+                "avg_moves_to_end": round(ms.avg_moves_to_end, 1),
+                "malom_wdl_after": ms.malom_wdl_after,
+                "malom_dtw_after": ms.malom_dtw_after,
+            })
+        winning_line = _human_db.canonical_winning_line(board, depth=15)
+
+    return {
+        "fen": board.to_fen_string(),
+        "turn": board.turn,
+        "board": board_dict,
+        "position_stats": pos_stats,
+        "moves": moves_out,
+        "winning_line": winning_line,
+    }
+
+
+@app.get("/api/explorer/move")
+async def explorer_move(fen: str, move: str):
+    """Apply a move to a FEN and return the resulting position data."""
+    from game.board import BoardState
+    from ai.human_db import _apply_notation
+    try:
+        board = BoardState.from_fen_string(fen)
+        next_board = _apply_notation(board, move)
+    except Exception as exc:
+        return {"error": str(exc)}
+    if next_board is None:
+        return {"error": f"Could not apply move {move!r} to position"}
+    return await explorer_position(next_board.to_fen_string())
+
+
 def _db_file_info(path: "Path | None") -> dict:
     if path is None or not path.exists():
         return {"path": str(path) if path else None, "exists": False, "size_mb": 0, "mtime": None}

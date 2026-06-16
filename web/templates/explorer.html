@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NMM Position Explorer</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ v }}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1a1612; color: #e8d9c0; font-family: system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem;
+      background: #2a2018; border-bottom: 1px solid #5a4a2a; flex-shrink: 0;
+    }
+    header h1 { font-size: 1.1rem; color: #c8a96e; white-space: nowrap; }
+    .hdr-sep { color: #5a4a2a; }
+    #fen-input {
+      flex: 1; min-width: 0; background: #1a1612; border: 1px solid #5a4a2a;
+      color: #e8d9c0; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
+      font-family: monospace;
+    }
+    button { cursor: pointer; border: none; border-radius: 4px; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
+    .btn-primary { background: #c8a96e; color: #1a1612; font-weight: 600; }
+    .btn-secondary { background: #3a2e1e; color: #c8a96e; border: 1px solid #5a4a2a; }
+    .btn-secondary:hover { background: #4a3c28; }
+    .btn-secondary:disabled { opacity: 0.4; cursor: default; }
+    a.btn-back { background: #3a2e1e; color: #c8a96e; border: 1px solid #5a4a2a; text-decoration: none; padding: 0.3rem 0.75rem; border-radius: 4px; font-size: 0.85rem; }
+
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── 3D canvas ── */
+    #canvas-wrap { flex: 1; position: relative; }
+    #board-canvas { width: 100%; height: 100%; display: block; }
+
+    /* ── Side panel ── */
+    #side-panel {
+      width: 280px; flex-shrink: 0; background: #221c12; border-left: 1px solid #5a4a2a;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .panel-section { padding: 0.75rem; border-bottom: 1px solid #3a2e1e; }
+    .panel-section h3 { font-size: 0.78rem; color: #8a7a5a; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+
+    /* Turn badge */
+    #turn-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+    #turn-badge.white { background: #f5f0dc; color: #1a1612; }
+    #turn-badge.black { background: #2a2020; color: #e8d9c0; border: 1px solid #5a4a2a; }
+
+    /* Position stats */
+    .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; margin: 0.2rem 0; }
+    .stat-label { color: #8a7a5a; }
+    .stat-val { color: #e8d9c0; font-weight: 600; }
+    .wdl-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 0.4rem 0; }
+    .wdl-bar .w { background: #22c55e; }
+    .wdl-bar .d { background: #f59e0b; }
+    .wdl-bar .l { background: #ef4444; }
+    .malom-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; margin-top: 0.3rem; }
+    .malom-w { background: #16532a; color: #4ade80; }
+    .malom-d { background: #78350f; color: #fcd34d; }
+    .malom-l { background: #7f1d1d; color: #fca5a5; }
+
+    /* Move list */
+    #move-list { flex: 1; overflow-y: auto; }
+    .move-item {
+      padding: 0.45rem 0.75rem; border-bottom: 1px solid #2a2018; cursor: pointer;
+      display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem;
+    }
+    .move-item:hover { background: #2a2018; }
+    .move-item.highlighted { background: #3a2e1e; }
+    .move-bar-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .move-notation { font-family: monospace; min-width: 4.5em; }
+    .move-pct { margin-left: auto; font-weight: 600; }
+    .move-sub { color: #8a7a5a; font-size: 0.72rem; }
+    .move-malom { font-size: 0.72rem; padding: 0.1rem 0.3rem; border-radius: 4px; }
+
+    /* Winning line */
+    #winning-line { font-family: monospace; font-size: 0.8rem; color: #c8a96e; word-break: break-all; }
+
+    /* Tooltip */
+    #tooltip {
+      position: absolute; background: #2a2018; border: 1px solid #5a4a2a; border-radius: 6px;
+      padding: 0.5rem 0.75rem; font-size: 0.78rem; pointer-events: none; z-index: 100;
+      min-width: 160px; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    #tooltip .tt-notation { font-family: monospace; font-size: 0.9rem; font-weight: 700; color: #c8a96e; }
+    #tooltip .tt-row { display: flex; justify-content: space-between; gap: 1rem; margin-top: 0.2rem; color: #e8d9c0; }
+    #tooltip .tt-label { color: #8a7a5a; }
+
+    /* No-data notice */
+    #no-data-notice { color: #8a7a5a; font-size: 0.82rem; padding: 0.5rem 0; }
+
+    /* Loading */
+    #loading-overlay {
+      position: absolute; inset: 0; background: rgba(26,22,18,0.7);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; color: #c8a96e; pointer-events: none; z-index: 50;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="btn-back">&#8592; Game</a>
+  <span class="hdr-sep">|</span>
+  <h1>Position Explorer</h1>
+  <span class="hdr-sep">|</span>
+  <input id="fen-input" type="text" placeholder="FEN position string…" spellcheck="false">
+  <button class="btn-primary" id="btn-go">Go</button>
+  <button class="btn-secondary" id="btn-back" disabled>&#8592; Back</button>
+  <button class="btn-secondary" id="btn-best">Best move &#8594;</button>
+</header>
+
+<div id="main">
+  <div id="canvas-wrap">
+    <canvas id="board-canvas"></canvas>
+    <div id="tooltip"></div>
+    <div id="loading-overlay">Loading…</div>
+  </div>
+
+  <div id="side-panel">
+    <div class="panel-section">
+      <h3>To move</h3>
+      <span id="turn-badge" class="white">White</span>
+    </div>
+
+    <div class="panel-section">
+      <h3>Position (human games)</h3>
+      <div id="pos-stats">
+        <div id="no-data-notice">No HumanDB data for this position.</div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Next moves</h3>
+      <div id="move-list"></div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Canonical winning line</h3>
+      <div id="winning-line">—</div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="/static/explorer.js?v={{ v }}"></script>
+</body>
+</html>

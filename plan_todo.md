@@ -27,8 +27,8 @@ Track 1 (heuristic/phase-control), SE-1 through SE-9, SE-14, and the B-55–B-64
 |  | **SE-11** ✅ | Opponent likelihood weighting + VN reordering (SE-11b/11c) via TrajectoryDB |
 |  | **B-75** ✅ | Background pondering during opponent's turn |
 |  | **B-51** | Build extended endgame WDL tables (code ready — run `--build-all`) |
-|  | **SE-12** | Incremental evaluation cache (Zobrist-keyed) |
-|  | **SE-13** | N-gram opponent move predictor |
+|  | **SE-12** ✅ | Incremental evaluation cache (Zobrist-keyed) |
+|  | **SE-13** ✅ | N-gram opponent move predictor |
 
 
 ### Recently completed (2026-05-28)
@@ -1263,7 +1263,7 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 - `web/app.py` — `Session.ponder\_manager`; start/stop hooks in `\_ai\_turn` and move/capture handlers
 
 
-### SE-12 — Incremental Evaluation Cache (Zobrist-Keyed Sub-Functions) ⬜
+### SE-12 — Incremental Evaluation Cache (Zobrist-Keyed Sub-Functions) ✅ 2026-06-10
 
 **Why:** Heavy heuristic sub-calls recompute from scratch every leaf call. With Zobrist hashing already in place (SE-1), a secondary cache keyed by board hash stores sub-function results. Requires SE-1.
 
@@ -1272,7 +1272,7 @@ The simple cap is preferred: fewer fields, same effect, easier to reason about.
 - `ai/heuristics.py` — result cache dict keyed by Zobrist hash for top-cost sub-functions; invalidate on `apply\_move`
 
 
-### SE-13 — N-Gram Opponent Move Predictor ⬜
+### SE-13 — N-Gram Opponent Move Predictor ✅ 2026-06-10
 
 **Why:** Complements TrajectoryDB (win/loss rates) with a pure move-frequency bigram/trigram model. Feeds into SE-11 with richer per-sequence predictions.
 
@@ -1685,3 +1685,223 @@ The B-22 through B-37 cluster around three confirmed core weaknesses:
 
 **Weakness 3 — Tactical priority ladder exists in ordering but not in scoring.** `\_order\_moves()` has a clean P0/P1/P2 hierarchy but `tactical\_move\_bonus()` is fully additive — speculative bonuses can still outscore emergency blocks. B-29 fixes the chain case; B-22 investigates the block case.
 
+
+
+## Game Problem Catalogue (2026-06-09)
+
+The following bugs were recorded from live game observations. Games are expressed in the same half-move notation as the rest of the backlog. All game records use White as the AI under examination unless otherwise noted.
+
+
+### Bug B-91 — Malom perfect DB does not override bad last placement ⬜ ★★★ [partial]
+
+**Symptom:** White AI level 9 (Malom perfect DB enabled) places its 9th piece at a4 instead of blocking the Black triangle at c5/d6/e4.
+
+**Game record:**
+
+```
+1.f4 b4 / 2.d2 d6 / 3.b6 e4 / 4.c4 d3 / 5.d7 g4 / 6.e3 d1 / 7.g1 c5 / 8.a7 g7 / 9.a4 b2 / 10.d2-f2
+```
+
+White's 9th piece is a4. With Black already holding c5, d6, e4 (inner cardinal triangle), Black can form multiple closeable 2-configs from the move phase. White should have placed at a square that blocks c5-d6 or e4-c4 convergence (e.g. e5, d5, or f6 depending on what remains available).
+
+**Expected behaviour:** With Malom perfect DB active, placement moves should be scored by WDL outcome at the resulting position — a4 should rank below a blocking placement if the DB entries confirm a different move is winning/drawing.
+
+**Root cause (suspected):**
+
+1. The Malom DB probe in `_negamax` / SE-14 is called at leaf nodes but placement-phase root scoring still relies entirely on `tactical_move_bonus` + opening book. If the DB is only queried mid-search rather than as a root override, a sufficiently large tactical bonus (opening book adherence, feeder bonuses) can mask a DB-indicated loss.
+
+2. The placement dead-filter (B-69) only filters 0-free-neighbour squares. a4 has at least one free neighbour so the filter does not remove it.
+
+**Proposed fix:** At root selection in `choose_move()` (or `_root_search()`), after negamax returns, check if the Malom/endgame DB returns a WDL result for the top candidate's resulting position. If the DB says LOSS and a different candidate is WIN or DRAW, override the negamax choice with the DB-indicated best move (same pattern as the current single-move WDL carveout, but applied across the full root candidate list).
+
+**Files:**
+
+- `ai/game_ai.py` — root WDL override pass after `_root_search` completes
+- `ai/endgame_solved_db.py` — confirm `query()` is callable on placement-phase positions
+
+**Implementation notes (2026-06-09):** The root cause was two separate issues:
+1. The dead-placement filter (B-69) was removing b2 and f6 from the candidate list because they had 0 free neighbors, even though they created closeable 2-configs via external-piece moves (d2→f2 closes b2-d2-f2). Fixed: added "setup-rescue" exemption that re-admits dead placements that gain a new closeable 2-config via `apply_move + _closeable_mills`.
+2. The Malom DB root override cannot be tested (no .sec2 sector files on this machine). That part remains unimplemented.
+After the partial fix, the AI picks e5 instead of a4 in the B-91 position (e5 is tactically sound; a4 was creating a dead-end 2-config). The full DB override (Malom required) remains a future task.
+
+
+### Bug B-92 — AI misses mill relay (advance-to-relay opportunity) ✅ ★★
+
+**Symptom:** Black AI (move phase, turn 14) plays c4-c3 instead of a7-d7, which would set up the g1-g4-g7 cycling mill via d7→g7.
+
+**Game record:**
+
+```
+1.d6 d2 / 2.f4 b4 / 3.f6 b6 / 4.f2xb6 b6 / 5.e5 d5 / 6.e4 g4 / 7.e3xg4 d3 / 8.d1 g4 / 9.b2 a4 / 10.d1-a1 b4-c4 / 11.b2-b4 a4-a7 / 12.a1-a4 d2-d1 / 13.f2-d2 d1-g1 / 14.d2-f2xd3 c4-c3
+```
+
+After turn 14, Black plays c4-c3. Better: a7-d7, which establishes Black control of the d-column and sets up g1-g4-g7 (Black has g1 and g4; moving d7→g7 closes the mill). c4-c3 creates a 2-config (c3-c4-c5) but c5 is unoccupied by Black — no immediate progression.
+
+**Root cause (suspected):** The relay-setup value of a7-d7 depends on a 3-ply chain (a7→d7; then d7→g7 closes mill). The `_sealed_two_configs` heuristic only rewards moves that *create* a sealed config in one step. A move that positions a piece to *enable* a future sealed config in one more step earns no bonus. The trajectory DB may also not have enough data on this specific position.
+
+**Proposed fix:** In `_order_moves` or `tactical_move_bonus`, add a 2-ply relay bonus: for each candidate move, simulate the resulting board and count sealed 2-configs that would become closeable in one further step (i.e. the piece moved is now adjacent to an empty closing square of an existing 2-config). Weight approximately 0.5× the `sealed_setup_bonus`.
+
+**Files:**
+
+- `ai/heuristics.py` — `tactical_move_bonus()`: relay setup bonus (2-ply sealed approach)
+- `ai/game_ai.py` — optional: P0.25 ordering tier for relay-setup moves
+
+
+### Enhancement B-93 — Ponder: use trajectory DB to predict opponent moves ✅ 2026-06-10
+
+**Symptom:** `PonderManager` predicts the opponent's reply using `_order_moves` priority ordering (mill closes > blocks > history) optionally refined by VN re-score of the top 3 candidates. It does not query the trajectory DB or FullGameDB, both of which contain frequency-weighted human move data.
+
+**Current behaviour:** `ai/ponder.py` calls `_order_moves(board, opp_color)` and takes the first result as the predicted move. On a ponder hit, the cached move is returned immediately with `elapsed=0.00s`.
+
+**Proposed fix:**
+
+1. In `PonderManager._ponder_thread()`, after `_order_moves` produces the candidate list, query `trajectory_db.query(move_history)` and blend the frequency weights into the candidate ordering (same logic as SE-11).
+2. If FullGameDB is available, also query it for the post-AI-move position and bias toward high-frequency human continuations.
+3. The predicted opponent move becomes the highest-scoring candidate after blending rather than the raw priority-order first element.
+
+**Impact:** Better ponder hit rate → more AI turns served from cache → lower latency.
+
+**Files:**
+
+- `ai/ponder.py` — `_ponder_thread()`: add trajectory DB + FullGameDB query for opponent prediction
+- `web/app.py` — pass `_trajectory_db` and `_fullgame_db` to `PonderManager` constructor
+
+
+### Enhancement B-94 — Ponder hit: search deeper with remaining think time ✅ 2026-06-10
+
+**Symptom:** When the human plays the pondered move (ponder hit), the AI returns the cached move immediately with `elapsed=0.00s`. The remaining think-time budget is wasted.
+
+**Proposed behaviour:** On a ponder hit, the pre-computed root move is the starting best move. Use the remaining time budget (configured think time minus the ~0 ms elapsed) to run a deeper iterative deepening search from the same position (the cached result seeds the aspiration window and TT from the ponder search). Return the deepest-confirmed best move when time expires, or the cached result if time is negligible.
+
+**Implementation sketch:**
+
+1. `PonderManager.get_result()` returns `(best_move, ponder_board, ponder_tt)` — the cached TT table from the ponder search.
+2. In `_ai_turn()`, on ponder hit: call `game_ai._root_search(ponder_board, remaining_time, seed_move=best_move, seed_tt=ponder_tt)` instead of returning immediately.
+3. `_root_search` starts aspiration window around the cached score; iterative deepening continues from the depth already reached in the ponder search.
+
+**Files:**
+
+- `ai/ponder.py` — expose TT state from completed ponder search
+- `ai/game_ai.py` — `_root_search()`: accept `seed_move` / `seed_tt` to resume from ponder depth
+- `web/app.py` — `_ai_turn()`: pass remaining budget on ponder hit
+
+
+### Enhancement B-95 — Disable complex heuristics at difficulty 1–2 ✅ ★
+
+**Goal:** At difficulty 1 and 2, the AI should make noticeably simpler, more beginner-like decisions. Several heuristics (defer-for-chain, sealed 2-config detection, fork anticipation, convergence block) make the AI play too well even at low difficulty because they fire unconditionally regardless of the difficulty setting.
+
+**Proposed changes:**
+
+- At difficulty ≤ 2: disable `_move_phase_fork_anticipation`, `_sealed_two_configs` bonus in `tactical_move_bonus`, `defer_for_chain` heuristic, and `_dual_connected_mill_alert`.
+- At difficulty ≤ 1: also disable `_pinned_move_squares` (the AI should occasionally blunder into traps).
+- The `difficulty` value is already available on the `GameAI` instance — add an `_is_beginner` property (`difficulty <= 2`) and gate the relevant blocks.
+
+**Files:**
+
+- `ai/game_ai.py` — `_is_beginner` guard in `choose_move` and `_order_moves`
+- `ai/heuristics.py` — `tactical_move_bonus()`: gate fork anticipation and sealed setup bonus on `difficulty`
+
+
+### Enhancement B-96 — Log to terminal when sentinel intervenes on an AI move ✅ ★
+
+**Symptom:** When the sentinel changes (intervenes on) the GameAI's chosen move, there is no terminal output. The intervention is only visible in the browser AI Discussion box.
+
+**Proposed fix:** In `ai/game_ai.py`, in `_sentinel_score_adjust()` and `_sentinel_reconsider()`, when an intervention fires (i.e. `new_move != move` or the llm/rank1 branch executes), emit a `print()` or `logger.info()` line to stdout:
+
+```
+[Sentinel] intervened: engine intended <orig_notation> → redirected to <new_notation> (type: score_adjust|llm_override|sentinel_best, gap: {gap:.2f})
+```
+
+This makes sentinel activity visible when monitoring the server process, and aids debugging of B-91 through B-98 game problems.
+
+**Files:**
+
+- `ai/game_ai.py` — `_sentinel_score_adjust()` and `_sentinel_reconsider()`: add logger.info on intervention
+
+
+### Bug B-97 — Mill blocker abandonment (three game instances) ✅ [partial] ★★★
+
+Three separate games exhibit the same pattern: the AI vacates a square that is the sole blocker of an opponent mill line, either abandoning an explicit block or disarming its own mill threat.
+
+**Instance (a) — Turn 16, Level 3, d1→g1 abandons block on a1-d1-g1:**
+
+```
+1.d6 d2 / 2.f4 a7 / 3.f6 b6 / 4.f2xa7 g1 / 5.d3 d5 / 6.a4 g4 / 7.g7 a7 / 8.b4 c4 / 9.e5 e3 / 10.f4-e4 g4-f4 / 11.g7-g4 d2-b2 / 12.f2-d2 g1-d1 / 13.a4-a1 a7-a4 / 14.g4-g7 a4-a7 / 15.g7-d7 a7-a4 / 16.d7-a7 d1-g1
+```
+
+At turn 16, Black plays d1-g1. Black has a1 on board; White plays a7 (turn 16). With d1 vacated, the a1-d1-g1 mill is now open to any d-column piece. Black should maintain d1 as the blocking anchor and find a different move.
+
+**Instance (b) — Turn 15, f2→f4 disarms own mill threat:**
+
+```
+1.f4 b4 / 2.d2 d6 / 3.b6 f2 / 4.d1 d3 / 5.c4 a4 / 6.c5 c3 / 7.e3 g4 / 8.d7 g1 / 9.g7 e5 / 10.d7-a7 e5-d5 / 11.a7-d7 a4-a7 / 12.d2-b2 f2-d2 / 13.e3-e4 d3-e3 / 14.f4-f2 d6-f6 / 15.f2-f4 d2-d3xe4
+```
+
+White plays f2-f4 at turn 15. White had just played f4-f2 (turn 14) to set up f2-d2-b2 (White holds f2 and d2; b2 is the closing square). f2-f4 vacates f2, dissolving this 2-config. Black takes d2-d3 and captures e4 with tempo. White should have preserved f2 and closed the f2-d2-b2 mill instead.
+
+**Instance (c) — Turn 10, d2→d3 abandons cardinal control:**
+
+```
+1.d6 d2 / 2.f4 b4 / 3.f6 b6 / 4.f2xb6 b6 / 5.e5 b2xe5 / 6.c5 d5 / 7.c3 c4 / 8.a4 g4 / 9.a1 a7 / 10.a1-d1 d2-d3
+```
+
+White plays a1-d1 at turn 10 (creates 2-config a1-d1-g1). Black responds d2-d3. d2 was a cardinal node and a key feeder for the b2-d2-f2 line. d3 is a weaker square with fewer strategic connections. The move gains nothing while surrendering a key central node.
+
+**Root cause (common thread):** B-70 (`_pinned_move_squares`) only detects 1-ply pins where an opponent piece is *adjacent* to the blocking square. Instances (a) and (c) involve longer setup chains (opponent needs 2+ moves to exploit the vacated square). Instance (b) involves the AI voluntarily undoing its own setup, which no pin rule addresses.
+
+**Proposed fixes:**
+
+1. **Instances (a) and (c):** Extend B-77 (2-ply pin rule) to also cover 2-move opponent setup chains. The `_pinned_move_squares_2ply()` helper should detect when vacating S allows an opponent piece to move to an adjacent square S' where S' then becomes the blocker-needed square for an existing opponent 2-config.
+
+2. **Instance (b):** Add a "2-config dissolution penalty" in `tactical_move_bonus`: when a move vacates a square that was part of the AI's own closeable 2-config (and no mill is being closed), apply a penalty proportional to the number of closeable 2-configs lost (`closeable_before - closeable_after`). This is symmetric to the `setup_mill_bonus` and should be sized similarly (~`weights.setup_mill`).
+
+**Files:**
+
+- `ai/game_ai.py` — `_pinned_move_squares_2ply()` extension (B-77 follow-on)
+- `ai/heuristics.py` — `tactical_move_bonus()`: 2-config dissolution penalty
+
+
+### Bug B-98 — Mill patience: AI closes mill prematurely without net subsequent benefit ✅ ★★
+
+**Symptom:** Black AI (turn 12) plays d2→d1, creating a non-closeable 2-config (g1-d1-a1 — the closing square a1 has no reachable Black piece outside the mill), instead of d5→c5 which maintains cardinal control and patience.
+
+**Game record:**
+
+```
+1.d6 d2 / 2.f4 b4 / 3.f6 b6 / 4.f2xb6 b6 / 5.e5 d5 / 6.e4 g4 / 7.e3xg4 d3 / 8.d1 g4 / 9.b2 a4 / 10.d1-a1 b4-c4 / 11.b2-b4 a4-a7 / 12.a1-a4 d2-d1
+```
+
+After White plays a1-a4 (turn 12), Black has g4 and d3 on board with d5 also available. Black plays d2-d1, creating g1-d1-a1. But a1's only neighbours are a4=White and d1=Black(in-mill) — the 2-config is permanently non-closeable. Better: d5-c5 (cardinal node, adjacent to c4=Black; creates closeable c3-c4-c5 via the c-column; maintains central positional control).
+
+**Root cause:** The `setup_mill_bonus` fix from B-87 correctly uses `_closeable_mills` delta to avoid rewarding non-closeable 2-configs. However, the broader heuristic still awards positional bonuses for moves that land at well-connected squares (d1 is a junction square with high `cardinal_bonus`). When a player has few pieces on board and d1 is "free", the cardinal node bonus plus any assembly reward may still net more than d5-c5 (which involves a less dramatic static improvement).
+
+Additionally, the trajectory DB may not have enough data on this specific 12-move position to down-weight d2-d1 in favour of d5-c5.
+
+**Proposed fix:**
+
+1. In `tactical_move_bonus()`, add a "cardinal patience penalty": when the AI creates a non-closeable 2-config by a move to a cardinal/junction node (d1, d7, a4, g4, etc.), apply a small penalty (~50–80 pts) to represent the opportunity cost of locking a feeder piece in an un-closeable configuration. This is distinct from the dead-placement penalty — the piece is mobile, but structurally committed to a dead end.
+
+2. Extend `_closeable_mills` analysis to also check whether a 2-config whose closing square has both neighbours occupied will become closeable in ≤2 moves (i.e. one of the blocking pieces will need to move). If no such path exists, apply the patience penalty.
+
+**Files:**
+
+- `ai/heuristics.py` — `tactical_move_bonus()`: non-closeable 2-config penalty
+- `ai/heuristics.py` — optional `_will_become_closeable(board, color, mill, horizon=2)` helper
+
+
+### Enhancement B-99 — HumanDB Malom DTW overlay on the main game board ⬜ ★
+
+**Description:** The HumanDB already stores `malom_dtw` (Malom depth-to-win for the current position) and `malom_dtw_after` (DTW for the position after each candidate move). Add a GUI toggle near the existing Sentinel/Malom overlay to display these values on the board.
+
+**What to show:** For each square that is a valid next move from the current position, overlay the `malom_dtw_after` value as a badge on the target square — showing how many moves perfect play needs to win or lose from that resulting position. This lets the player compare "shortest path to forced win" (Malom) against "historically played moves" (human win%) in a single view.
+
+**Requires:** `data/human_db.sqlite` built with `--malom-db` (so `malom_dtw_after` columns are populated). When the field is NULL (DB not annotated), the overlay shows nothing for that square.
+
+**GUI placement:** New checkbox "DTW" in the board overlay control group (alongside Sentinel and Malom DB toggles). Enabled only when HumanDB is loaded and `malom_dtw_after` data is present.
+
+**API change:** `GET /api/explorer/position` already returns `malom_dtw_after` per move. For the main game board, the existing `/api/hint` or a new `/api/board_dtw?fen=…` endpoint returns `{notation: dtw_after}` dict for the current position.
+
+**Files:**
+- `web/app.py` — add `/api/board_dtw` endpoint querying `_human_db.query_moves(board)`
+- `web/static/game.js` — DTW overlay layer (badge rendering alongside Sentinel badges)
+- `web/templates/index.html` — DTW toggle checkbox near Sentinel toggle
