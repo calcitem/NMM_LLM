@@ -52,6 +52,7 @@ from ai.opening_recognizer import OpeningRecognizer
 from ai.move_guidance import build_choose_move_kwargs, pick_target_opening
 from ai.endgame_recognizer import EndgameRecognizer
 from ai.trajectory_db import TrajectoryDB
+from ai.human_db import HumanDB
 from ai.ngram_opponent_model import NGramOpponentModel
 from ai.endgame_db import EndgameDB
 from ai.fullgame_db import FullGameDB
@@ -77,20 +78,40 @@ def _persist_game_record(record: dict) -> None:
     log.info("Game saved (no-LLM): %s", fname.name)
 
 
-# Load trajectory DB once at startup — updated incrementally as games complete.
+# HumanDB: if the pre-built SQLite exists, use it in place of the slow file-scan
+# TrajectoryDB for human-corpus positions.  Falls back to TrajectoryDB when absent.
 _human_games_dir = _ROOT / "data" / "human_games"
+_human_db_path   = _ROOT / "data" / "human_db.sqlite"
+_human_db: "HumanDB | None" = None
+try:
+    _hdb = HumanDB(_human_db_path)
+    if _hdb.is_available():
+        _human_db = _hdb
+        log.info("HumanDB: %d positions, %d games — skipping TrajectoryDB file scan.",
+                 _human_db.entry_count, _human_db.game_count)
+except Exception as _exc:
+    log.warning("HumanDB: load failed — %s", _exc)
+
+# TrajectoryDB: only do the expensive file scan when HumanDB is not available.
 _trajectory_db   = TrajectoryDB(
     _ROOT / "data" / "games",
     extra_dirs=[_human_games_dir] if _human_games_dir.exists() else [],
 )
-try:
-    _trajectory_db.load()
-    log.info(
-        "TrajectoryDB: %d games, %d state entries",
-        _trajectory_db.game_count, _trajectory_db.entry_count,
-    )
-except Exception as _exc:
-    log.warning("TrajectoryDB: load failed — %s", _exc)
+if _human_db is None:
+    try:
+        _trajectory_db.load()
+        log.info(
+            "TrajectoryDB: %d games, %d state entries",
+            _trajectory_db.game_count, _trajectory_db.entry_count,
+        )
+    except Exception as _exc:
+        log.warning("TrajectoryDB: load failed — %s", _exc)
+else:
+    log.info("TrajectoryDB: file scan skipped (HumanDB active).")
+
+# _effective_tdb is what gets passed to GameAI as trajectory_db=.
+# It is HumanDB when available (duck-compatible), otherwise TrajectoryDB.
+_effective_tdb = _human_db if _human_db is not None else _trajectory_db
 
 # SE-13: load n-gram opponent model from the same games directories.
 _ngram_model: NGramOpponentModel = NGramOpponentModel()
@@ -257,7 +278,7 @@ async def _maybe_consolidate(ws: "WebSocket") -> None:
 
 
 async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
-    global _trajectory_db, _endgame_db
+    global _trajectory_db, _endgame_db, _effective_tdb
     try:
         log.info("Library consolidation: %d games", game_count)
         new_tdb = TrajectoryDB(
@@ -266,6 +287,8 @@ async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
         )
         await asyncio.to_thread(new_tdb.load)
         _trajectory_db = new_tdb
+        if _human_db is None:
+            _effective_tdb = _trajectory_db
 
         new_edb = EndgameDB(_ROOT / "data" / "games")
         await asyncio.to_thread(new_edb.load)
@@ -276,12 +299,12 @@ async def _consolidate_libraries(ws: "WebSocket", game_count: int) -> None:
         ))
         log.info(
             "Library reload done: %d traj entries, %d endgame positions",
-            _trajectory_db.entry_count, _endgame_db.position_count,
+            _effective_tdb.entry_count, _endgame_db.position_count,
         )
         await _send(ws, {
             "type":              "library_reload",
             "game_count":        game_count,
-            "traj_entries":      _trajectory_db.entry_count,
+            "traj_entries":      _effective_tdb.entry_count,
             "endgame_positions": _endgame_db.position_count,
         })
     except Exception as exc:
@@ -836,10 +859,11 @@ async def tool_status():
         s2 = _endgame_solved_db.stats() if hasattr(_endgame_solved_db, "stats") else {}
         esdb_info["positions"] = s2.get("positions", 0) if s2 else 0
 
-    # Trajectory DB
+    # Trajectory DB (or HumanDB if active)
     tdb_info = {
-        "games":   _trajectory_db.game_count,
-        "entries": _trajectory_db.entry_count,
+        "games":   _effective_tdb.game_count,
+        "entries": _effective_tdb.entry_count,
+        "source":  "human_db" if _human_db is not None else "trajectory_db",
     }
 
     # Endgame (in-memory from games) DB
@@ -1188,7 +1212,9 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
                 record["draw_reason"] = draw_reason
             session._last_game_record = record
             await asyncio.to_thread(_persist_game_record, record)
-            if _trajectory_db is not None:
+            if _human_db is not None:
+                await asyncio.to_thread(_human_db.add_game, record)
+            elif _trajectory_db is not None:
                 await asyncio.to_thread(_trajectory_db.add_game, record)
             if _endgame_db is not None:
                 await asyncio.to_thread(_endgame_db.add_game, record)
@@ -1245,7 +1271,9 @@ async def _game_over(ws: WebSocket, session: Session) -> None:
 
         session._last_game_record = record
         await asyncio.to_thread(_persist_game_record, record)
-        if _trajectory_db is not None:
+        if _human_db is not None:
+            await asyncio.to_thread(_human_db.add_game, record)
+        elif _trajectory_db is not None:
             await asyncio.to_thread(_trajectory_db.add_game, record)
         if _endgame_db is not None:
             await asyncio.to_thread(_endgame_db.add_game, record)
@@ -1458,7 +1486,7 @@ def _nollm_choose_move(session: Session, board: BoardState) -> dict:
         target_opening=session.target_opening,
         game_sym_idx=session.game_sym_idx,
         ply_offset=session.game_ply_offset,
-        trajectory_db=_trajectory_db,
+        trajectory_db=_effective_tdb,
     )
 
     # Re-target when the recognizer has found a FEN transposition to a different opening.
@@ -1597,7 +1625,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
             board=session.engine.board,
             game_ai=session.game_ai,
             game_notations=_game_notations,
-            trajectory_db=_trajectory_db,
+            trajectory_db=_effective_tdb,
             fullgame_db=_fullgame_db,
             ngram_model=_ngram_model,
         )
@@ -1849,7 +1877,7 @@ async def ws_endpoint(websocket: WebSocket):
                             poor_move_threshold=settings.get("poor_move_threshold", 0.3),
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
-                            trajectory_db=_trajectory_db,
+                            trajectory_db=_effective_tdb,
                             endgame_db=_endgame_db,
                             vs_human=True,  # coordinator always faces a human in web games
                             human_color=hc,
@@ -1979,7 +2007,7 @@ async def ws_endpoint(websocket: WebSocket):
                             poor_move_threshold=settings.get("poor_move_threshold", 0.3),
                             max_poor_move_comments=settings.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=rec, endgame_recognizer=egr,
-                            trajectory_db=_trajectory_db,
+                            trajectory_db=_effective_tdb,
                             endgame_db=_endgame_db,
                             vs_human=True,
                             human_color=hc,
@@ -2210,9 +2238,9 @@ async def ws_endpoint(websocket: WebSocket):
 
                 # Trajectory DB: per-move relative frequency at this board state
                 traj_freqs: dict = {}
-                if _trajectory_db:
+                if _effective_tdb:
                     try:
-                        traj_freqs = _trajectory_db.query_all_frequencies(diag_board)
+                        traj_freqs = _effective_tdb.query_all_frequencies(diag_board)
                     except Exception:
                         pass
 
@@ -2306,11 +2334,21 @@ async def ws_endpoint(websocket: WebSocket):
                 # ── Sentinel overlay: score each legal move ───────────────────
                 if _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
                     try:
-                        candidates = [
-                            {"from": mv_e.get("from"), "to": mv_e.get("to"),
-                             "capture": mv_e.get("capture")}
-                            for mv_e in moves_out
-                        ]
+                        if diag_mode == "capture" and session._pending is not None:
+                            # Build candidates matching training format:
+                            # {"from": mill_from, "to": mill_to, "capture": cap_sq}
+                            _pend = session._pending
+                            candidates = [
+                                {"from": _pend.get("from"), "to": _pend.get("to"),
+                                 "capture": mv_e.get("to")}
+                                for mv_e in moves_out
+                            ]
+                        else:
+                            candidates = [
+                                {"from": mv_e.get("from"), "to": mv_e.get("to"),
+                                 "capture": mv_e.get("capture")}
+                                for mv_e in moves_out
+                            ]
                         if candidates:
                             sent_advice = await asyncio.to_thread(
                                 _sentinel_advisor.advise,
@@ -2409,7 +2447,7 @@ async def ws_endpoint(websocket: WebSocket):
                         poor_move_threshold=_s.get("poor_move_threshold", 0.3),
                         max_poor_move_comments=_s.get("max_poor_move_comments_per_game", 5),
                         opening_recognizer=rec, endgame_recognizer=egr,
-                        trajectory_db=_trajectory_db,
+                        trajectory_db=_effective_tdb,
                         endgame_db=_endgame_db,
                         vs_human=True,
                         human_color=human_color,
@@ -2927,7 +2965,7 @@ async def ws_endpoint(websocket: WebSocket):
                             poor_move_threshold=_s.get("poor_move_threshold", 0.3),
                             max_poor_move_comments=_s.get("max_poor_move_comments_per_game", 5),
                             opening_recognizer=_rec, endgame_recognizer=_egr,
-                            trajectory_db=_trajectory_db,
+                            trajectory_db=_effective_tdb,
                             endgame_db=_endgame_db,
                             vs_human=False,
                             human_color=_opp_color,  # each AI's "opponent" is the other color

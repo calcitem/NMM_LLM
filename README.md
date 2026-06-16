@@ -161,13 +161,17 @@ See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
 
 During the placement phase, the Game Info panel shows the **opening family** as it emerges — Outer Square, Diamond, Cardinal Cross, and other named configurations. White and Black families are shown independently when they differ.
 
-### Trajectory-based learning (TrajectoryDB)
+### Trajectory-based learning (HumanDB / TrajectoryDB)
 
-- All completed games are indexed by move prefix at server startup
+- All completed games are indexed by canonical board state and used to guide opening and midgame play
 
-- The AI consults win-rate statistics for the current move sequence when choosing openings, and avoids move sequences associated with losses
+- The AI consults win-rate statistics for the current position when choosing moves, and avoids lines associated with losses
 
-- Adaptive-softened games (where the AI was deliberately weakened) are excluded from the index so intentional blunders don't pollute the library
+- If `data/human_db.sqlite` exists (built with `tools/build_human_db.py`) it is used as the primary source — a single SQLite file that opens in milliseconds instead of scanning thousands of game files at startup
+
+- Without the SQLite file, the server falls back to TrajectoryDB which scans `data/games/` and `data/human_games/` on startup
+
+- Adaptive-softened games (where the AI was deliberately weakened) are excluded so intentional blunders never pollute the library
 
 ### Endgame learning (EndgameDB)
 
@@ -441,6 +445,7 @@ All tools can also be run from the browser at `http://127.0.0.1:8000/tools`. The
 | `endgame\\\\\\\_play.py` | Endgame-only self-play — generates positions near game-end and plays them out; much faster than full games for building EndgameDB |
 | `evolve\\\\\\\_weights\\\\\\\_v2.py` | **Recommended weight evolver.** Per-personality and gauntlet-mode (1+1)-ES; saves results to `data/personalities/` and `data/weights/best.json` |
 | `evolve\\\\\\\_weights.py` | Legacy single-pass evolver; only tunes the global baseline. Prefer `evolve\\\_weights\\\_v2.py` |
+| `build\\\\\\\_human\\\\\\\_db.py` | **Recommended first step.** Compiles all human-vs-human game files into `data/human_db.sqlite` for fast startup. Supports Malom WDL annotation and incremental `--update` mode as new games arrive |
 | `build\\\\\\\_fullgame\\\\\\\_db.py` | Frequency-seeded BFS builder: scans human JSONL games, expands around common positions, writes a sorted binary `.bin` for O(log N) position lookup at move time |
 | `build\\\\\\\_endgame\\\\\\\_db.py` | Retrograde solver: exact Win/Draw/Loss tables for fly-phase positions up to any piece count; outputs `endgame\\\_\\\<nW\\\>\\\_\\\<nB\\\>.wdl` files in `data/endgame/` |
 | `train\\\\\\\_value\\\\\\\_net.py` | Train a tiny MLP (79→128→64→1) on game outcome labels — infrastructure for future MCTS integration; see notes below |
@@ -710,6 +715,78 @@ python tools/build\\\\\\\_fullgame\\\\\\\_db.py \\\\\\\\
 \\\\\\\# Dry run to verify the pipeline:      
 python tools/build\\\\\\\_fullgame\\\\\\\_db.py --dry-run
 ```
+
+### Human Game Database (HumanDB)
+
+```
+.venv/bin/python tools/build_human_db.py
+```
+
+Compiles all human-vs-human JSONL game files into a single SQLite database (`data/human_db.sqlite`). When this file is present the server opens it at startup in milliseconds instead of scanning thousands of JSONL files, and every completed human game is appended to it incrementally so the database grows automatically as you play.
+
+For each canonical board position the database stores:
+
+- Aggregate win / loss / draw counts from all human games that passed through it
+- Per-move breakdown: wins, losses, draws, and average plies to game end for each next move played from that position
+- Malom perfect-play WDL + depth-to-win for the position itself and for each resulting position after a move — enabling a side-by-side comparison of *what humans actually did* vs *what perfect play demands*
+- A canonical winning move (the most-played next move among games the mover eventually won), which chains into a full winning line for navigation
+
+**First build (all existing human games, no Malom annotation):**
+
+```
+.venv/bin/python tools/build_human_db.py \
+    --games-dir data/human_games \
+    --output data/human_db.sqlite
+```
+
+**First build with Malom WDL/DTW annotation** (requires the Malom DB to be mounted):
+
+```
+.venv/bin/python tools/build_human_db.py \
+    --games-dir data/human_games \
+    --output data/human_db.sqlite \
+    --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+```
+
+**Adding more games** — after importing a new batch of JSONL files into `data/human_games/`, run with `--update`. Only files that are new or have changed since the last build are processed; everything else is skipped:
+
+```
+.venv/bin/python tools/build_human_db.py --update
+```
+
+If the Malom DB is available and you want to annotate any positions that were added without it:
+
+```
+.venv/bin/python tools/build_human_db.py --update \
+    --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+```
+
+**Full rebuild from scratch** (clears all data and reprocesses every file):
+
+```
+.venv/bin/python tools/build_human_db.py --rebuild
+```
+
+**Games completed during a server session** are written to the database automatically via `HumanDB.add_game()` — no manual rebuild step is needed for games played through the web interface.
+
+| Flag | Default | Description |
+| - | - | - |
+| `--games-dir PATH` | `data/human_games` | Directory of human-vs-human JSONL game files |
+| `--extra-dirs PATH…` | — | Additional game directories to include |
+| `--output PATH` | `data/human_db.sqlite` | Output SQLite path |
+| `--malom-db PATH` | *(from config)* | Malom DB directory for WDL annotation; falls back to `configs/sentinel_default.yaml` if not set |
+| `--no-malom` | — | Skip Malom annotation entirely |
+| `--update` | — | Only process files not yet recorded in `processed_files` |
+| `--rebuild` | — | Clear all tables and reprocess every file from scratch |
+
+**Database contents after a 23 k-game build (no Malom, ~44 s):**
+
+| Stat | Value |
+| - | - |
+| File size | 202 MB |
+| Unique positions | 642 703 |
+| Unique (position, move) pairs | 727 973 |
+| Startup time | < 0.1 s |
 
 ### Retrograde Endgame Database
 
