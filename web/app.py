@@ -2170,6 +2170,9 @@ async def ws_endpoint(websocket: WebSocket):
                 setup_fen_str = msg.get("setup_fen", "")
                 if setup_fen_str:
                     setup_board = BoardState.from_fen_string(setup_fen_str)
+                    from game.rules import get_game_phase as _gp
+                    setup_turn  = setup_board.turn
+                    setup_phase = _gp(setup_board, setup_turn)
                 else:
                     setup_phase = msg.get("phase", "move")
                     setup_turn  = msg.get("turn", "W")
