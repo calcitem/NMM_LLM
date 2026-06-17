@@ -40,12 +40,12 @@ _SENTINEL_CKPT = "learned_ai/sentinel/checkpoints/best.pt"
 _VALUE_NET_PATH = "data/value_net.npz"
 
 
-def _load_sentinel():
+def _load_sentinel(path: str = _SENTINEL_CKPT):
     try:
         from learned_ai.sentinel.infer import load_advisor
-        advisor = load_advisor(_SENTINEL_CKPT)
+        advisor = load_advisor(path)
         if advisor:
-            print(f"  Sentinel loaded: {_SENTINEL_CKPT}")
+            print(f"  Sentinel loaded: {path}")
         else:
             print("  Sentinel load returned None.")
         return advisor
@@ -114,6 +114,8 @@ def main() -> int:
                    help="Sentinel mode for White; omit for pure heuristic")
     p.add_argument("--black-sentinel", default=None,
                    choices=["advisory", "score_adjust", "reconsider"])
+    p.add_argument("--sentinel-path", default=_SENTINEL_CKPT,
+                   help="Path to sentinel checkpoint (default: best.pt)")
     p.add_argument("--white-value-net", action="store_true")
     p.add_argument("--black-value-net", action="store_true")
     p.add_argument("--vn-blend", type=int, default=0,
@@ -126,7 +128,7 @@ def main() -> int:
     need_vn = args.white_value_net or args.black_value_net
 
     print("Loading components...")
-    sentinel = _load_sentinel() if need_sentinel else None
+    sentinel = _load_sentinel(args.sentinel_path) if need_sentinel else None
     value_net = _load_value_net() if need_vn else None
     print()
 
