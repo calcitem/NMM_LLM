@@ -1514,7 +1514,7 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         blocked_scale=_w("blocked_scale", 100),
         make_mistakes=_w("make_mistakes", 0),
         opening_adherence=_w("opening_adherence", 50),
-        value_net_blend=_w("value_net_blend", 0),
+        value_net_blend=_w("value_net_blend", 80),
         cross_mill_cycling=_w("cross_mill_cycling", 300),
     )
     return GameAI(
@@ -2069,7 +2069,7 @@ async def ws_endpoint(websocket: WebSocket):
                         blocked_scale=_w("blocked_scale", 100),
                         make_mistakes=_w("make_mistakes", 0),
                         opening_adherence=_w("opening_adherence", 50),
-                        value_net_blend=_w("value_net_blend", 0),
+                        value_net_blend=_w("value_net_blend", 80),
                         cross_mill_cycling=_w("cross_mill_cycling", 300),
                     )
                     base_blunder = _hw.make_mistakes / 100.0
@@ -2208,7 +2208,7 @@ async def ws_endpoint(websocket: WebSocket):
                         blocked_scale=_w("blocked_scale", 100),
                         make_mistakes=_w("make_mistakes", 0),
                         opening_adherence=_w("opening_adherence", 50),
-                        value_net_blend=_w("value_net_blend", 0),
+                        value_net_blend=_w("value_net_blend", 80),
                         cross_mill_cycling=_w("cross_mill_cycling", 300),
                     )
                     game_ai = GameAI(
@@ -2667,7 +2667,7 @@ async def ws_endpoint(websocket: WebSocket):
                     blocked_scale=_w("blocked_scale", 100),
                     make_mistakes=_w("make_mistakes", 0),
                     opening_adherence=_w("opening_adherence", 50),
-                    value_net_blend=_w("value_net_blend", 0),
+                    value_net_blend=_w("value_net_blend", 80),
                     cross_mill_cycling=_w("cross_mill_cycling", 300),
                 )
                 new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
