@@ -1,0 +1,17 @@
+# Light fine-tune of best.pt on Malom DB labels + moves-to-win weighting.
+# Very low LR and few epochs to nudge without overwriting structural learning.
+input_dim: 58
+hidden_dims: [128, 64, 32]
+dropout: 0.1
+lr: 0.00003
+batch_size: 256
+epochs: 5
+val_fraction: 0.15
+seed: 42
+checkpoint_dir: learned_ai/sentinel/checkpoints/light_retrain
+log_dir: learned_ai/sentinel/logs
+external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
+external_db_enabled: true
+sentinel_mode: advisory
+score_adjust_scale: 0.05
+reconsider_threshold: 0.15

@@ -833,57 +833,129 @@ def _parse_notation_squares(notation: str) -> tuple[str | None, str]:
     return None, main
 
 
+def _mv_notation(mv: dict) -> str:
+    """Build a notation string from a legal-move dict (from/to/capture)."""
+    from_sq  = mv.get("from")
+    to_sq    = mv["to"]
+    capture  = mv.get("capture")
+    if from_sq:
+        base = f"{from_sq}-{to_sq}"
+    else:
+        base = to_sq
+    if capture:
+        return f"{base}x{capture}"
+    return base
+
+
 @app.get("/api/explorer/position")
 async def explorer_position(fen: str = "........................|W|0|0"):
-    """Return position stats + move stats + winning line for the 3D explorer."""
+    """Return position stats + move stats + winning line for the 3D explorer.
+
+    Always returns ALL legal moves merged with:
+    - HumanDB data (wins/losses/draws/win_pct/malom) when available
+    - Heuristic scores (tactical_move_bonus + evaluate) for every move
+    - Sentinel scores (if sentinel is loaded)
+    """
     from game.board import BoardState, POSITIONS
+    from ai.heuristics import (
+        tactical_move_bonus as _tac_bonus,
+        evaluate as _heval,
+        DEFAULT_WEIGHTS as _DW,
+    )
+
     try:
         board = BoardState.from_fen_string(fen)
     except Exception as exc:
         return {"error": str(exc)}
 
     board_dict = {p: board.positions.get(p, "") or "" for p in POSITIONS}
+    color = board.turn
 
-    pos_stats = None
-    moves_out = []
+    # ── HumanDB ───────────────────────────────────────────────────────────────
+    pos_stats    = None
+    db_by_notation: dict = {}
     winning_line: list[str] = []
 
     if _human_db and _human_db.is_available():
         ps = _human_db.query_position(board)
         if ps:
             pos_stats = {
-                "total_games": ps.total_games,
-                "wins": ps.wins,
-                "losses": ps.losses,
-                "draws": ps.draws,
-                "malom_wdl": ps.malom_wdl,
-                "malom_dtw": ps.malom_dtw,
+                "total_games":           ps.total_games,
+                "wins":                  ps.wins,
+                "losses":                ps.losses,
+                "draws":                 ps.draws,
+                "malom_wdl":             ps.malom_wdl,
+                "malom_dtw":             ps.malom_dtw,
                 "canonical_winning_move": ps.canonical_winning_move,
             }
         for ms in _human_db.query_moves(board):
-            from_sq, to_sq = _parse_notation_squares(ms.notation)
-            moves_out.append({
-                "notation": ms.notation,
-                "from_sq": from_sq,
-                "to_sq": to_sq,
-                "wins": ms.wins,
-                "losses": ms.losses,
-                "draws": ms.draws,
-                "total": ms.total,
-                "win_pct": round(ms.win_pct, 4),
-                "avg_moves_to_end": round(ms.avg_moves_to_end, 1),
-                "malom_wdl_after": ms.malom_wdl_after,
-                "malom_dtw_after": ms.malom_dtw_after,
-            })
+            db_by_notation[ms.notation] = ms
         winning_line = _human_db.canonical_winning_line(board, depth=15)
 
+    # ── Heuristic scores for every legal move ─────────────────────────────────
+    legal  = get_all_legal_moves(board)
+    candidates_ordered = []  # parallel list of candidate dicts for sentinel
+    moves_out = []
+    for mv in legal:
+        notation = _mv_notation(mv)
+        from_sq, to_sq = mv.get("from"), mv["to"]
+        after = board.apply_move(mv)
+        tac   = _tac_bonus(board, after, color, _DW, return_breakdown=True)
+        ev    = int(_heval(after, color))
+        heuristic_score = int(tac["total"]) + ev
+
+        ms = db_by_notation.get(notation)
+        has_db = ms is not None
+        moves_out.append({
+            "notation":          notation,
+            "from_sq":           from_sq,
+            "to_sq":             to_sq,
+            "has_db_data":       has_db,
+            # DB fields — None when no DB data
+            "wins":              ms.wins               if has_db else None,
+            "losses":            ms.losses             if has_db else None,
+            "draws":             ms.draws              if has_db else None,
+            "total":             ms.total              if has_db else None,
+            "win_pct":           round(ms.win_pct, 4)  if has_db else None,
+            "avg_moves_to_end":  round(ms.avg_moves_to_end, 1) if has_db else None,
+            "malom_wdl_after":   ms.malom_wdl_after    if has_db else None,
+            "malom_dtw_after":   ms.malom_dtw_after    if has_db else None,
+            # Always present
+            "heuristic_score":   heuristic_score,
+            "tac_total":         int(tac["total"]),
+            "eval_score":        ev,
+            "sentinel_score":    None,  # filled below if sentinel is loaded
+        })
+        candidates_ordered.append({"from": from_sq, "to": to_sq, "capture": mv.get("capture")})
+
+    # ── Sentinel scores ───────────────────────────────────────────────────────
+    if _sentinel_advisor is not None and _sentinel_advisor.is_loaded() and candidates_ordered:
+        try:
+            sent_advice = await asyncio.to_thread(
+                _sentinel_advisor.advise, board, candidates_ordered, color, 0,
+            )
+            if sent_advice:
+                for i, m in enumerate(moves_out):
+                    if i < len(sent_advice.move_scores):
+                        score = sent_advice.move_scores[i]
+                        m["sentinel_score"] = round(score, 3) if score is not None else None
+        except Exception as _e:
+            log.debug("Explorer sentinel scoring failed: %s", _e)
+
+    # ── Sort: DB moves first (by total desc), then non-DB (by heuristic desc) ─
+    db_moves    = sorted([m for m in moves_out if m["has_db_data"]],
+                         key=lambda x: x["total"], reverse=True)
+    nondb_moves = sorted([m for m in moves_out if not m["has_db_data"]],
+                         key=lambda x: x["heuristic_score"], reverse=True)
+    moves_out = db_moves + nondb_moves
+
     return {
-        "fen": board.to_fen_string(),
-        "turn": board.turn,
-        "board": board_dict,
+        "fen":            board.to_fen_string(),
+        "turn":           board.turn,
+        "board":          board_dict,
         "position_stats": pos_stats,
-        "moves": moves_out,
-        "winning_line": winning_line,
+        "moves":          moves_out,
+        "winning_line":   winning_line,
     }
 
 
@@ -1172,6 +1244,7 @@ def _state(session: Session) -> dict:
     return {
         "type":             "state",
         "board":            dict(board.positions),
+        "fen":              board.to_fen_string(),
         "turn":             color,
         "phase":            phase,
         "is_human_turn":    (not session.ai_vs_ai) and (session.vs_human or color == session.human_color),
@@ -1220,14 +1293,16 @@ async def _send(ws: WebSocket, obj: dict) -> None:
 def _sentinel_payload(adv) -> dict:
     """Serialise a move-level SentinelAdvice into the ai_move 'sentinel' dict."""
     return {
-        "player":                 adv.player,
-        "played_move_quality":    round(adv.played_move_quality, 3),
-        "best_available_quality": round(adv.best_available_quality, 3),
-        "opportunity_gap":        round(adv.opportunity_gap, 3),
-        "advisory_message":       adv.advisory_message,
-        "intervention":           getattr(adv, "intervention_applied", None),
-        "intervention_detail":    getattr(adv, "intervention_detail", None),
-        "original_move_notation": getattr(adv, "original_move_notation", None),
+        "player":                       adv.player,
+        "played_move_quality":          round(adv.played_move_quality, 3),
+        "best_available_quality":       round(adv.best_available_quality, 3),
+        "opportunity_gap":              round(adv.opportunity_gap, 3),
+        "advisory_message":             adv.advisory_message,
+        "intervention":                 getattr(adv, "intervention_applied", None),
+        "intervention_detail":          getattr(adv, "intervention_detail", None),
+        "original_move_notation":       getattr(adv, "original_move_notation", None),
+        "engine_move_notation":         getattr(adv, "engine_move_notation", None),
+        "best_sentinel_move_notation":  getattr(adv, "best_sentinel_move_notation", None),
     }
 
 
@@ -1508,6 +1583,12 @@ async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
                 "was_blunder": bool(game_ai.last_was_blunder),
                 "can_mark_bad": False,
             }
+            _ava_thinking = (
+                (coord.last_thinking if coord else "")
+                or (game_ai.last_thinking if game_ai else "")
+            )
+            if _ava_thinking:
+                _avai_move_msg["thinking"] = _ava_thinking
             if game_ai and game_ai.last_sentinel_advice is not None:
                 _avai_move_msg["sentinel"] = _sentinel_payload(game_ai.last_sentinel_advice)
                 game_ai.last_sentinel_advice = None  # consume after sending
@@ -1602,6 +1683,72 @@ def _nollm_choose_move(session: Session, board: BoardState) -> dict:
     return game_ai.choose_move(board, **kwargs)
 
 
+async def _pre_ai_static_diag(ws: WebSocket, board, session) -> None:
+    """Compute and send the static overlay immediately after 'thinking' is sent.
+
+    This guarantees the client sees heuristic + sentinel scores before the AI
+    move arrives, even when the AI completes synchronously (ponder hit) or
+    finishes before the client's own get_diagnostic request reaches the server.
+    """
+    from ai.heuristics import (
+        tactical_move_bonus as _tac_bonus,
+        evaluate as _heval,
+        DEFAULT_WEIGHTS as _DW,
+    )
+    try:
+        color   = board.turn
+        weights = session.game_ai._weights if session.game_ai else _DW
+        eval_w  = int(_heval(board, "W"))
+        eval_b  = int(_heval(board, "B"))
+        legal   = get_all_legal_moves(board)
+        moves_out = []
+        for mv in legal:
+            after = board.apply_move(mv)
+            tac   = _tac_bonus(board, after, color, weights, return_breakdown=True)
+            ev    = int(_heval(after, color))
+            moves_out.append({
+                "from":       mv.get("from"),
+                "to":         mv["to"],
+                "capture":    mv.get("capture"),
+                "tac_total":  int(tac["total"]),
+                "tac_terms":  [[lbl, val] for lbl, val in tac.get("top_terms", [])],
+                "eval_score": ev,
+                "score":      int(tac["total"]) + ev,
+            })
+        moves_out.sort(key=lambda x: x["score"], reverse=True)
+
+        if _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+            try:
+                candidates = [
+                    {"from": m.get("from"), "to": m["to"], "capture": m.get("capture")}
+                    for m in moves_out
+                ]
+                sent_advice = await asyncio.to_thread(
+                    _sentinel_advisor.advise, board, candidates, color, 0,
+                )
+                if sent_advice:
+                    for i, m in enumerate(moves_out):
+                        if i < len(sent_advice.move_scores):
+                            m["sentinel_score"] = round(sent_advice.move_scores[i], 3)
+            except Exception as _e:
+                log.debug("Pre-AI sentinel scoring failed: %s", _e)
+        for m in moves_out:
+            m.setdefault("sentinel_score", None)
+
+        await _send(ws, {
+            "type":   "diagnostic",
+            "seq":    0,
+            "mode":   "static",
+            "color":  color,
+            "eval_w": eval_w,
+            "eval_b": eval_b,
+            "moves":  moves_out,
+            "fen":    board.to_fen_string(),
+        })
+    except Exception as exc:
+        log.debug("Pre-AI static diagnostic failed: %s", exc)
+
+
 async def _ai_turn(ws: WebSocket, session: Session) -> None:
     import time as _time
     board = session.engine.board
@@ -1615,6 +1762,10 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         "color":            board.turn,
         "expected_seconds": exp,
     })
+
+    # Pre-compute static overlay so client sees scores before the AI move arrives.
+    # Essential at high difficulty where ponder hits complete synchronously.
+    await _pre_ai_static_diag(ws, board, session)
 
     # B-75/B-94: stop any running ponder; check if we pre-computed this position.
     _ponder_hit: dict | None = None
@@ -1690,8 +1841,12 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         "was_blunder": bool(session.game_ai and session.game_ai.last_was_blunder),
         "can_mark_bad": True,
     }
-    if session.coordinator and session.coordinator.last_thinking:
-        _ai_move_msg["thinking"] = session.coordinator.last_thinking
+    _thinking = (
+        (session.coordinator.last_thinking if session.coordinator else "")
+        or (session.game_ai.last_thinking if session.game_ai else "")
+    )
+    if _thinking:
+        _ai_move_msg["thinking"] = _thinking
     if session.game_ai and session.game_ai.last_sentinel_advice is not None:
         _ai_move_msg["sentinel"] = _sentinel_payload(session.game_ai.last_sentinel_advice)
         session.game_ai.last_sentinel_advice = None  # consume after sending
@@ -1877,6 +2032,7 @@ async def ws_endpoint(websocket: WebSocket):
                 use_llm   = bool(msg.get("use_llm", True))
                 use_sentinel   = bool(msg.get("use_sentinel", False))
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
+                sentinel_gap   = float(msg.get("sentinel_gap", 0.10))  # min opportunity gap to intercede
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 settings  = _load_settings()
 
@@ -1937,15 +2093,12 @@ async def ws_endpoint(websocket: WebSocket):
                         game_ai.sentinel_mode = "score_adjust"
                         game_ai._sentinel_activation_prob = _sent_prob
                         log.info("Malom perfect DB guidance enabled (diff=%d, prob=%.0f%%)", eff_diff, _sent_prob * 100)
-                    elif (_sent_prob > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
-                        _sent_mode = sentinel_mode if use_sentinel else "score_adjust"
-                        game_ai.set_sentinel(_sentinel_advisor, mode=_sent_mode)
-                        game_ai._sentinel_activation_prob = _sent_prob if not use_sentinel else 1.0
-                        log.info("Sentinel attached (diff=%d, prob=%.0f%%, mode=%s)", eff_diff, game_ai._sentinel_activation_prob * 100, _sent_mode)
-                    elif _sent_prob > 0.0 and _sentinel_advisor is None:
-                        game_ai.sentinel_mode = "score_adjust"
-                        game_ai._sentinel_activation_prob = _sent_prob
-                        log.info("Sentinel unavailable — DB fallback (diff=%d, prob=%.0f%%)", eff_diff, _sent_prob * 100)
+                    elif use_sentinel and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                        game_ai.set_sentinel(_sentinel_advisor, mode=sentinel_mode)
+                        game_ai._sentinel_activation_prob = 1.0
+                        game_ai._sentinel_min_gap = sentinel_gap
+                        game_ai._sentinel_reconsider_threshold = sentinel_gap
+                        log.info("Sentinel attached (diff=%d, mode=%s, gap≥%.0f%%)", eff_diff, sentinel_mode, sentinel_gap * 100)
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")
@@ -2012,12 +2165,16 @@ async def ws_endpoint(websocket: WebSocket):
                 use_llm        = bool(msg.get("use_llm", True))
                 use_sentinel   = bool(msg.get("use_sentinel", False))
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")
+                sentinel_gap   = float(msg.get("sentinel_gap", 0.10))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
-                setup_phase = msg.get("phase", "move")   # "place" | "move"
-                setup_turn  = msg.get("turn", "W")        # "W" | "B"
-                setup_pos   = msg.get("positions", {})    # {pos: "W"|"B"|""}
-
-                setup_board = BoardState.from_setup(setup_pos, setup_turn, setup_phase)
+                setup_fen_str = msg.get("setup_fen", "")
+                if setup_fen_str:
+                    setup_board = BoardState.from_fen_string(setup_fen_str)
+                else:
+                    setup_phase = msg.get("phase", "move")
+                    setup_turn  = msg.get("turn", "W")
+                    setup_pos   = msg.get("positions", {})
+                    setup_board = BoardState.from_setup(setup_pos, setup_turn, setup_phase)
                 engine = GameEngine(human_color=hc)
                 engine.board = setup_board
                 engine.game_record["setup_game"] = True
@@ -2061,21 +2218,18 @@ async def ws_endpoint(websocket: WebSocket):
                     )
                     game_ai.suppress_fork_variety = _random.random() < 0.5
 
-                    _sent_prob_s = SENTINEL_PROB_BY_DIFF.get(diff, 0.0)
                     if use_perfect_db:
+                        _sent_prob_s = SENTINEL_PROB_BY_DIFF.get(diff, 0.0)
                         game_ai.use_perfect_db = True
                         game_ai.sentinel_mode = "score_adjust"
                         game_ai._sentinel_activation_prob = _sent_prob_s
                         log.info("Malom perfect DB guidance enabled (diff=%d, prob=%.0f%%)", diff, _sent_prob_s * 100)
-                    elif (_sent_prob_s > 0.0 or use_sentinel) and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
-                        _sent_mode_s = sentinel_mode if use_sentinel else "score_adjust"
-                        game_ai.set_sentinel(_sentinel_advisor, mode=_sent_mode_s)
-                        game_ai._sentinel_activation_prob = _sent_prob_s if not use_sentinel else 1.0
-                        log.info("Sentinel attached (diff=%d, prob=%.0f%%, mode=%s)", diff, game_ai._sentinel_activation_prob * 100, _sent_mode_s)
-                    elif _sent_prob_s > 0.0 and _sentinel_advisor is None:
-                        game_ai.sentinel_mode = "score_adjust"
-                        game_ai._sentinel_activation_prob = _sent_prob_s
-                        log.info("Sentinel unavailable — DB fallback (diff=%d, prob=%.0f%%)", diff, _sent_prob_s * 100)
+                    elif use_sentinel and _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                        game_ai.set_sentinel(_sentinel_advisor, mode=sentinel_mode)
+                        game_ai._sentinel_activation_prob = 1.0
+                        game_ai._sentinel_min_gap = sentinel_gap
+                        game_ai._sentinel_reconsider_threshold = sentinel_gap
+                        log.info("Sentinel attached (diff=%d, mode=%s, gap≥%.0f%%)", diff, sentinel_mode, sentinel_gap * 100)
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")

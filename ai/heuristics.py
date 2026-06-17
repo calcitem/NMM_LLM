@@ -108,6 +108,7 @@ class HeuristicWeights:
     value_net_blend: int = 0     # % of value-network score blended into leaf eval (0 = off)
     # ── B-74: Cross-mill cycling fork ────────────────────────────────────────
     cross_mill_cycling: int = 300  # static bonus per two-mill fork (closed mill + adjacent near-mill closing sq)
+    relay_cycling: int = 220        # bonus per two-step relay fork (closed mill → relay piece → near-mill closing sq)
     # ── B-81: Placement independent fork ("keep-busy") ───────────────────────
     placement_fork_penalty: int = 50  # penalty per extra unblockable closing sq in opp placement fork
     # ── B-83: Cross-block (pivot-blocker) bonus ────────────────────────────────
@@ -402,6 +403,17 @@ def evaluate(
         if w_cross_cycle:
             base += w_cross_cycle * (
                 _cross_mill_cycling(board, color) - _cross_mill_cycling(board, opp)
+            )
+
+    # Relay cycling fork: two-step variant of B-74 where a relay piece must first
+    # vacate to unblock the cycling pivot (closed mill → relay piece → closing square
+    # of a near-mill containing the relay piece). Fires in place/move; fly is already
+    # covered by cross_mill_cycling which counts all closed+near-mill pairs.
+    if phase in ("place", "move"):
+        w_relay = weights.relay_cycling if weights else DEFAULT_WEIGHTS.relay_cycling
+        if w_relay:
+            base += w_relay * (
+                _relay_cycling_setup(board, color) - _relay_cycling_setup(board, opp)
             )
 
     # Move-phase: reward non-contributing pieces assembling toward a 2-config.
@@ -1691,6 +1703,55 @@ def _cross_mill_cycling(board: BoardState, color: str) -> int:
                        for nb in ADJACENCY[p]):
                     count += 1
                     break
+    return count
+
+
+def _relay_cycling_setup(board: BoardState, color: str) -> int:
+    """Two-step cycling fork (one hop further than _cross_mill_cycling).
+
+    Pattern: closed mill M1 has piece P adjacent to own piece Q (outside M1).
+    Q can slide to empty square R, which is the closing square of a near-mill
+    M2 that contains Q.
+
+    Prep move: Q→R (frees Q's square).
+    Cycle: P→Q closes M2 (capture); Q→P reforms M1 (capture); repeat.
+
+    Example: White b2-b4-b6 closed, b4 adjacent to c4 (own, not in M1),
+    c4 adjacent to c5 (empty), and c5 closes c3-c4-c5 near-mill.
+    Moving c4→c5 enables the perpetual b4↔c4 cycle between both mills.
+
+    Not counted in fly phase — _cross_mill_cycling already covers all pairs there.
+    """
+    near_closing_by_sq: dict[str, list] = {}
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) == 2 and vals.count("") == 1:
+            closing = next(p for p in mill if board.positions[p] == "")
+            near_closing_by_sq.setdefault(closing, []).append(mill)
+
+    if not near_closing_by_sq:
+        return 0
+
+    count = 0
+    seen: set[tuple] = set()
+    for mill in MILLS:
+        if not all(board.positions[p] == color for p in mill):
+            continue
+        mill_set = set(mill)
+        for p in mill:
+            for q in ADJACENCY[p]:
+                if q in mill_set or board.positions[q] != color:
+                    continue
+                for r in ADJACENCY[q]:
+                    if board.positions[r] != "" or r not in near_closing_by_sq:
+                        continue
+                    for m2 in near_closing_by_sq[r]:
+                        if q in m2:
+                            key = (tuple(sorted(mill)), q, r)
+                            if key not in seen:
+                                seen.add(key)
+                                count += 1
+                            break
     return count
 
 

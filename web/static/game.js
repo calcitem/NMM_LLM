@@ -12,6 +12,8 @@ let board           = null;
 let gameState       = null;
 let phase           = "idle";
 let evalHistory     = [];     // [{move: n, score: f}] — history for the graph
+let sentinelHistory = [];     // per-diagnostic sentinel position score in [-1,+1], White-perspective
+let _humanColor     = null;   // "W" | "B" | null (null = vs human or unknown)
 let hintsLeft       = 3;      // server-tracked cap; synced via hint messages
 let drawUnlocked    = false;  // true once 40 post-placement half-moves have passed
 let forceAggressive = false;  // when true, AI ignores fly-sacrifice heuristic
@@ -225,11 +227,30 @@ document.addEventListener("DOMContentLoaded", () => {
       : "Value net: not found — run Train Value Network in Tools to build one";
   }).catch(() => {});
 
+  function _updateSentinelRows() {
+    const checked = $("chk-sentinel") && $("chk-sentinel").checked;
+    const mode    = $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory";
+    const modeRow = $("row-sentinel-mode");
+    const gapRow  = $("row-sentinel-gap");
+    if (modeRow) modeRow.style.display = checked ? "" : "none";
+    if (gapRow)  gapRow.style.display  = (checked && mode !== "advisory") ? "" : "none";
+  }
+
   const chkSentinel = $("chk-sentinel");
   if (chkSentinel) {
-    chkSentinel.addEventListener("change", () => {
-      const modeRow = $("row-sentinel-mode");
-      if (modeRow) modeRow.style.display = chkSentinel.checked ? "" : "none";
+    chkSentinel.addEventListener("change", _updateSentinelRows);
+  }
+
+  const selSentinelMode = $("sel-sentinel-mode");
+  if (selSentinelMode) {
+    selSentinelMode.addEventListener("change", _updateSentinelRows);
+  }
+
+  const rngSentinelGap = $("rng-sentinel-gap");
+  if (rngSentinelGap) {
+    rngSentinelGap.addEventListener("input", () => {
+      const lbl = $("lbl-sentinel-gap");
+      if (lbl) lbl.textContent = rngSentinelGap.value + "%";
     });
   }
 
@@ -238,14 +259,15 @@ document.addEventListener("DOMContentLoaded", () => {
     chkPerfectDB.addEventListener("change", () => {
       const sentinelRow = $("row-sentinel");
       const modeRow     = $("row-sentinel-mode");
+      const gapRow      = $("row-sentinel-gap");
       if (chkPerfectDB.checked) {
         // Malom DB overrides sentinel — dim sentinel controls
         if (sentinelRow) sentinelRow.style.opacity = "0.45";
         if (modeRow)     modeRow.style.display = "none";
+        if (gapRow)      gapRow.style.display  = "none";
       } else {
         if (sentinelRow) sentinelRow.style.opacity = "";
-        if (modeRow && chkSentinel && chkSentinel.checked)
-          modeRow.style.display = "";
+        _updateSentinelRows();
       }
     });
   }
@@ -581,7 +603,40 @@ document.addEventListener("DOMContentLoaded", () => {
       }));
     }
   });
+
+  // Auto-load from explorer: if ?setup_fen= is in the URL, start a HvH game
+  // from that position so the user can continue playing from the explorer state.
+  const _explorerFen = new URLSearchParams(window.location.search).get('setup_fen');
+  if (_explorerFen) {
+    history.replaceState({}, '', '/');   // clean URL without reloading
+    startFromExplorerFen(_explorerFen);
+  }
 });
+
+// ── Load from Explorer ───────────────────────────────────────────────────────
+
+function startFromExplorerFen(fen) {
+  isVsHuman = true;
+  _updateHandoffButtons();
+  if (ws) { ws.close(); ws = null; }
+
+  const wsUrl = `ws://${location.host}/ws`;
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type:       "setup_game",
+      vs_human:   true,
+      human_color: "W",
+      difficulty:  3,
+      use_llm:     false,
+      setup_fen:   fen,
+    }));
+  };
+  ws.onmessage = evt => handleMessage(JSON.parse(evt.data));
+  ws.onerror   = () => setStatus("Connection error.");
+  ws.onclose   = () => { if (phase !== "game_over") setStatus("Disconnected."); };
+}
 
 function renderIdle() {
   setStatus("Configure a game and click New Game.");
@@ -610,7 +665,7 @@ function startNewGame() {
   clearCommentary();
   setStatus("Starting…");
   phase = "idle";
-  evalHistory = [];
+  evalHistory = []; sentinelHistory = []; _humanColor = null;
   hintsLeft = 3;
   drawUnlocked = false;
   forceAggressive = false;
@@ -653,6 +708,7 @@ function startNewGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       ai_weights:   _getWeights(),
       player_name:  playerName,
@@ -684,7 +740,7 @@ function startAiVsAi() {
   setStatus("Starting AI vs AI…");
   phase = "idle";
   isAiVsAi = true;
-  evalHistory = [];
+  evalHistory = []; sentinelHistory = []; _humanColor = null;
   hintsLeft = 0;
   drawUnlocked = false;
   forceAggressive = false;
@@ -875,7 +931,7 @@ function startSetupGame() {
   clearCommentary();
   setStatus("Starting setup game…");
   phase = "idle";
-  evalHistory = [];
+  evalHistory = []; sentinelHistory = []; _humanColor = null;
   hintsLeft = 3;
   drawUnlocked = false;
   forceAggressive = false;
@@ -918,6 +974,7 @@ function startSetupGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       ai_weights:   _getWeights(),
       positions:    positions,
@@ -953,6 +1010,7 @@ function handleMessage(msg) {
         if (msg.move_pairs) board.setMovePairs(msg.move_pairs);
       }
       updateInfoPanel(msg);
+      if (msg.human_color) _humanColor = msg.human_color;
       if (msg.eval_score !== undefined) {
         evalHistory.push(msg.eval_score);
         drawEvalGraph();
@@ -1005,6 +1063,11 @@ function handleMessage(msg) {
         _diagNegamaxData = null;
         _diagRequestAll();
       }
+      // Update Explorer button to open at the current board position
+      if (msg.fen) {
+        const explorerBtn = document.getElementById('btn-explorer');
+        if (explorerBtn) explorerBtn.href = '/explorer?fen=' + encodeURIComponent(msg.fen);
+      }
       break;
 
     case "capture_required":
@@ -1025,8 +1088,17 @@ function handleMessage(msg) {
       break;
 
     case "thinking":
-      _aiThinking = true;       // block diagnostics while AI computes
-      board && board.clearDiag();
+      _aiThinking = true;       // block negamax diagnostics while AI computes
+      // Request static overlay for the position the AI is about to evaluate,
+      // before search starts so the user can see the scores immediately.
+      if (diagEnabled) {
+        _diagStaticData  = null;
+        _diagNegamaxData = null;
+        board && board.clearDiag();
+        _diagRequestStatic();   // bypasses _diagRequestAll's _aiThinking guard
+      } else {
+        board && board.clearDiag();
+      }
       startThinkingTimer(msg.color, msg.expected_seconds ?? 0, ws);
       $("btn-force-move").hidden = false;
       canOverride = false;
@@ -1042,14 +1114,23 @@ function handleMessage(msg) {
       const to      = msg.to;
       const cap     = msg.capture ? ` × ${msg.capture}` : "";
       const blunder = msg.was_blunder ? " ← deliberate mistake!" : "";
-      // If sentinel/LLM redirected the engine's move, show both the intended and played moves
-      const origNotation = msg.sentinel && msg.sentinel.original_move_notation;
+      const playedStr    = from === "—" ? to : `${from}→${to}`;
+      const origNotation = msg.sentinel && msg.sentinel.original_move_notation;  // set only when redirected
+      const engineNote   = msg.sentinel && msg.sentinel.engine_move_notation;    // always the engine's first choice
+      const sentBest     = msg.sentinel && msg.sentinel.best_sentinel_move_notation;
+
       if (origNotation) {
-        addCommentary("GameAI", `Engine intended: ${origNotation}`, "ai");
+        // Sentinel redirected — show both engine intention and the redirected result
+        addCommentary("GameAI", `Engine intended: ${origNotation} → Sentinel redirected to: ${playedStr}${cap}`, "ai");
+      } else {
+        // No redirect — show what the engine played
+        addCommentary("GameAI", `Played: ${playedStr}${cap}${blunder}`, "ai");
+        // If sentinel was observing and had a different recommendation, surface it
+        if (sentBest && engineNote && sentBest !== engineNote) {
+          addCommentary("Sentinel", `Engine played: ${engineNote} — Sentinel recommends: ${sentBest}`, "ai");
+        }
       }
-      const playedStr = from === "—" ? to : `${from}→${to}`;
-      const playedLabel = origNotation ? "Redirected to" : "Played";
-      addCommentary("GameAI", `${playedLabel}: ${playedStr}${cap}${blunder}`, "ai");
+
       // Sentinel advisory (move-level scorer)
       if (msg.sentinel) {
         const s = msg.sentinel;
@@ -1059,6 +1140,7 @@ function handleMessage(msg) {
 
         const qualityPct = Math.round((s.played_move_quality || 0) * 100);
         const gapPct     = Math.round((s.opportunity_gap || 0) * 100);
+        const bestPct    = Math.round((s.best_available_quality || 0) * 100);
         const player     = s.player || "?";
 
         if (badge && txt) {
@@ -1080,7 +1162,11 @@ function handleMessage(msg) {
           const showBadge = !isSafe || hasIntervention;
           if (showBadge) {
             icon.textContent = style.icon;
-            txt.textContent  = `${player}: ${style.label} (move quality ${qualityPct}%, gap ${gapPct}%)`;
+            // Show engine vs sentinel best when sentinel didn't override
+            const extraNote = (!hasIntervention && sentBest && engineNote && sentBest !== engineNote)
+              ? ` — engine: ${engineNote}, recommends: ${sentBest}`
+              : (hasIntervention ? ` — redirected to: ${playedStr}` : "");
+            txt.textContent  = `${player}: ${style.label} (played ${qualityPct}%, best ${bestPct}%, gap ${gapPct}%)${extraNote}`;
             badge.style.background = style.bg;
             badge.style.display = "";
           } else {
@@ -1091,7 +1177,7 @@ function handleMessage(msg) {
           if (!isSafe || hasIntervention || gapPct > 10) {
             addCommentary(
               "Sentinel",
-              `${player} · ${displayKey.replace(/_/g, " ")} · move quality ${qualityPct}% · gap ${gapPct}%`,
+              `${player} · ${displayKey.replace(/_/g, " ")} · played ${qualityPct}% · best ${bestPct}% · gap ${gapPct}%`,
               "ai"
             );
           }
@@ -1103,7 +1189,7 @@ function handleMessage(msg) {
         const txt   = $("sentinel-text");
         const badge = $("sentinel-advisory");
         if (txt && badge && badge.style.display !== "none") {
-          txt.textContent += ` — ${detail}`;
+          // detail already embedded in badge text above; avoid duplication
         }
       }
       if (msg.thinking) {
@@ -1654,10 +1740,43 @@ function drawEvalGraph() {
                   : "rgba(100,90,70,0.15)";
   svg.appendChild(mk("path", { d: area, fill: fillCol }));
 
-  // Line
+  // Heuristic line (gold)
   let linePath = `M ${pts[0].x},${pts[0].y}`;
   for (const p of pts.slice(1)) linePath += ` L ${p.x},${p.y}`;
   svg.appendChild(mk("path", { d: linePath, stroke:"#c8a96e", "stroke-width":1.5, fill:"none" }));
+
+  // Sentinel line — dashed, from human's perspective (+1 = human winning)
+  const sn = sentinelHistory.length;
+  if (sn >= 2) {
+    // Convert each entry to human-perspective: +1 = human's turn and avg quality high,
+    // or opponent's turn and avg quality low.  Falls back to White-perspective for H vs H.
+    const toHuman = entry => {
+      if (isVsHuman || !_humanColor)
+        return entry.raw * (entry.color === "B" ? -1 : 1); // White-perspective fallback
+      return entry.raw * (entry.color === _humanColor ? 1 : -1);
+    };
+    const lastSent = toHuman(sentinelHistory[sn - 1]);
+    const sentCol  = isVsHuman ? "#666"
+                   : lastSent > 0.05  ? "#4caf50"   // human winning
+                   : lastSent < -0.05 ? "#e05050"   // AI winning
+                   : "#888";
+    const sxScale  = (W - 2) / Math.max(sn - 1, 1);
+    const sPts     = sentinelHistory.map((entry, i) => ({
+      x: 1 + i * sxScale,
+      y: mid - toHuman(entry) * (mid - 4),
+    }));
+    let sPath = `M ${sPts[0].x},${sPts[0].y}`;
+    for (const p of sPts.slice(1)) sPath += ` L ${p.x},${p.y}`;
+    svg.appendChild(mk("path", {
+      d: sPath, stroke: sentCol, "stroke-width": 1.2, fill: "none",
+      "stroke-dasharray": "4 3", opacity: "0.85",
+    }));
+    // Update legend label colours
+    const lblHeuristic = $("legend-heuristic");
+    const lblSentinel  = $("legend-sentinel");
+    if (lblHeuristic) lblHeuristic.style.color = "#c8a96e";
+    if (lblSentinel)  lblSentinel.style.color  = sentCol;
+  }
 
   // Replay cursor: vertical line + dot at the current replay position
   if (replayIdx >= 0) {
@@ -2291,6 +2410,7 @@ function _handleTournamentNext(msg) {
       use_llm:        $("chk-llm").checked,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
+      sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
     }));
   }
@@ -2426,6 +2546,17 @@ function _diagOnReceive(msg) {
     if (msg.mode === "static")  entry.static  = msg;
     if (msg.mode === "negamax") entry.negamax = msg;
     _diagFenCache.set(msg.fen, entry);
+  }
+  // Sentinel position score: average move quality for the current player.
+  // Store { raw, color } so drawEvalGraph can compute human-perspective at render time
+  // even when _humanColor arrives in a state message after the first diagnostic fires.
+  if (msg.mode === "static" && msg.moves) {
+    const sentScores = msg.moves.map(m => m.sentinel_score).filter(s => s != null);
+    if (sentScores.length > 0) {
+      const avg = sentScores.reduce((a, b) => a + b, 0) / sentScores.length;
+      sentinelHistory.push({ raw: (avg - 0.5) * 2, color: msg.color || "W" });
+      drawEvalGraph();
+    }
   }
   _diagRender();
 }

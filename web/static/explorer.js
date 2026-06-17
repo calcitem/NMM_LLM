@@ -12,6 +12,29 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
+// ── Sprite text helper (for DTW numbers) ─────────────────────────────────────
+function makeDtwSprite(text, hexColor) {
+  const W = 64, H = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 20px monospace';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign    = 'center';
+  // dark outline
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth   = 4;
+  ctx.strokeText(text, W / 2, H / 2);
+  ctx.fillStyle = hexColor;
+  ctx.fillText(text, W / 2, H / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.7, 0.35, 1);
+  return sprite;
+}
+
 // ── Board geometry data ───────────────────────────────────────────────────────
 
 const POS_COORDS = {
@@ -58,8 +81,17 @@ function winPctColor(pct) {
   return new THREE.Color().setRGB(0.94 - 0.8 * u, 0.62 + 0.14 * u, 0.07);
 }
 
+// Sentinel score [0,1] → green (good) → red (poor)
+function sentinelColor(score) {
+  // Blue gradient: dark blue (low quality) → bright cyan-blue (high quality)
+  const t = Math.max(0, Math.min(1, score));
+  return new THREE.Color().setHSL(0.58 + t * 0.08, 0.75, 0.28 + t * 0.35);
+}
+
 function barColor(moveData) {
-  return winPctColor(moveData.win_pct);
+  if (moveData.has_db_data) return winPctColor(moveData.win_pct);
+  if (moveData.sentinel_score != null) return sentinelColor(moveData.sentinel_score);
+  return new THREE.Color(0x555555);
 }
 
 // ── Scene setup ───────────────────────────────────────────────────────────────
@@ -148,24 +180,22 @@ buildStaticBoard();
 
 function buildCoordLabels() {
   // Column letters a–g along south edge (z = 4.2)
-  // a=-3, b=-2, c=-1, d=0, e=1, f=2, g=3
   ['a','b','c','d','e','f','g'].forEach((letter, i) => {
     const el = document.createElement('div');
     el.className = 'coord-label';
     el.textContent = letter;
     const obj = new CSS2DObject(el);
-    obj.position.set(i - 3, 0.05, 4.2);
+    obj.position.set(i - 3, 0.5, 4.5);
     scene.add(obj);
   });
 
   // Row numbers 7–1 along west edge (x = -4.2)
-  // row 7 → z=-3, row 1 → z=3
   ['7','6','5','4','3','2','1'].forEach((num, i) => {
     const el = document.createElement('div');
     el.className = 'coord-label';
     el.textContent = num;
     const obj = new CSS2DObject(el);
-    obj.position.set(-4.2, 0.05, i - 3);
+    obj.position.set(-4.5, 0.5, i - 3);
     scene.add(obj);
   });
 }
@@ -201,18 +231,38 @@ function rebuildPieces(boardDict) {
 }
 
 const barMeshMap = new Map();
-const MAX_BAR_HEIGHT = 4.5;
+const MAX_BAR_HEIGHT = 2.0;
 
 function rebuildBars(movesArray) {
   barGroup.clear();
   barMeshMap.clear();
-  const maxTotal = Math.max(1, ...movesArray.map(m => m.total));
+
+  // DB moves: height based on total games
+  const dbMoves    = movesArray.filter(m => m.has_db_data);
+  const nonDbMoves = movesArray.filter(m => !m.has_db_data);
+  const maxTotal   = Math.max(1, ...dbMoves.map(m => m.total));
+
+  // Non-DB moves: height based on heuristic score (shift+normalize)
+  const hScores   = nonDbMoves.map(m => m.heuristic_score);
+  const minH      = hScores.length ? Math.min(...hScores) : 0;
+  const maxH      = hScores.length ? Math.max(...hScores) : 1;
+  const hRange    = Math.max(1, maxH - minH);
+
   for (const mv of movesArray) {
     const toSq = mv.to_sq;
     if (!toSq || !POS_COORDS[toSq]) continue;
-    const height = Math.max(0.12, (mv.total / maxTotal) * MAX_BAR_HEIGHT);
+
+    let height;
+    if (mv.has_db_data) {
+      height = Math.max(0.12, (mv.total / maxTotal) * MAX_BAR_HEIGHT);
+    } else {
+      // Normalize heuristic into [0.12, MAX_BAR_HEIGHT * 0.5]
+      const norm = (mv.heuristic_score - minH) / hRange;
+      height = 0.12 + norm * (MAX_BAR_HEIGHT * 0.5);
+    }
+
     const col  = barColor(mv);
-    const mat  = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.88 });
+    const mat  = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: mv.has_db_data ? 0.88 : 0.55 });
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, height, 0.38), mat);
     const [x,, z] = POS_COORDS[toSq];
     mesh.position.set(x, height / 2 + 0.07, z);
@@ -231,7 +281,8 @@ const _up = new THREE.Vector3(0, 1, 0);
 
 function rebuildArrows(movesArray) {
   arrowGroup.clear();
-  const maxTotal = Math.max(1, ...movesArray.map(m => m.total));
+  const dbMoves  = movesArray.filter(m => m.has_db_data);
+  const maxTotal = Math.max(1, ...dbMoves.map(m => m.total));
 
   for (const mv of movesArray) {
     if (!mv.from_sq || !POS_COORDS[mv.from_sq] || !POS_COORDS[mv.to_sq]) continue;
@@ -246,18 +297,29 @@ function rebuildArrows(movesArray) {
     const dirN = dir.clone().normalize();
     const q    = new THREE.Quaternion().setFromUnitVectors(_up, dirN);
 
-    const col     = barColor(mv).getHex();
-    const opacity = 0.22 + 0.65 * (mv.total / maxTotal);
-    const mat     = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity });
+    let col, opacity, shaftRadius, headRadius;
+    if (mv.has_db_data) {
+      col         = barColor(mv).getHex();
+      opacity     = 0.22 + 0.65 * (mv.total / maxTotal);
+      shaftRadius = 0.038;
+      headRadius  = 0.115;
+    } else {
+      // Non-DB moves: thin grey arrows, low opacity
+      col         = 0x555555;
+      opacity     = 0.18;
+      shaftRadius = 0.020;
+      headRadius  = 0.065;
+    }
 
+    const mat      = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity });
     const headLen  = Math.min(0.38, len * 0.28);
     const shaftLen = len - headLen - 0.04;
 
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, shaftLen, 6), mat);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLen, 6), mat);
     shaft.position.copy(from3).addScaledVector(dirN, shaftLen / 2);
     shaft.setRotationFromQuaternion(q);
 
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.115, headLen, 8), mat.clone());
+    const head = new THREE.Mesh(new THREE.ConeGeometry(headRadius, headLen, 8), mat.clone());
     head.position.copy(from3).addScaledVector(dirN, shaftLen + headLen / 2);
     head.setRotationFromQuaternion(q);
 
@@ -283,15 +345,12 @@ function rebuildMalomOverlay(movesArray) {
     ring.position.set(x, 0.08, z);
 
     if (mv.malom_dtw_after != null) {
-      const el = document.createElement('div');
-      el.className = 'malom-dtw-label';
-      el.textContent = Math.abs(mv.malom_dtw_after);
-      el.style.color = mv.malom_wdl_after === 'L' ? '#4ade80'
-                     : mv.malom_wdl_after === 'W' ? '#fca5a5'
-                     : '#fcd34d';
-      const lbl = new CSS2DObject(el);
-      lbl.position.set(0, 0.45, 0);
-      ring.add(lbl);
+      const col = mv.malom_wdl_after === 'L' ? '#4ade80'
+                : mv.malom_wdl_after === 'W' ? '#fca5a5'
+                : '#fcd34d';
+      const sprite = makeDtwSprite(String(Math.abs(mv.malom_dtw_after)), col);
+      sprite.position.set(0, 0.6, 0);
+      ring.add(sprite);
     }
     malomGroup.add(ring);
   }
@@ -344,22 +403,37 @@ canvas.addEventListener('click', () => {
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 
 function showTooltip(cx, cy, mv) {
-  const wdlText = mv.malom_wdl_after
-    ? `${mv.malom_wdl_after}${mv.malom_dtw_after != null ? ` (${mv.malom_dtw_after > 0 ? '+' : ''}${mv.malom_dtw_after} DTW)` : ''}`
+  const sentText = mv.sentinel_score != null
+    ? `${(mv.sentinel_score * 100).toFixed(1)}%`
     : '—';
-  tooltip.innerHTML = `
-    <div class="tt-notation">${mv.notation}</div>
+  const heurText = mv.heuristic_score != null
+    ? (mv.heuristic_score >= 0 ? '+' : '') + mv.heuristic_score
+    : '—';
+
+  let dbRows = '';
+  if (mv.has_db_data) {
+    const wdlText = mv.malom_wdl_after
+      ? `${mv.malom_wdl_after}${mv.malom_dtw_after != null ? ` (${mv.malom_dtw_after > 0 ? '+' : ''}${mv.malom_dtw_after} DTW)` : ''}`
+      : '—';
+    dbRows = `
     <div class="tt-row"><span class="tt-label">Win%</span><span>${(mv.win_pct*100).toFixed(1)}%</span></div>
     <div class="tt-row"><span class="tt-label">W/D/L</span><span>${mv.wins}/${mv.draws}/${mv.losses}</span></div>
     <div class="tt-row"><span class="tt-label">Games</span><span>${mv.total}</span></div>
     <div class="tt-row"><span class="tt-label">Avg plies left</span><span>${mv.avg_moves_to_end.toFixed(0)}</span></div>
-    <div class="tt-row"><span class="tt-label">Malom (after)</span><span>${wdlText}</span></div>
+    <div class="tt-row"><span class="tt-label">Malom (after)</span><span>${wdlText}</span></div>`;
+  }
+
+  tooltip.innerHTML = `
+    <div class="tt-notation">${mv.notation}</div>
+    ${dbRows}
+    <div class="tt-row"><span class="tt-label">Sentinel</span><span>${sentText}</span></div>
+    <div class="tt-row"><span class="tt-label">Heuristic</span><span>${heurText}</span></div>
   `;
   const wr = wrap.getBoundingClientRect();
   let tx = cx - wr.left + 14;
   let ty = cy - wr.top  - 10;
   if (tx + 180 > wr.width)  tx = cx - wr.left - 180;
-  if (ty + 140 > wr.height) ty = cy - wr.top  - 140;
+  if (ty + 160 > wr.height) ty = cy - wr.top  - 160;
   tooltip.style.left    = tx + 'px';
   tooltip.style.top     = ty + 'px';
   tooltip.style.display = 'block';
@@ -404,18 +478,35 @@ function updatePanel(data) {
     for (const mv of data.moves) {
       const col    = barColor(mv);
       const colHex = '#' + col.getHexString();
-      const wdl    = mv.malom_wdl_after
-        ? `<span class="move-malom" style="background:${mv.malom_wdl_after==='L'?'#16532a':mv.malom_wdl_after==='W'?'#7f1d1d':'#78350f'};color:${mv.malom_wdl_after==='L'?'#4ade80':mv.malom_wdl_after==='W'?'#fca5a5':'#fcd34d'}">${mv.malom_wdl_after}${mv.malom_dtw_after!=null?' '+mv.malom_dtw_after:''}</span>`
-        : '';
+
+      let rightContent = '';
+      if (mv.has_db_data) {
+        const wdl = mv.malom_wdl_after
+          ? `<span class="move-malom" style="background:${mv.malom_wdl_after==='L'?'#16532a':mv.malom_wdl_after==='W'?'#7f1d1d':'#78350f'};color:${mv.malom_wdl_after==='L'?'#4ade80':mv.malom_wdl_after==='W'?'#fca5a5':'#fcd34d'}">${mv.malom_wdl_after}${mv.malom_dtw_after!=null?' '+mv.malom_dtw_after:''}</span>`
+          : '';
+        rightContent = `
+          <span class="move-sub">${mv.total}</span>
+          ${wdl}
+          <span class="move-pct" style="color:${colHex}">${(mv.win_pct*100).toFixed(1)}%</span>
+        `;
+      } else {
+        const heurStr = (mv.heuristic_score >= 0 ? '+' : '') + mv.heuristic_score;
+        const sentStr = mv.sentinel_score != null
+          ? `<span class="move-sentinel">${(mv.sentinel_score*100).toFixed(0)}%</span>`
+          : '';
+        rightContent = `
+          <span class="move-heuristic">${heurStr}</span>
+          ${sentStr}
+        `;
+      }
+
       const item = document.createElement('div');
-      item.className = 'move-item';
+      item.className = 'move-item' + (mv.has_db_data ? '' : ' move-item-no-db');
       item.dataset.notation = mv.notation;
       item.innerHTML = `
         <div class="move-bar-swatch" style="background:${colHex}"></div>
         <span class="move-notation">${mv.notation}</span>
-        <span class="move-sub">${mv.total}</span>
-        ${wdl}
-        <span class="move-pct" style="color:${colHex}">${(mv.win_pct*100).toFixed(1)}%</span>
+        ${rightContent}
       `;
       item.addEventListener('click', () => applyMove(mv.notation));
       item.addEventListener('mouseenter', () => {
@@ -424,7 +515,10 @@ function updatePanel(data) {
       });
       item.addEventListener('mouseleave', () => {
         const entry = barMeshMap.get(mv.notation);
-        if (entry) { entry.mesh.material.color.copy(entry.mesh.userData.baseColor); entry.mesh.material.opacity = 0.88; }
+        if (entry) {
+          entry.mesh.material.color.copy(entry.mesh.userData.baseColor);
+          entry.mesh.material.opacity = mv.has_db_data ? 0.88 : 0.55;
+        }
       });
       listEl.appendChild(item);
     }
@@ -456,6 +550,8 @@ async function loadPosition(fen) {
     rebuildMalomOverlay(data.moves || []);
     updatePanel(data);
     document.getElementById('btn-back').disabled = history.length === 0;
+    const backLink = document.querySelector('a.btn-back');
+    if (backLink && data.fen) backLink.href = '/?setup_fen=' + encodeURIComponent(data.fen);
   } catch (err) {
     alert('Failed to load position: ' + err.message);
   } finally {
@@ -520,4 +616,5 @@ animate();
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-loadPosition('........................|W|0|0');
+const _urlFen = new URLSearchParams(window.location.search).get('fen');
+loadPosition(_urlFen || '........................|W|0|0');
