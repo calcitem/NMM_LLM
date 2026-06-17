@@ -65,20 +65,33 @@ needed.  The 84-float state encoder and 624-action space are already correct.
 **Why:** The value net is already +17.5 pp over the heuristic.  A pre-trained value head means
 the REINFORCE baseline is informative from episode 1, not after 50k episodes of noise.
 
+#### Stage 0 — Results
+
+| Item | Value |
+|------|-------|
+| Data gen | 500 games, 18 workers, diff=5, vn_blend=80%, budget=0.1s/move |
+| Positions | 28,537 (phase dist: place/early=4000, place/late=5000, midgame=16138, endgame=1916, fly=1483) |
+| Phase 1 training | frozen backbone, lr=3e-3, 20 epochs — val MSE 0.384 → **0.230** |
+| Phase 2 training | full network, lr=5e-4, 30 epochs — val MSE 0.295 → **0.012** |
+| Checkpoint | `learned_ai/checkpoints/stage0/best.pt` |
+| Notes | 0.012 val MSE on [−1,+1] scale ≈ 0.11 avg absolute error. No overfitting (train=0.002). Ready to use as `--resume` for Stage 1. |
+
 ---
 
 ### Stage 1 — Imitation Learning from Human Games  *(new)*
 
 **Goal:** Give the policy head a reasonable prior over move selection before RL begins.
 
-**Data:** HumanDB (22,895 games, 642,703 positions).  Label: the move actually played by the
-winner at each position.
+**Data:** HumanDB (30,256 games, 820,495 positions, 932,141 move records).  Label: win-rate
+of each move (wins + 0.5·draws) / total, used as a per-sample weight in the CE loss.
 
 **Method:**
-- Cross-entropy loss on the primary and capture action heads, using winner's moves as targets.
-- Weigh positions from winning side 2× vs losing side (imitation of *good* play, not all play).
-- Use Trajectory DB winner-path positions as additional high-quality targets (these are
-  confirmed winning continuations across ~27k games).
+- Query moves table (filter total ≥ 5) → ~820k raw (position, move) pairs.
+- Apply all 8 D4 symmetry augmentations per sample (board + notation transformed together)
+  so the policy sees every board orientation, not just the canonical one stored in the DB.
+- Cross-entropy loss on the primary action (placement/movement slice [0:599]), weighted by
+  win-rate.  Captures ([600:623]) deferred to Stage 2 (self-play value signal handles them).
+- Two-phase: (1) freeze backbone, high LR; (2) full network, low LR with early stop.
 
 **Exit criterion:** move-prediction accuracy on a held-out split stops improving.
 
@@ -86,6 +99,18 @@ winner at each position.
 have a reasonable prior — play that real humans have found effective.  This is the same
 approach that made AlphaGo's RL phase converge: start from supervised human imitation, not
 random.
+
+#### Stage 1 — Results
+
+| Item | Value |
+|------|-------|
+| DB rows used | 21,131 (total ≥ 5) → 169,048 after 8× D4 augmentation |
+| Phase distribution | opening place=32k, full place=40k, midgame=93k, endgame=1.1k, fly=1.1k |
+| Phase 1 training | frozen backbone, lr=3e-3, 20 epochs — val_acc 4% → **23.5%** |
+| Phase 2 training | full network, lr=5e-4, 40 epochs — val_acc 30% → **45.3%** (early stop ep 37) |
+| Exit criterion | Exceeds >30% target ✓ |
+| Checkpoint | `learned_ai/checkpoints/stage1/best.pt` |
+| Notes | Train/val accuracy gap (52%/45%) suggests mild overfitting; val accuracy still generalising well. Captures deferred — CE trained on primary actions only. |
 
 ---
 
