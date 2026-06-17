@@ -661,27 +661,39 @@ class GameAI:
         """score_adjust mode: blend heuristic rank with the sentinel score.
 
         Final score = 0.6 * heuristic_norm + 0.4 * sentinel_quality, per move.
-        Only swaps when the blend prefers a different move; otherwise the
-        heuristic move is kept.
+        The engine's search result (``move``) anchors heuristic_norm=1.0; the
+        sentinel must prefer an alternative by ≥ 1/(n-1) * 1.5 to override it.
+        Only swaps when the blend prefers a different move; otherwise kept.
         """
         scores = list(getattr(advice, "move_scores", []) or [])
         if len(scores) < 2 or len(scores) != len(moves):
             return move
 
-        # Heuristic ordering proxy: candidates arrive best-first, so rank 0 is the
-        # heuristic's top pick. Convert rank → normalised [0,1] (1.0 = best).
+        # Anchor: the engine's chosen move (result of search) is rank 0.
+        # moves[] is in move-ordering order, not post-search quality order, so
+        # we must find the engine's pick and rotate it to index 0 before
+        # applying the heuristic_norm gradient.
+        try:
+            engine_idx = next(i for i, m in enumerate(moves) if m == move)
+        except StopIteration:
+            return move
+
         n = len(moves)
+        order = [engine_idx] + [i for i in range(n) if i != engine_idx]
+        reordered_moves = [moves[i] for i in order]
+        reordered_scores = [scores[i] for i in order]
+
         heuristic_norm = [1.0 - (i / (n - 1)) for i in range(n)]
-        blended = [0.6 * heuristic_norm[i] + 0.4 * scores[i] for i in range(n)]
+        blended = [0.6 * heuristic_norm[i] + 0.4 * reordered_scores[i] for i in range(n)]
         best_i = max(range(n), key=lambda i: blended[i])
-        new_move = moves[best_i]
+        new_move = reordered_moves[best_i]
         if new_move != move:
             advice.original_move_notation = self._move_notation(move)
             advice.intervention_applied = "score_adjust"
             advice.intervention_detail = (
                 f"Score adjust — blended re-rank "
                 f"(played_q={advice.played_move_quality:.0%}, "
-                f"new_q={scores[best_i]:.0%})"
+                f"new_q={reordered_scores[best_i]:.0%})"
             )
             _logger.info(
                 "[Sentinel] intervened: engine intended %s → redirected to %s "

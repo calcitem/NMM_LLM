@@ -833,37 +833,13 @@ python tools/build\\\\\\\_endgame\\\\\\\_db.py --build-all --max-sum 8 --out-dir
 
 ### Value Network Training
 
+```bash
+.venv/bin/python tools/train_value_net.py \
+  --games-dir data/games data/human_games \
+  --decisive-only --epochs 30
 ```
-python tools/train\\\\\\\_value\\\\\\\_net.py
-```
 
-Trains a tiny 3-layer MLP (79 inputs → 128 → 64 → 1 tanh output) as a position evaluator. Every board position in every saved game is labelled +1 (the player to move won), −1 (lost), or 0 (draw/unknown) and used as a training sample. The network is side-invariant: features are encoded from the moving player's perspective so the same weights handle both White and Black.
-
-- **Input (79 values)**: 24 board positions × 3 one-hot channels (own / opponent / empty) = 72, plus 7 scalar metadata values (turn, pieces placed and on board for both sides).
-
-- **Output**: `tanh` scalar in (−1, 1) — positive means the current player is expected to win.
-
-- **Training**: mini-batch SGD with MSE loss; pure numpy, no GPU, no PyTorch needed. ~33 KB on disk.
-
-**Current status: dormant infrastructure.** The network trains and saves fine, but the production game path (negamax, difficulty 1–10) does not currently load or query it — gameplay is unaffected whether or not `data/value\\\_net.npz` exists. The hook exists in `ai/mcts.py` and `ai/game\\\_ai.py` (`value\\\_net` parameter) but the web app does not pass the loaded network to `GameAI`. Training the network now builds up data for when this wiring is completed.
-
-- Quality is limited by game count: with fewer than ~200 games the network learns noise. With 1000+ varied games it begins to provide meaningful signal.
-
-- Inference is ~0.1 ms per position; no GPU required.
-
-- The model is small enough that retraining from scratch is fast — no need to checkpoint.
-
-| Flag | Default | Description |
-| - | - | - |
-| `--games-dir PATH [PATH …]` | `data/games` | One or more source directories of JSONL game files |
-| `--output PATH` | `data/value_net.npz` | Where to write the trained weights |
-| `--epochs N` | 30 | Training epochs |
-| `--lr F` | 0.001 | Learning rate |
-| `--batch-size N` | 256 | Mini-batch size |
-| `--decisive-only` | off | Exclude draw/unknown games (not recommended — draws add calibration signal) |
-
-
-Recommended: accumulate at least 200 self-play games before training for useful signal. Retrain after each major batch of new games — the whole run takes under a minute.
+Trains a 3-layer MLP (79 → 128 → 64 → 1 tanh) to predict position outcomes. Each unique board state is included once (FEN-deduplicated; mean label when a position appears in multiple games). See [`docs/AI_INTERNALS.md`](docs/AI_INTERNALS.md#7-value-network-aivaluenetpy) for full training and benchmarking documentation.
 
 ## Learned (Neural) AI
 
@@ -1000,9 +976,7 @@ Each line includes episode count, stage name, `heuristic\\\_difficulty` (stage 3
 
 - [`docs/TRAINING\\\_GUIDE.md`](file:///home/benbrandwood/Documents/dev/NMM_ollama/docs/TRAINING_GUIDE.md) — detailed training reference with expected win rates per stage, hyperparameter guide, and troubleshooting.
 
-- [`docs/MIGRATION\\\_GUIDE.md`](file:///home/benbrandwood/Documents/dev/NMM_ollama/docs/MIGRATION_GUIDE.md) — switching engines, A/B testing, and instant rollback to the heuristic engine.
-
-- [`docs/AI\\\_INTERFACE\\\_MAPPING.md`](file:///home/benbrandwood/Documents/dev/NMM_ollama/docs/AI_INTERFACE_MAPPING.md) — the exact engine interface the learned AI implements.
+- [`docs/AI_INTERNALS.md`](docs/AI_INTERNALS.md) — sentinel overlay, value network, and heuristic engine internals.
 
 ## Strategic Sentinel Overlay
 
@@ -1013,110 +987,11 @@ The **sentinel** (`learned_ai/sentinel/`) is an opt-in move-quality overlay trai
 - 20 move-specific features (from/to squares, mill closure, capture, double-mill detection, block detection)
 - 18 counterfactual context features (fraction of winning/losing/drawing moves available from DB, heuristic rank, best/worst available quality)
 
-**Trained performance** (Malom DB, 3.6 M examples, 83% DB-labelled):
-- Move-quality accuracy vs Malom DB: **99.6%** — MAE **0.002**
-- Winning-trajectory accuracy: **100%** — mean score **0.891**
-- Losing-trajectory accuracy: **99.2%** — mean score **0.460**
-- Game-level trajectory polarity: **90%** of games — winner's mean score > loser's
+**Current Stage 4+5 performance:** top1_win_rate 76.5%, loss_acc 64.9%, critical_miss 20.0%.
 
-### Advisory thresholds
+Enable via **Settings → Use Sentinel overlay** in the game UI. Three modes: `advisory` (badge only), `score_adjust` (re-ranks candidates), `reconsider` (redirects AI on high-confidence bad moves).
 
-`_advisory_message()` in `learned_ai/sentinel/infer.py` assigns one of four labels after scoring every candidate:
-
-| Label | Condition | Overlay badge |
-| - | - | - |
-| `safe` | No significant gap | 🟢 |
-| `possible_mistake` | Played quality < 0.4 and gap ≥ 8% | 🟡 |
-| `missed_opportunity` | Gap ≥ 15% and played quality ≥ 0.4 | 🔵 |
-| `critical` | Played quality < 0.4 and gap ≥ 20% | 🔴 |
-
-`reconsider_threshold` (default **0.15**) controls the gap at which reconsider mode redirects the AI.
-
-### Training guide
-
-**Prerequisites:** `.venv/bin/python` activated; `data/games/` or `data/human_games/` populated with `.jsonl` game records; Malom DB strongly recommended for best label quality.
-
-**Step 1 — Train**
-
-```bash
-# With Malom DB — ground-truth WDL labels (recommended)
-.venv/bin/python scripts/train_sentinel.py \
-    --config configs/sentinel_default.yaml \
-    --game-dir data/human_games
-
-# Without DB — game-outcome proxy labels (still useful)
-.venv/bin/python scripts/train_sentinel.py \
-    --config configs/sentinel_default.yaml \
-    --game-dir data/games \
-    --db-path ""
-
-# Decisive games only (exclude draws — not recommended; draws add calibration signal)
-.venv/bin/python scripts/train_sentinel.py \
-    --config configs/sentinel_default.yaml \
-    --game-dir data/human_games \
-    --decisive-only
-```
-
-Checkpoints → `learned_ai/sentinel/checkpoints/` (`best.pt` = lowest val loss, `latest.pt` = last epoch). To retrain from scratch, delete both files. Convergence typically occurs by epoch 1–5 with the Malom DB; 50 epochs is safe.
-
-**Step 2 — Evaluate (trajectory-level)**
-
-```bash
-.venv/bin/python scripts/evaluate_sentinel.py \
-    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
-    --game-dir data/human_games \
-    --db-path "/mnt/windows/NMM_DB/Entire DB"
-```
-
-Reports two sections:
-
-- **Trajectory evaluation** — every played move in every decisive game scored and grouped into winning-trajectory (moves by the eventual winner) and losing-trajectory. Metrics: per-trajectory accuracy vs Malom DB, mean sentinel scores, fraction of games where winner's mean score > loser's (game-level polarity).
-- **Flat statistics** — all legal-move candidates per position (matches training distribution): overall accuracy, win/draw/loss breakdown, calibration bins.
-
-Target metrics for a well-trained model: trajectory accuracy ≥ 0.99, game-level polarity ≥ 85%, winner mean ≥ 0.85, loser mean ≈ 0.45–0.50.
-
-**Step 3 — Attach at play time**
-
-Enable via **Settings → Use Sentinel overlay** in the game UI, or set `sentinel_mode` in `configs/sentinel_default.yaml`:
-
-| Mode | Effect |
-| - | - |
-| `advisory` | Overlay badge only — never changes AI moves (default, safe) |
-| `score_adjust` | Nudges heuristic scores by ±`score_adjust_scale` (≤5%) |
-| `reconsider` | Redirects AI to sentinel's preferred move when gap ≥ `reconsider_threshold` (0.15) |
-
-**Resume training**
-
-```bash
-.venv/bin/python scripts/train_sentinel.py \
-    --config configs/sentinel_default.yaml \
-    --game-dir data/human_games \
-    --resume learned_ai/sentinel/checkpoints/latest.pt \
-    --epochs 20
-```
-
-### External solved database (Malom)
-
-The sentinel uses the Gévay–Danner **Malom Ultra-Strong** perfect-play database as ground-truth WDL supervision. The adapter (`learned_ai/sentinel/db_teacher.py`) reads `.sec2` sector files and returns exact WDL for any queried position.
-
-**Download:** Malom Standard Ultra-strong v1.1.0 (`ggevay/malom`, GPL-3). Extract the `Std_DD_89adjusted/` directory.
-
-```
-Std_DD_89adjusted/
-  std_3_3_0_0.sec2   ← one file per (W, B, WF, BF) sector
-  std_3_4_0_0.sec2
-  std.secval          ← win/loss thresholds
-  ...                (498 sector files total)
-```
-
-Update `configs/sentinel_default.yaml`:
-
-```yaml
-external_db_path: "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted"
-external_db_enabled: true
-```
-
-With the DB enabled, 83%+ of training labels are exact WDL from perfect play, dramatically improving label quality for positions decided well before the game ended. The board→index hash uses D4 × ring-swap 16-symmetry canonical form + combinadic ranking, ported from [Sanmill](https://github.com/calcitem/Sanmill). All 498 sectors are queryable.
+For full training documentation, evaluation commands, and benchmark results see [`docs/AI_INTERNALS.md`](docs/AI_INTERNALS.md#8-sentinel-overlay-learned_aisentinel) and [`docs/sentinel_overview.md`](docs/sentinel_overview.md).
 
 See `docs/DATABASES.md` for a full reference on all databases used by the AI.
 
@@ -1251,76 +1126,28 @@ The Tools page (`/tools`) also provides a GUI import button under **Import PlayO
 ```
 
 
-## Training the Sentinel
+## Retraining the Learned AI
 
-The sentinel is a move-quality MLP that scores legal moves by their historical win probability. It is trained on JSONL game records with per-move Malom DB WDL labels when available.
+Full training documentation, evaluation commands, and benchmark results are in [`docs/AI_INTERNALS.md`](docs/AI_INTERNALS.md).
 
-### Train on AI self-play games
-
-```
-.venv/bin/python scripts/train\_sentinel.py \\  
-    --game-dir data/games \\  
-    --output   learned\_ai/sentinel/checkpoints/best.pt
+**Sentinel** (four-stage curriculum, includes human games, FEN deduplication):
+```bash
+bash scripts/retrain_pipeline.sh cuda
 ```
 
-### Train on human games (recommended for human-like play)
-
-```
-.venv/bin/python scripts/train\_sentinel.py \\  
-    --game-dir data/human\_games \\  
-    --output   learned\_ai/sentinel/checkpoints/best.pt
-```
-
-### Review sentinel predictions
-
-```
-\# Single game with full move table  
-.venv/bin/python scripts/sentinel\_review.py \\  
-    --checkpoint learned\_ai/sentinel/checkpoints/best.pt \\  
-    --game-file  data/human\_games/human\_ml11756018.jsonl \\  
-    --all-moves  
-  
-\# Batch review — top 5 most-flagged games in a directory  
-.venv/bin/python scripts/sentinel\_review.py \\  
-    --checkpoint learned\_ai/sentinel/checkpoints/best.pt \\  
-    --game-dir   data/human\_games \\  
-    --top 5
+**Value network:**
+```bash
+.venv/bin/python tools/train_value_net.py \
+  --games-dir data/games data/human_games \
+  --decisive-only --epochs 30
 ```
 
-The sentinel is activated in the game UI via **Settings → Use Sentinel overlay**. At difficulty ≥ 5 it intervenes on moves the model classifies as poor quality.
-
-
-## Training the Value Network
-
-The value network is a lightweight MLP (numpy) that predicts the winner from a board position feature vector. It is used as a leaf evaluator in the negamax search when `value\_net\_blend \> 0`.
-
-### Train on AI self-play games
-
+**Review sentinel predictions against game files:**
+```bash
+.venv/bin/python scripts/sentinel_review.py \
+    --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+    --game-dir   data/human_games --top 5
 ```
-.venv/bin/python tools/train\_value\_net.py \\  
-    --games-dir data/games \\  
-    --output    data/value\_net.npz \\  
-    --epochs    30
-```
-
-### Train on human games (recommended for strategic accuracy)
-
-```
-.venv/bin/python tools/train\_value\_net.py \\  
-    --games-dir data/human\_games \\  
-    --output    data/value\_net.npz \\  
-    --epochs    30
-```
-
-Options:
-
-- `--epochs N` — training epochs (default 30)
-
-- `--lr FLOAT` — learning rate (default 0.001)
-
-- `--batch-size N` — mini-batch size (default 256)
-
-The **Value network blend %** slider in the AI Tuning panel controls how much weight the value network gets in leaf evaluation (0 = heuristic only, 100 = value net only). A starting value of 30–50 is recommended when using a human-trained network alongside the heuristic AI.
 
 
 ## Project Structure

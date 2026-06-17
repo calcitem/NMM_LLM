@@ -676,59 +676,91 @@ Pieces already in a closed mill, a 2-config, or another 1-config are excluded fr
 
 The classical heuristic engine documented above has an opt-in self-learning counterpart under `learned_ai/` — a PyTorch policy/value network trained by self-play reinforcement learning using the REINFORCE algorithm. It is selected via the `NMM_AI_ENGINE=learned` environment variable and exposes the same `choose_move(board)` interface as the heuristic engine.
 
-The learned AI does **not** share any code with the heuristic engine. It learns purely from game-outcome rewards and never consults the hand-crafted evaluation weights, tactical bonuses, or alpha-beta search stack described above.
+The learned AI does **not** share any code with the heuristic engine. It learns purely from game-outcome rewards and never consults the hand-crafted evaluation weights, tactical bonuses, or alpha-beta search stack described above. **This component is experimental and not well-calibrated.**
 
-**Training curriculum** (win-rate gated):
-
-| Stage | Opponent | Exit condition |
-|-------|----------|----------------|
-| 1 | self (sanity) | episode budget |
-| 2 | random agent | ≥ 60 % rolling win rate (200-game window) |
-| 3 | heuristic difficulty 1 → 10 | ≥ 55 % win rate at each level; graduate at difficulty 10 |
-| 4 | self-play pool | episode budget |
-
-Temperature resets to 1.0 at every stage advance and every difficulty bump so the model enters each new challenge with full exploration headroom.
-
-Full documentation:
-
-- [`docs/LEARNED_AI_ARCHITECTURE.md`](docs/LEARNED_AI_ARCHITECTURE.md) — state/action encoding, NMMNet architecture, training algorithm, curriculum.
-- [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — step-by-step training walkthrough, hardware requirements, hyperparameter reference.
+Full documentation: [`docs/LEARNED_AI_ARCHITECTURE.md`](LEARNED_AI_ARCHITECTURE.md) — state/action encoding, NMMNet architecture, training algorithm, curriculum.
 
 ---
 
-## 7. Sentinel Overlay (`learned_ai/sentinel/`)
+## 7. Value Network (`ai/value_net.py`)
 
-The sentinel is an opt-in **move-quality scorer** layered on top of the heuristic engine. It never replaces the engine's move but scores every candidate and flags suspicious choices. In `reconsider` mode it can redirect the AI when the chosen move scores far below the best available alternative.
+A small MLP (79 → 128 → 64 → 1) trained from game records to predict the winner from a board position.
+
+**Input (79 floats):** 24 positions × 3 one-hot channels (own/opponent/empty) + 7 scalar metadata (turn, pieces placed and on board for each side). Encoded from the current player's perspective so the same weights handle both colours.
+
+**Output:** `tanh` scalar in (−1, 1). Positive = current player likely wins.
+
+**Inference:** Pure numpy, no deep-learning framework required. ~0.1 ms per position.
+
+**Usage:** Passed as the `value_net` parameter to `GameAI` and used as the MCTS leaf evaluator. The **Value network blend %** slider in AI Tuning controls how much weight the value net gets versus the heuristic (0 = heuristic only, 100 = value net only). Not loaded by the web server by default — must be enabled explicitly.
+
+### Training
+
+```bash
+.venv/bin/python tools/train_value_net.py \
+  --games-dir data/games data/human_games \
+  --decisive-only \
+  --epochs 30 \
+  --output data/value_net.npz
+```
+
+**FEN deduplication:** Each unique board position (identified by `board_fen_before`) is included exactly once. When the same position appears in multiple games with different outcomes, the label is the **mean** of all outcomes (+1.0 / −1.0 / 0.0). This prevents repeated opening positions from dominating the training signal.
+
+**Multi-directory support:** Pass multiple paths to `--games-dir` to combine AI self-play games (`data/games/`) with human-vs-human games (`data/human_games/`). The value net currently achieves ~0.82 final loss over 743,231 unique positions from 31,501 game files.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--games-dir PATH [PATH …]` | `data/games` | Source directories containing `*.jsonl` game records |
+| `--output PATH` | `data/value_net.npz` | Output `.npz` path |
+| `--epochs N` | 30 | Training epochs |
+| `--lr F` | 0.001 | Learning rate |
+| `--batch-size N` | 256 | Mini-batch size |
+| `--decisive-only` | off | Exclude draw/unknown games |
+
+### Benchmark
+
+```bash
+# Value net alone vs baseline heuristic
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 --white-value-net
+
+# Value net + sentinel vs baseline
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 \
+  --white-value-net --white-sentinel score_adjust
+```
+
+---
+
+## 8. Sentinel Overlay (`learned_ai/sentinel/`)
+
+The sentinel is an opt-in **move-quality scorer** layered on top of the heuristic engine. For every candidate move in a position it predicts a quality score in [0, 1] (1.0 = DB win, 0.5 = draw, 0.0 = DB loss), flags suspicious choices, and in `reconsider` mode can redirect the AI's chosen move.
+
+All sentinel calls are wrapped in `try/except`; failures always fall through to the heuristic engine's choice.
 
 ### Architecture
 
-Single-output sigmoid MLP (`learned_ai/sentinel/model.py`): 58 → 128 → 64 → 32 → 1.
+Single-output sigmoid MLP (`learned_ai/sentinel/model.py`): **58 → 128 → 64 → 32 → 1**.
 
 **Feature vector (FEATURE_DIM = 58):**
 
 | Range | Group | Features |
 |-------|-------|----------|
 | [0:20) | Board context | Phase one-hot, piece counts, mill counts, mobility, double-mill pivots, placed counts, potential mills, side-to-move flag — all mover-normalised |
-| [20:40) | Move-specific | From/to square indices, is_placement, is_mill_closing, is_capture, captured index, double-mill creation, opponent block, resulting counts/mobility/mills, square type (junction/corner), mobility reduction, new mill threat |
+| [20:40) | Move-specific | From/to square indices, is_placement, is_mill_closing, is_capture, captured index, double-mill creation, opponent block, resulting counts/mobility/mills, square type, mobility reduction, new mill threat |
 | [40:58) | Counterfactual context | n_legal, frac_winning/losing/draw moves (DB), best/worst available WDL, heuristic rank, heuristic score normalised, winning/losing move available (DB), this move is DB win/loss/draw |
 
-### Labels
+**DB feature leakage note:** Slots [41:46) and [48:58) are derived from the Malom DB and are always zeroed at inference time. Training must use `--drop-db-features` to zero them during training too; otherwise the model learns `output ≈ feat[57]` which collapses at inference.
 
-Supervision comes from the Malom Ultra-Strong solved DB (`learned_ai/sentinel/db_teacher.py`):
-- `1.0` — DB says this move wins for the mover
-- `0.5` — DB says draw (down-weighted at 0.5 in training)
-- `0.0` — DB says loss
-- Heuristic weak label (normalised to [0,1]) when the DB has no entry — weight 0.4
+### Intervention modes
 
-With the Malom DB, 83%+ of labels are solved; heuristic labels cover the remaining 17%.
+| Mode | Behaviour |
+|------|-----------|
+| `advisory` | Logs advice; never changes the move. Badge shown in UI. |
+| `score_adjust` | Re-ranks candidates using a blend of heuristic rank and sentinel quality. The engine's search result is always anchored at rank 0; other candidates are blended 60% heuristic / 40% sentinel. |
+| `reconsider` | On high-confidence bad moves (gap ≥ `reconsider_threshold`): tries LLM override → deeper search → second-best fallback. |
 
-### Training dataset (`SentinelDataset`)
+### Advisory labels
 
-For every played position in every game file, **all legal moves** are enumerated (not just the played move). Each legal move gets one `MoveExample` with its own feature vector and label. This trains the model to rank moves within a position, not just to predict the played move. The dataset is split at the **game file level** (no ply-level leakage between train and val).
-
-### Advisory messages (`learned_ai/sentinel/infer.py`)
-
-`_advisory_message(played_quality, opportunity_gap)` maps scores to a label displayed in the overlay:
+`_advisory_message()` in `learned_ai/sentinel/infer.py`:
 
 | Label | Condition |
 |-------|-----------|
@@ -737,19 +769,160 @@ For every played position in every game file, **all legal moves** are enumerated
 | `missed_opportunity` | Gap ≥ 15% and played quality ≥ 0.4 |
 | `critical` | Played quality < 0.4 and gap ≥ 20% |
 
-### Reconsider mode
+### Training dataset (`SentinelDataset`)
 
-When `sentinel_mode == "reconsider"` and `opportunity_gap > reconsider_threshold` (default **0.15**), `_sentinel_reconsider()` in `game_ai.py` first tries the LLM move recommender; if unavailable, falls back to the sentinel's top-scored candidate. The threshold is loaded from `configs/sentinel_default.yaml` and stored in `self._sentinel_reconsider_threshold`.
+For every played position in every game file, **all legal moves** are enumerated (not just the played move). Each legal move gets one `MoveExample`. This trains the model to rank moves within a position, not just to predict the played move.
 
-### Trajectory evaluation (`scripts/evaluate_sentinel.py`)
+**FEN deduplication:** Each unique board position (by `board_fen_before`) is included at most once per split. Positions seen in earlier game files are skipped for later ones. This prevents common opening positions from flooding the gradient signal. Applied per-split (train and val each deduplicate independently).
 
-The primary evaluation metric is **game-level trajectory polarity**: for each decisive game, do the winner's played moves receive a higher mean sentinel score than the loser's? A model with 90%+ polarity is reliably distinguishing winning from losing play at the game level.
+The dataset is split at the **game-file level** — no ply-level leakage between train and val sets.
 
-Secondary metric: per-move accuracy against Malom DB ground truth, broken out by winning-trajectory (mover = eventual winner) vs losing-trajectory (mover = eventual loser).
+**Human games:** Pass `--human-game-dir data/human_games` to include human-vs-human JSONL records alongside AI self-play games.
 
-**Validated performance** (Malom DB, 3.6 M training examples):
-- Val loss: 0.0355 (converged at epoch 1, stable thereafter)
-- Move-quality accuracy: 99.6% — MAE 0.002
-- Winning-trajectory accuracy: 100%, mean score 0.891
-- Losing-trajectory accuracy: 99.2%, mean score 0.460
-- Game-level polarity: 90% (9/10 games winner mean > loser mean)
+### Training curriculum
+
+Training follows a four-stage curriculum. Each stage saves its best checkpoint to `learned_ai/sentinel/checkpoints/stageN/`.
+
+**Stage 1 — Structural foundation**
+
+Purely from board structure. No DB. Heuristic quality scores are training labels.
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+  --config configs/sentinel_stage1.yaml \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --drop-db-features \
+  --decisive-only \
+  --device cuda
+```
+
+**Stage 2 — DB calibration**
+
+Resume from Stage 1. Malom DB provides WDL + DTM labels. `--drop-db-features` zeroes DB indicator slots so the model updates structural weights toward DB ground truth rather than memorising oracle signals.
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+  --config configs/sentinel_stage2.yaml \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --resume learned_ai/sentinel/checkpoints/stage1/best.pt \
+  --drop-db-features \
+  --aux-wdl --lambda-wdl 0.3 \
+  --device cuda
+```
+
+**Stage 4 — Corrected full training (fresh start)**
+
+Fresh start with DB, `--drop-db-features` active throughout. DTM-graded labels provide accurate supervision without oracle shortcutting.
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+  --config configs/sentinel_stage4.yaml \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --drop-db-features \
+  --aux-wdl --lambda-wdl 0.3 \
+  --device cuda
+```
+
+**Stage 5 — DB feature fine-tuning**
+
+Resume from Stage 4. DB feature slots are now **visible**. At a very low learning rate the model learns to exploit DB quality signals when available, while retaining structural weights from Stage 4.
+
+```bash
+# Read Stage 4's saved epoch first, then: --epochs = stage4_epoch + 8
+.venv/bin/python scripts/train_sentinel.py \
+  --config configs/sentinel_stage5.yaml \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --resume learned_ai/sentinel/checkpoints/stage4/best.pt \
+  --epochs 38 \
+  --aux-wdl --lambda-wdl 0.3 \
+  --device cuda
+```
+
+> **Epoch arithmetic:** `--resume` loads Stage 4's epoch counter. Pass `--epochs N` where N = Stage 4 best epoch + 8. With `epochs: 30` in the Stage 4 config, use `--epochs 38`. Omitting `--epochs` causes the config's `epochs: 8` to produce an empty range.
+
+**One-command pipeline (recommended):**
+
+```bash
+bash scripts/retrain_pipeline.sh cuda
+```
+
+Runs all four stages in sequence with human games, dynamically computes Stage 5's epoch count, and promotes the final checkpoint to `best.pt`.
+
+### Evaluation
+
+**Offline quality metrics** (against Malom DB ground truth, DB feature slots zeroed to simulate inference):
+
+```bash
+.venv/bin/python scripts/eval_sentinel.py \
+  --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+  --game-dir data/games \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --limit 200
+```
+
+| Metric | Meaning | Target |
+|--------|---------|--------|
+| `win_acc` | % of DB-win moves scored > 0.5 | > 60% |
+| `loss_acc` | % of DB-loss moves scored < 0.5 | > 65% |
+| `top1_win_rate` | % of positions (win available) where sentinel ranks a win #1 | > 75% |
+| `critical_miss` | % of positions (win available) where sentinel ranks a loss #1 | < 15% |
+| `spearman_r` | Move ranking correlation with DTM quality | limited by features |
+
+**Current Stage 4+5 results:**
+
+| Checkpoint | win_acc | loss_acc | top1_win_rate | critical_miss | spearman_r |
+|------------|---------|----------|---------------|---------------|------------|
+| Stage 3 (leaky — do not use) | ~85% | ~65% | ~76% | ~20% | ~0.10 |
+| Stage 4+5 | 41.6% | 64.9% | 76.5% | 20.0% | 0.10 |
+
+win_acc is lower than the leaky model because the network no longer reads feat[57] (the training label) at inference. top1_win_rate — the actionable game-play metric — is equivalent.
+
+**Game-play benchmark:**
+
+```bash
+# Sanity check: identical configs should be ~50/50
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4
+
+# Sentinel score_adjust vs baseline
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 \
+  --white-sentinel score_adjust
+
+# Sentinel + value net vs baseline
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 \
+  --white-sentinel score_adjust --white-value-net
+
+# Value net alone vs baseline
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 \
+  --white-value-net
+```
+
+Each config plays White in half the games and Black in the other half to cancel first-mover bias. Results are reported as **Config A edge** in percentage points. 200 games at difficulty 4 ≈ 45 minutes.
+
+### Deploying a new checkpoint
+
+```bash
+# Back up current production checkpoint
+cp learned_ai/sentinel/checkpoints/best.pt \
+   learned_ai/sentinel/checkpoints/best-YYYYMMDD-backup.pt
+
+# Promote Stage 5 output to production
+cp learned_ai/sentinel/checkpoints/stage5/best.pt \
+   learned_ai/sentinel/checkpoints/best.pt
+```
+
+Restart the Flask server to pick up the new checkpoint (loaded once at startup).
+
+### Graceful degradation
+
+If `best.pt` is missing or PyTorch is not installed, the sentinel silently disables itself at startup. The game runs identically.
+
+---
+
+See [`docs/DATABASES.md`](DATABASES.md) for the full database reference including the Malom DB, value network, and sentinel checkpoint.

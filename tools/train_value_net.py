@@ -56,64 +56,100 @@ def fen_to_board(fen: str) -> BoardState:
 
 # ── Dataset extraction ────────────────────────────────────────────────────────
 
+def _iter_records(fpath: Path):
+    """Yield game-record dicts from a JSONL file (single object, array, or line-delimited)."""
+    try:
+        content = fpath.read_text().strip()
+    except Exception:
+        return
+    if not content:
+        return
+    try:
+        obj = json.loads(content)
+        if isinstance(obj, dict):
+            yield obj
+            return
+        if isinstance(obj, list):
+            for o in obj:
+                if isinstance(o, dict):
+                    yield o
+            return
+    except json.JSONDecodeError:
+        pass
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                yield obj
+        except json.JSONDecodeError:
+            continue
+
+
 def extract_samples(games_dirs: list[Path], decisive_only: bool = False) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Read all JSONL files from one or more directories and build feature matrix X and label vector y.
 
-    For each position in a game:
+    For each unique board position (identified by FEN):
       color  = board.turn (the player about to move)
-      label  = +1.0 if color wins, -1.0 if color loses, 0.0 for draw/unknown.
+      label  = mean of all outcomes seen for that FEN:
+               +1.0 if color wins, -1.0 if color loses, 0.0 for draw/unknown.
 
+    Using the mean across all games prevents repeated early-game positions from
+    dominating the signal when many games share the same opening positions.
     decisive_only: if True, skip games with no winner (draws/unknowns) entirely.
     """
-    X_list: list[np.ndarray] = []
-    y_list: list[float] = []
+    # Collect per-FEN labels and features (features are deterministic from the board).
+    fen_labels: dict[str, list[float]] = {}
+    fen_features: dict[str, np.ndarray] = {}
     files = sorted({f for d in games_dirs for f in d.rglob("*.jsonl")})
     skipped = 0
 
     for fpath in files:
-        try:
-            record = json.loads(fpath.read_text())
-        except Exception:
-            continue
-        winner = record.get("winner")          # "W", "B", or None
-        moves  = record.get("moves", [])
-        if not moves:
-            continue
-        if decisive_only and winner is None:
-            skipped += 1
-            continue
-
-        for entry in moves:
-            fen = entry.get("board_fen_before")
-            if not fen:
+        for record in _iter_records(fpath):
+            winner = record.get("winner")
+            moves = record.get("moves", [])
+            if not moves:
                 continue
-            try:
-                board = fen_to_board(fen)
-            except Exception:
+            if decisive_only and winner is None:
+                skipped += 1
                 continue
 
-            color = board.turn
-            if winner == color:
-                label = 1.0
-            elif winner is not None and winner != color:
-                label = -1.0
-            else:
-                label = 0.0
+            for entry in moves:
+                fen = entry.get("board_fen_before")
+                if not fen:
+                    continue
+                try:
+                    board = fen_to_board(fen)
+                except Exception:
+                    continue
 
-            X_list.append(board_to_features(board, color))
-            y_list.append(label)
+                color = board.turn
+                if winner == color:
+                    label = 1.0
+                elif winner is not None and winner != color:
+                    label = -1.0
+                else:
+                    label = 0.0
+
+                if fen not in fen_features:
+                    fen_features[fen] = board_to_features(board, color)
+                    fen_labels[fen] = []
+                fen_labels[fen].append(label)
 
     if decisive_only and skipped:
         print(f"  Skipped {skipped} draw/unknown games.")
 
-    if not X_list:
+    if not fen_features:
         dirs_label = ", ".join(str(d) for d in games_dirs)
         print(f"No training samples found.  Ensure these directories contain JSONL files: {dirs_label}")
         sys.exit(1)
 
-    X = np.stack(X_list).astype(np.float32)
-    y = np.array(y_list, dtype=np.float32)
+    fens = list(fen_features.keys())
+    X = np.stack([fen_features[f] for f in fens]).astype(np.float32)
+    y = np.array([float(np.mean(fen_labels[f])) for f in fens], dtype=np.float32)
     return X, y, len(files)
 
 
@@ -141,7 +177,7 @@ def main() -> None:
     print(f"Loading game records from {dirs_str} ...")
     X, y, n_files = extract_samples(args.games_dir, decisive_only=args.decisive_only)
     N = len(X)
-    print(f"  {N} positions extracted from {n_files} games.")
+    print(f"  {N:,} unique positions (FEN-deduplicated) from {n_files:,} game files.")
 
     label_dist = {
         "+1 (win)":  int((y > 0.5).sum()),

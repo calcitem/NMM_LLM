@@ -118,11 +118,19 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 **What it stores:** A position evaluator trained on game outcomes. Input is 24 board positions × 3 one-hot channels + 7 scalar metadata = 79 features, encoded from the moving player's perspective. Output is a `tanh` scalar in (−1, 1): positive = current player likely wins.
 
-**How it is built:** `tools/train_value_net.py`. Reads all JSONL files from one or more `--games-dir` directories. Labels each position with `+1.0` (mover won), `−1.0` (mover lost), or `0.0` (draw/unknown). Trains with mini-batch SGD (MSE loss, pure numpy, no GPU required). Saves to `--output` (default `data/value_net.npz`). Training ~200+ games gives useful signal; retraining after each major batch takes under a minute.
+**How it is built:** `tools/train_value_net.py`. Reads all JSONL files from one or more `--games-dir` directories (typically `data/games data/human_games`). Each unique board position (by FEN) is included exactly once — when the same position appears in multiple games with different outcomes, the label is the mean of all outcomes. Trains with mini-batch SGD (MSE loss, pure numpy, no GPU required).
 
-**Current status:** Dormant infrastructure. The value net trains and saves correctly, but the production game path does not currently load it by default — gameplay is unaffected whether or not `data/value_net.npz` exists. The hook is in `ai/mcts.py` and `ai/game_ai.py` (`value_net` parameter); the **Value network blend %** slider in AI Tuning controls the blend weight (0 = heuristic only, 100 = value net only) when wired in.
+```bash
+.venv/bin/python tools/train_value_net.py \
+  --games-dir data/games data/human_games \
+  --decisive-only \
+  --epochs 30 \
+  --output data/value_net.npz
+```
 
-**Target performance:** Val loss < 0.55 (baseline random). A well-trained value net on 1000+ varied games reaches ~0.45–0.50 val loss.
+**Current performance:** 743,231 unique positions from 31,501 game files; final loss 0.820 after 30 epochs.
+
+**Usage:** Passed as the `value_net` parameter to `GameAI` and used as the MCTS leaf evaluator. Not loaded by the web server by default. The **Value network blend %** slider in AI Tuning controls the blend weight (0 = heuristic only, 100 = value net only) when wired in. Benchmarks show the value net is neutral versus the baseline heuristic (+0.5pp over 200 games).
 
 ---
 
@@ -136,16 +144,16 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 **How it is built:** `scripts/train_sentinel.py`. Reads JSONL game records, generates one `MoveExample` per legal move per position (not just the played move), labels with Malom DB WDL when available, trains with BCE loss. `best.pt` is selected automatically.
 
-**To retrain from scratch:** Delete both `best.pt` and `latest.pt` and rerun training.
+**To retrain:** Run `bash scripts/retrain_pipeline.sh cuda` — runs Stage 1 → 2 → 4 → 5 in sequence with FEN deduplication and human games, then promotes the result to `best.pt`.
 
-**When consulted:** At runtime in `ai/game_ai.py` when a sentinel is attached (`set_sentinel()`). Runs one batched forward pass over all candidate moves before the engine commits to a choice. Also consulted by `scripts/evaluate_sentinel.py` and `scripts/sentinel_review.py`.
+**When consulted:** At runtime in `ai/game_ai.py` when a sentinel is attached (`set_sentinel()`). Runs one batched forward pass over all candidate moves before the engine commits to a choice. Also consulted by `scripts/eval_sentinel.py` and `scripts/sentinel_review.py`.
 
-**Validated performance** (3.6 M examples, 83% Malom DB labelled, 50 epochs):
-- Val BCE loss: 0.0355
-- Move-quality accuracy vs Malom DB: 99.6%
-- Winning-trajectory accuracy: 100%, mean score 0.891 ± 0.109
-- Losing-trajectory accuracy: 99.2%, mean score 0.460 ± 0.176
-- Game-level trajectory polarity: 90%
+**Current Stage 4+5 performance** (eval against Malom DB, DB feature slots zeroed):
+- win_acc: 41.6% (DB-win moves scored > 0.5)
+- loss_acc: 64.9% (DB-loss moves scored < 0.5)
+- top1_win_rate: 76.5% (positions with a win available where sentinel ranks a win #1)
+- critical_miss: 20.0%
+- spearman_r: 0.10 (expected with DB features zeroed at inference)
 
 ---
 

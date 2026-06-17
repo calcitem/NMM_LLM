@@ -202,11 +202,17 @@ def examples_from_game(
     record: Dict[str, Any],
     db=None,
     trajectory_weight: bool = False,
+    seen_fens: Optional[set] = None,
 ) -> List[MoveExample]:
     """Replay one game record and return per-move MoveExamples for every ply.
 
     When ``trajectory_weight=True`` the actually-played move at each position
     receives a training-weight boost scaled by the game outcome (win/loss).
+
+    ``seen_fens``: if provided, positions whose ``board_fen_before`` is already
+    in the set are skipped and the FEN is added to the set.  Pass a shared set
+    across games to deduplicate across the entire dataset (prevents repeated
+    early-game positions from flooding the training signal).
     """
     winner = record.get("winner")
     moves = record.get("moves") or []
@@ -215,6 +221,10 @@ def examples_from_game(
         fen = log_move.get("board_fen_before")
         if not fen:
             continue
+        if seen_fens is not None:
+            if fen in seen_fens:
+                continue
+            seen_fens.add(fen)
         board = _board_from_fen_before(fen)
         if board is None:
             continue
@@ -284,6 +294,7 @@ class SentinelDataset(_TorchDataset):
         print(f"[dataset] loading {n_total} game files...", flush=True)
         all_examples: List[MoveExample] = []
         skipped = 0
+        seen_fens: set = set()
         t0 = _time.time()
         _REPORT_EVERY = max(1, n_total // 20)  # ~5% increments
         for i, path in enumerate(paths):
@@ -292,7 +303,10 @@ class SentinelDataset(_TorchDataset):
                     skipped += 1
                     continue
                 try:
-                    all_examples.extend(examples_from_game(record, db=db, trajectory_weight=trajectory_weight))
+                    all_examples.extend(examples_from_game(
+                        record, db=db, trajectory_weight=trajectory_weight,
+                        seen_fens=seen_fens,
+                    ))
                 except Exception as exc:
                     logger.warning("[SentinelDataset] failed on %s: %s", path, exc)
             if (i + 1) % _REPORT_EVERY == 0 or (i + 1) == n_total:
