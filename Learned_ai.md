@@ -114,6 +114,14 @@ random.
 
 ---
 
+#### Pre-Stage 2 Baseline
+
+Stage 1 checkpoint (greedy, temp=0) vs heuristic difficulty 2, vn_blend=0:
+W=0, D=25, L=15 over 40 games — 0% win rate, 62.5% draw rate.
+Confirms the imitation policy has learned to defend but cannot win without RL.
+
+---
+
 ### Stage 2 — Sentinel-Filtered Self-play vs Weak Heuristic
 
 **Goal:** Begin RL while filtering the noisiest moves so self-play does not diverge.
@@ -129,6 +137,11 @@ enough to get positive signal).
 - Sentinel does **not** override the move selection — the policy still chooses freely.
 
 **Algorithm:** REINFORCE with value-head baseline (same as original Stage 2/3).
+
+**Implementation notes:**
+- `override_time_budget=0.05s/move` passed to GameAI so training games run in ~3s not ~27s.
+- Opponent's **first move is forced random** each game to ensure the learner sees varied
+  opening positions (without this, every game diverges from the same 1–2 opponent placements).
 
 **Exit criterion:** rolling 200-game win rate ≥ 65% vs difficulty 3.
 
@@ -146,6 +159,10 @@ difficulty.  Temperature resets at each bump (same as original Stage 3).
 **Sentinel role:** Keep the sentinel blunder filter active (quality < 0.25 → skip transition).
 As the curriculum advances and the learner strengthens, the filter will fire less often
 naturally.
+
+**Training quality note:** Stage 3+ prioritises quality over speed.  The opponent uses a full
+time budget (0.3 s – 1.0 s/move), vn_blend=80% at difficulty 6+, and has access to the
+fullgame DB and endgame DB.  Extended wall-clock time is acceptable.
 
 **Exit criterion:** 55% win rate held at difficulty 8 + vn_blend=80%.
 
