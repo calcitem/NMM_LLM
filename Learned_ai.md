@@ -374,3 +374,51 @@ evaluation.
 Stage 5 is distinct from all prior stages: it is the only stage where the model directly *sees*
 perfect Malom labels rather than learning from reward alone.  Stages 2–4 built the strategic
 intuition; Stage 5 sharpens it to Malom precision across the full game.
+
+---
+
+## Contingency: If Training Plateaus
+
+If the model fails to reach its Stage targets and the bottleneck appears to be architectural
+rather than signal quality, the following options should be considered in order of cost.
+
+### Option A — Structural Feature Enrichment (low cost, no restart)
+
+Add 5–10 pre-computed structural features to the state encoder before Stage 5 (or before a
+second Stage 4 run).  The sentinel's `feature_builder.py` already computes these:
+
+| Feature | Why it helps |
+|---------|-------------|
+| Mill threat count (own / opponent) | Direct signal for closing/blocking urgency |
+| Open triples (2-configs with empty third square) | One-move mill opportunities the MLP must currently infer |
+| Mobility (number of legal moves) | Zugzwang detection; critical in endgame |
+| Locked mill count | Cycling potential vs static closed mills |
+
+This is an additive change to the state encoder — the backbone dimensions widen slightly but
+no architectural rewrite is needed and no training checkpoint is lost.  Expected improvement:
+8–10% in sample efficiency and final strength.  **Try this first.**
+
+### Option B — GNN Backbone (high cost, full restart)
+
+Replace the flat MLP backbone with a graph neural network where nodes are the 24 board
+positions and edges are mill adjacencies.  This lets the model explicitly propagate
+"this square is connected to a threatening mill" as a structural prior, rather than having to
+infer positional relationships from raw data.
+
+**Expected benefit:** Better sample efficiency; the model learns mill-threat patterns in fewer
+games because the graph structure is baked in.  For NMM's 24-node graph this is a meaningful
+but not transformative gain — the MLP can learn most pairwise correlations from data, it just
+takes longer.
+
+**Cost:** Full 6-stage restart.  Stage 0 and Stage 1 checkpoints (value pre-training at MSE
+0.012, imitation accuracy 45%) are lost and must be rebuilt.
+
+**When to consider:** Only if Stage 5 results plateau well below target *and* the structural
+feature enrichment (Option A) has already been applied without closing the gap.  Do not restart
+for the GNN alone until the current pipeline has run to completion and a ceiling is confirmed.
+
+**Implementation sketch:**
+- Node features: 3-way one-hot (empty/own/opponent) per position = 24 × 3 input node features
+- Edge features: mill membership (which of the 16 mills does this edge participate in?)
+- 2–3 message-passing layers → 128-dim node embeddings → global pool → value head / phase heads
+- Keep the same 624-action output interface; the phase routing is unchanged
