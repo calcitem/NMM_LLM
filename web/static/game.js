@@ -97,7 +97,7 @@ const WEIGHT_DEFAULTS = [
   { key: "fork_anticipation",    group: "Tactical",   label: "Fork anticipation block",     def: 90,  min: 0,   max: 300,  step: 10,
     tip: "Bonus for blocking squares the opponent could use within 2 moves to create a double mill threat (fork)" },
   { key: "locked_mill_escape",   group: "Tactical",   label: "Locked mill escape",          def: 160, min: 0,   max: 400,  step: 10,
-    tip: "Bonus for moving a piece out of a locked mill (all exits blocked by opponent) toward a new 2-config" },
+    tip: "Bonus for moving a piece away from an opponent that is blocking/freezing the exit of an own closed mill" },
   { key: "redirected_pin",       group: "Tactical",   label: "Redirected pin creation",     def: 140, min: 0,   max: 400,  step: 10,
     tip: "Bonus when a move forces an opponent piece to simultaneously guard two own mill threats (double-pin)" },
   // ── Positional (continued) ─────────────────────────────────────────────
