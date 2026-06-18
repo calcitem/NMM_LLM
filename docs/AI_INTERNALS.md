@@ -709,7 +709,7 @@ Full plan: `Learned_ai.md` — root-cause analysis of v1 failure, 6-stage traini
 
 1. **Move quality** — `query_move_quality(board, move)` returns a delta ∈ [−2, +2] from the mover's perspective. Scaled by `malom_weight` and added to the transition reward. Rewards moves that directly improve the learner's position.
 
-2. **Trap reward** — after each learner move, `query(board)` checks the resulting position from the *opponent's* perspective. If the opponent is now in an "L" (losing) state, the learner's transition receives an additional `+malom_weight` bonus. This rewards the strategically critical NMM skill of constraining the opponent — setting up double-mill threats, forcing captures, zugzwang. The sentinel approximates this signal; Malom is exact.
+2. **Trap reward** — after each learner move, `query(board)` checks the resulting position from the *opponent's* perspective. If the opponent is now in an "L" (losing) state, the learner's transition receives an additional `+malom_weight` bonus. This rewards the strategically critical NMM skill of constraining the opponent — cycling mill setups (oscillating a pivot piece between two 2-configs to force a capture every turn), forced captures, zugzwang. The sentinel approximates this signal; Malom is exact.
 
 Both signals degrade gracefully when a position is outside DB coverage (return `None`).
 

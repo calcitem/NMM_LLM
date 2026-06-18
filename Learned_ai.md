@@ -149,7 +149,8 @@ enough to get positive signal).
    position from the *opponent's* perspective.  If the opponent is now in an "L" (losing)
    state, the learner's transition receives an additional `+malom_weight` bonus.  This rewards
    moves that constrain or trick the opponent into bad territory — the core strategic skill in
-   NMM (setting up double-mill threats, forcing captures, zugzwang).  The sentinel approximates
+   NMM (cycling mill setups — oscillating a pivot piece between two 2-configs to force a capture
+   every turn — forced captures, zugzwang).  The sentinel approximates
    this signal; Malom is exact.
 
 Both signals are zero-overhead (Malom DB already loaded) and degrade gracefully if a position
@@ -194,7 +195,7 @@ the trap reward was identified as the missing signal and the run was restarted.
 Added Malom trap reward on top of v2: after each learner move, if `query(board)` returns "L"
 from the opponent's perspective (opponent is now in a losing position), the learner's transition
 receives an additional `+malom_weight` bonus.  This directly rewards the core NMM strategic
-skill — creating positions where the opponent has no good response (double-mill setups, forced
+skill — creating positions where the opponent has no good response (cycling mill setups, forced
 captures, zugzwang) — rather than only rewarding moves that improve the learner's own
 evaluation.  Both Malom signals are exact; the sentinel approximates them.
 
@@ -230,6 +231,14 @@ naturally.
 throughout Stage 3 with no game-count cutoff.  The model is strong enough by this stage that
 the rewards reinforce genuinely good play rather than noise.  The AI does **not** receive the
 raw W/L/D labels as input features — it learns from the reward signal only.
+
+**Opponent move replay (new in Stage 3):** In every lost game, the opponent's moves are
+examined post-game.  Any move where `query_move_quality >= 0` (Malom confirms it was W or D
+for the opponent) is added to a supervised imitation batch.  A small CE loss
+(`imitation_weight=0.1`) on these transitions teaches the model what winning play looks like
+from the exact positions it failed at.  Only Malom-exact moves are used — heuristic moves that
+Malom disagrees with are discarded.  This mirrors how human players study lost games to
+understand the opponent's edge.
 
 **Training quality note:** Stage 3+ prioritises quality over speed.  The opponent uses a full
 time budget (0.3 s – 1.0 s/move), vn_blend=80% at difficulty 6+, and has access to the
@@ -284,6 +293,17 @@ Malom has DTM (distance to mate) available, W moves can instead be weighted inve
 so faster wins receive higher probability mass.  This is not required for correctness but
 improves the sharpness of the resulting policy.  Treat as a refinement once the supervised
 training is otherwise stable.
+
+**Structural feature enrichment (consider before Stage 5):** The current state encoder uses
+raw piece positions (84-float flat vector).  The model has to infer mill threats and piece
+relationships from data alone.  Adding a small set of pre-computed structural features — mill
+threat count, open triples (two own pieces on a mill line with the third empty), mobility
+(number of legal moves) — would give the model explicit pattern context before supervised
+distillation begins.  The sentinel's `feature_builder.py` already computes these; the same
+features can be appended to the state encoder without changing the backbone architecture.
+A more powerful option is a graph-neural-network (GNN) backbone where edges are mill
+adjacencies, but that requires an architecture change.  The flat feature extension is lower
+risk and is the recommended first step.
 
 **Key distinction from Stages 2–4:** The model now *sees* the Malom W/L/D labels as
 supervised targets, not just as a reward shaping signal.  This is the first time perfect
