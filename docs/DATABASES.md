@@ -40,6 +40,13 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 **How it is built:** `tools/build_endgame_db.py`. The retrograde solver uses D4 symmetry (~8× speedup), starts from terminal positions, and propagates backward. `--build-all` builds all tables in dependency order up to `--max-sum`.
 
+```bash
+python tools/build_endgame_db.py \
+  --build-all \
+  --skip-existing \
+  --out-dir /mnt/windows/NMM_DB
+```
+
 **Encoding:** Combinatorial number system — `pos_id = combo_rank(white_squares) × C(21,3) × 2 + combo_rank(black_squares) × 2 + turn_bit`. Table size for 3v3: 5,383,840 entries.
 
 **When consulted:** In `choose_move()` when both sides have exactly 3 pieces and all 9 pieces have been placed. Returns `"W"` / `"L"` / `"D"` / `None`. Consulted before the FullGameDB and negamax search.
@@ -60,18 +67,64 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 **When consulted:** In `choose_move()` after the EndgameSolvedDB check, before negamax. If the current position is in the DB and a clear WDL signal exists, the best-labelled move is preferred.
 
+**Build command (large run):**
+
+```bash
+python tools/build_fullgame_db.py \
+  --expand-from-games data/games \
+  --min-seed-frequency 3 \
+  --early-expand-depth 4 \
+  --expand-depth 6 \
+  --output /mnt/windows/NMM_DB/fullgame.bin \
+  --temp-db /mnt/windows/NMM_DB/ \
+  --max-db-gb 40
+```
+
 **Build options:**
 
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--min-seed-frequency N` | 2 | Only positions seen ≥ N times seed the BFS |
+| `--early-expand-depth D` | — | BFS depth for early-game positions (high-frequency seeds) |
 | `--expand-depth D` | 4 | BFS expansion depth from seeds |
 | `--max-db-gb GB` | 10 | Stop BFS if temp SQLite DB exceeds this size |
 | `--max-gb GB` | 6 | Stop BFS if process RAM exceeds this |
 
 ---
 
-## 5. Opening Book (`ai/opening_book.py`)
+## 5. HumanDB (`data/human_db.sqlite`)
+
+**What it stores:** Human game records in SQLite — positions, moves, win/loss/draw frequencies per move. Used for Stage 1 imitation learning (NMMNet) and sentinel training supervision.
+
+**How it is built:** Two steps — import raw game files, then build the SQLite DB.
+
+```bash
+# Step 1 — import PlayOK archive into JSONL format
+python tools/import_playok.py \
+  --archive ~/playok_archive/games \
+  --output data/human_games
+
+# Step 2a — full rebuild from scratch
+.venv/bin/python tools/build_human_db.py \
+  --rebuild \
+  --games-dir data/human_games \
+  --extra-dirs data/games \
+  --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --output data/human_db.sqlite
+
+# Step 2b — incremental update (append new games, skip existing)
+.venv/bin/python tools/build_human_db.py \
+  --games-dir data/human_games \
+  --extra-dirs data/games \
+  --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --output data/human_db.sqlite
+```
+
+Omit `--rebuild` to avoid starting from scratch — new game files are appended to the existing DB.
+
+---
+
+## 7. Opening Book (`ai/opening_book.py`)
 
 **Files:** `data/openings/learned_openings.json`, `data/openings/book_openings.json`
 
@@ -85,7 +138,7 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 ---
 
-## 6. ChromaDB — LLM Vector Memory
+## 8. ChromaDB — LLM Vector Memory
 
 **Directory:** `data/chroma/`
 
@@ -97,7 +150,7 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 ---
 
-## 7. Malom Ultra-Strong Solved Database (external, training only)
+## 9. Malom Ultra-Strong Solved Database (external, training only)
 
 **Directory:** configured in `configs/sentinel_default.yaml` → `external_db_path`
 **Format:** Binary `.sec2` sector files (498 sectors total), one per `(W_pieces, B_pieces, W_flying, B_flying)` combination. A `.secval` file stores virtual win/loss thresholds.
@@ -112,7 +165,7 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 ---
 
-## 8. Value Network (`data/value_net.npz`)
+## 10. Value Network (`data/value_net.npz`)
 
 **Format:** NumPy `.npz` archive containing MLP weights (3-layer: 79 → 128 → 64 → 1).
 
@@ -134,7 +187,7 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 
 ---
 
-## 9. Sentinel Checkpoint (`learned_ai/sentinel/checkpoints/`)
+## 11. Sentinel Checkpoint (`learned_ai/sentinel/checkpoints/`)
 
 **Files:** `best.pt` (lowest val loss epoch), `latest.pt` (most recent epoch)
 
@@ -165,6 +218,7 @@ Every database the AI reads or writes, what it stores, how it is built, and when
 | EndgameDB | `data/endgame_db.json` | web server, self-play | `game_ai.py` | Learned endgame positions |
 | EndgameSolvedDB | `data/endgame/*.wdl` | `build_endgame_db.py` | `game_ai.py` | Exact retrograde WDL (3v3+) |
 | FullGameDB | `data/fullgame.bin` | `build_fullgame_db.py` | `game_ai.py` | BFS-expanded position WDL |
+| HumanDB | `data/human_db.sqlite` | `build_human_db.py` | Stage 1 training, sentinel | Human game frequencies + win rates |
 | Opening Book | `data/openings/*.json` | web server, tools | `opening_book.py` | UCB1-selected opening lines |
 | ChromaDB | `data/chroma/` | `memory_manager.py` | `mills_llm.py` | LLM strategic vector memory |
 | Malom DB | (external, user-configured) | Gévay/Danner | `db_teacher.py` | Perfect-play WDL labels (training only) |

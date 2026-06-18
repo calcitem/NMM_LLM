@@ -694,14 +694,36 @@ A small MLP (79 → 128 → 64 → 1) trained from game records to predict the w
 
 **Usage:** Passed as the `value_net` parameter to `GameAI` and used as the MCTS leaf evaluator. The **Value network blend %** slider in AI Tuning controls how much weight the value net gets versus the heuristic (0 = heuristic only, 100 = value net only). Not loaded by the web server by default — must be enabled explicitly.
 
+### Self-play data generation
+
+Run before or alongside value-net training to add fresh AI-generated games:
+
+```bash
+python tools/self_play.py \
+  --games 500 \
+  --no-llm \
+  --white 7 --black 3 \
+  --parallel 4 \
+  --game-dir data/games/self_play \
+  --random-difficulty
+```
+
 ### Training
 
 ```bash
+# Standard — 30 epochs, decisive games only
 .venv/bin/python tools/train_value_net.py \
-  --games-dir data/games data/human_games \
+  --games-dir data/games \
   --decisive-only \
   --epochs 30 \
   --output data/value_net.npz
+
+# Extended — include self-play and human games, more epochs
+python tools/train_value_net.py \
+  --epochs 100 --lr 0.009 --decisive_only \
+  --games-dir data/games \
+  --games-dir data/games/self_play \
+  --games-dir data/human_games
 ```
 
 **FEN deduplication:** Each unique board position (identified by `board_fen_before`) is included exactly once. When the same position appears in multiple games with different outcomes, the label is the **mean** of all outcomes (+1.0 / −1.0 / 0.0). This prevents repeated opening positions from dominating the training signal.
@@ -851,11 +873,76 @@ Resume from Stage 4. DB feature slots are now **visible**. At a very low learnin
 
 ```bash
 bash scripts/retrain_pipeline.sh cuda
+# or
+bash scripts/retrain_pipeline.sh cpu
 ```
 
 Runs all four stages in sequence with human games, dynamically computes Stage 5's epoch count, and promotes the final checkpoint to `best.pt`.
 
+### Light retrain (incremental, on top of existing checkpoint)
+
+Use when new games have arrived but a full 4-stage retrain is too expensive:
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+  --config configs/sentinel_light_retrain.yaml \
+  --resume learned_ai/sentinel/checkpoints/best.pt \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --trajectory-weight \
+  --decisive-only
+```
+
 ### Evaluation
+
+### Staging evaluation
+
+```bash
+# Grade a specific stage checkpoint against Malom DB ground truth
+.venv/bin/python scripts/eval_sentinel.py \
+  --checkpoint learned_ai/sentinel/checkpoints/stage3/best.pt \
+  --game-dir data/games \
+  --limit 300 \
+  --output eval_results.json \
+  --device cuda
+```
+
+### Real-time validation with new self-play games
+
+1. Play AI vs AI games using the **Pure AI** button — they land in `data/games/`
+2. Run the evaluator against the accumulated games:
+
+```bash
+python scripts/evaluate_sentinel.py \
+  --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+  --game-dir data/human_games/test_set
+```
+
+### Move review
+
+Inspect the sentinel's top-N flagged moves across a game directory:
+
+```bash
+python scripts/sentinel_review.py \
+  --checkpoint learned_ai/sentinel/checkpoints/best.pt \
+  --game-dir <game-dir> \
+  --top 5
+```
+
+### Opportunity assessment
+
+Live assessment of how often the sentinel would have intervened against itself:
+
+```bash
+.venv/bin/python scripts/sentinel_assessment.py \
+  --games 20 --diff 6 --gap 0.15
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--games N` | 20 | Number of games to play |
+| `--diff D` | 6 | AI difficulty 1–10 |
+| `--gap G` | 0.15 | Minimum opportunity gap (fraction) before sentinel would intervene |
 
 **Offline quality metrics** (against Malom DB ground truth, DB feature slots zeroed to simulate inference):
 
