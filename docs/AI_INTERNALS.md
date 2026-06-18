@@ -678,7 +678,40 @@ The classical heuristic engine documented above has an opt-in self-learning coun
 
 The learned AI does **not** share any code with the heuristic engine. It learns purely from game-outcome rewards and never consults the hand-crafted evaluation weights, tactical bonuses, or alpha-beta search stack described above. **This component is experimental and not well-calibrated.**
 
-Full documentation: [`docs/LEARNED_AI_ARCHITECTURE.md`](LEARNED_AI_ARCHITECTURE.md) — state/action encoding, NMMNet architecture, training algorithm, curriculum.
+Full plan: `Learned_ai.md` — root-cause analysis of v1 failure, 6-stage training plan, results per stage.
+
+### Stage 2 — REINFORCE self-play vs weak heuristic
+
+```bash
+.venv/bin/python -u scripts/train_stage2.py \
+  --resume learned_ai/checkpoints/stage1/best.pt \
+  --out-dir learned_ai/checkpoints/stage2 \
+  --max-games 5000 \
+  --time-budget 0.05 \
+  --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+```
+
+**Key flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--max-games N` | 5000 | Total training games |
+| `--time-budget F` | 0.05 | Seconds per opponent move (0.05 = ~3s/game) |
+| `--temperature F` | 0.5 | Learner sampling temperature |
+| `--win-reward F` | 2.0 | Terminal reward magnitude on win/loss |
+| `--warmup-frac F` | 0.20 | Fraction of games with no sentinel blunder filter |
+| `--malom-frac F` | 0.30 | Fraction of games with Malom reward shaping |
+| `--malom-weight F` | 0.30 | Scale applied to each Malom signal |
+| `--no-malom` | off | Disable Malom shaping entirely |
+| `--no-sentinel` | off | Disable sentinel blunder filter entirely |
+
+**Malom reward shaping (two signals, both Malom-exact, active for first `--malom-frac` of games):**
+
+1. **Move quality** — `query_move_quality(board, move)` returns a delta ∈ [−2, +2] from the mover's perspective. Scaled by `malom_weight` and added to the transition reward. Rewards moves that directly improve the learner's position.
+
+2. **Trap reward** — after each learner move, `query(board)` checks the resulting position from the *opponent's* perspective. If the opponent is now in an "L" (losing) state, the learner's transition receives an additional `+malom_weight` bonus. This rewards the strategically critical NMM skill of constraining the opponent — setting up double-mill threats, forcing captures, zugzwang. The sentinel approximates this signal; Malom is exact.
+
+Both signals degrade gracefully when a position is outside DB coverage (return `None`).
 
 ---
 

@@ -131,19 +131,80 @@ enough to get positive signal).
 
 **Sentinel role (advisory only):**
 - After each move in self-play, query the sentinel for the played move's quality score.
-- If quality < 0.25 (sentinel calls it a clear blunder), *do not add that transition to the
-  replay buffer*.
-- This prevents the model from reinforcing obviously bad moves while it is still learning.
+- If quality < 0.1 after warmup (sentinel calls it a clear blunder), *do not add that
+  transition to the replay buffer*.
 - Sentinel does **not** override the move selection — the policy still chooses freely.
+- No filtering for the first 20% of games (warmup) — the model must accumulate enough
+  transitions before blunder filtering is useful.
 
 **Algorithm:** REINFORCE with value-head baseline (same as original Stage 2/3).
+
+**Malom DB reward shaping (two signals, both Malom-exact, active for first 30% of games):**
+
+1. **Move quality** — `query_move_quality(board, move)` returns a delta ∈ [−2, +2] from
+   the mover's perspective.  Scaled by `malom_weight=0.3` and added to the transition reward.
+   Rewards moves that directly improve the learner's own position.
+
+2. **Trap reward** — after each learner move, `query(board)` is called on the resulting
+   position from the *opponent's* perspective.  If the opponent is now in an "L" (losing)
+   state, the learner's transition receives an additional `+malom_weight` bonus.  This rewards
+   moves that constrain or trick the opponent into bad territory — the core strategic skill in
+   NMM (setting up double-mill threats, forcing captures, zugzwang).  The sentinel approximates
+   this signal; Malom is exact.
+
+Both signals are zero-overhead (Malom DB already loaded) and degrade gracefully if a position
+is outside the DB's coverage.
 
 **Implementation notes:**
 - `override_time_budget=0.05s/move` passed to GameAI so training games run in ~3s not ~27s.
 - Opponent's **first move is forced random** each game to ensure the learner sees varied
-  opening positions (without this, every game diverges from the same 1–2 opponent placements).
+  opening positions.
+- Temperature = 0.5 (less random than v1), UPDATE_EVERY = 16 (larger stable batches),
+  WIN_REWARD = 2.0 (strong terminal signal).
 
 **Exit criterion:** rolling 200-game win rate ≥ 65% vs difficulty 3.
+
+#### Stage 2 — Attempt History
+
+**v1 (killed at game ~4372):**
+
+| Root cause | Effect |
+|------------|--------|
+| Sentinel threshold 0.25 too aggressive in early training | 38% of transitions filtered → batches of 40–60, too small to learn from |
+| Value head collapsed to predict loss for every position | Advantages all near zero → near-zero policy gradient |
+| Temperature = 1.0 too random | Model never explored intentionally; drew many games it could have won |
+| No Malom shaping | Only terminal reward: one sparse signal per game |
+
+Win rate at game 4372: 7.5% (target 65%).  Training was not converging.
+
+**v2 (killed at game ~200 — restarted with trap reward):**
+
+Changes from v1: sentinel warmup (no filter for first 1000 games), Malom move-quality reward
+(first 1500 games), temperature reduced to 0.5, UPDATE_EVERY=16, WIN_REWARD=2.0, advantage
+normalisation guarded by `std > 1e-3`.  Win rate at game 176: 2.3% — too early to judge, but
+the trap reward was identified as the missing signal and the run was restarted.
+
+**v3 (current — in progress):**
+
+Added Malom trap reward on top of v2: after each learner move, if `query(board)` returns "L"
+from the opponent's perspective (opponent is now in a losing position), the learner's transition
+receives an additional `+malom_weight` bonus.  This directly rewards the core NMM strategic
+skill — creating positions where the opponent has no good response (double-mill setups, forced
+captures, zugzwang) — rather than only rewarding moves that improve the learner's own
+evaluation.  Both Malom signals are exact; the sentinel approximates them.
+
+| Parameter | v1 | v2/v3 |
+|-----------|----|----|
+| Temperature | 1.0 | 0.5 |
+| UPDATE_EVERY | 4 | 16 |
+| WIN_REWARD | 1.0 | 2.0 |
+| Sentinel threshold | 0.25 | 0.1 (after warmup) |
+| Sentinel warmup | none | first 1000 games |
+| Malom move-quality reward | none | first 1500 games, weight=0.3 |
+| Malom trap reward | none | first 1500 games, weight=0.3 |
+| Checkpoint | — | `learned_ai/checkpoints/stage2/` |
+
+Status: **in progress** — game ~80 / 5000.
 
 ---
 
@@ -156,9 +217,14 @@ enough to get positive signal).
 **Difficulty ramp rule:** hold ≥ 55% win rate over a 200-game rolling window before bumping
 difficulty.  Temperature resets at each bump (same as original Stage 3).
 
-**Sentinel role:** Keep the sentinel blunder filter active (quality < 0.25 → skip transition).
+**Sentinel role:** Keep the sentinel blunder filter active (quality < 0.1 → skip transition).
 As the curriculum advances and the learner strengthens, the filter will fire less often
 naturally.
+
+**Malom DB reward shaping:** Both Malom signals (move quality + trap reward) remain active
+throughout Stage 3 with no game-count cutoff.  The model is strong enough by this stage that
+the rewards reinforce genuinely good play rather than noise.  The AI does **not** receive the
+raw W/L/D labels as input features — it learns from the reward signal only.
 
 **Training quality note:** Stage 3+ prioritises quality over speed.  The opponent uses a full
 time budget (0.3 s – 1.0 s/move), vn_blend=80% at difficulty 6+, and has access to the
@@ -172,7 +238,7 @@ target than beating the configuration we know is good.
 
 ---
 
-### Stage 4 — Self-play Pool  *(same as original Stage 4)*
+### Stage 4 — Self-play Pool
 
 **Goal:** Open-ended strength improvement through self-play against a pool of past checkpoints.
 
@@ -180,26 +246,41 @@ target than beating the configuration we know is good.
 Remove the sentinel blunder filter here — the model should be strong enough that blunders are
 rare, and filtering them would bias the replay buffer.
 
+**Malom DB reward shaping:** Both Malom signals remain active throughout Stage 4.  The AI
+still does **not** see the raw W/L/D labels — reward shaping only.
+
 **Exit criterion:** Benchmark vs the Stage 0 baseline (heuristic + vn_blend=80%) shows ≥ 70%
 win rate, or episode budget exhausted (70k games).
 
 ---
 
-### Stage 5 — Malom DB Endgame Fine-tune  *(same as sentinel Stage 5)*
+### Stage 5 — Malom DB Full-game Supervised Distillation  *(revised)*
 
-**Goal:** Perfect endgame play by distilling from the Malom tablebase.
+**Goal:** Skill refinement by distilling Malom's perfect play across the entire game, not just
+endgame positions.
+
+**Why revised from endgame-only:** Stages 2–4 gave the model Malom rewards as a training
+signal throughout the game, but the model never directly *saw* Malom's W/L/D assessment of
+its own moves.  Stage 5 closes that gap: every legal move in every position gets an exact Malom
+label, and the model is trained supervised on the full game trajectory.
 
 **Method:**
-- Sample positions with ≤ 7 pieces on board from the Malom DB.
-- For each position, run a few seconds of Malom lookup to get the exact DTM (distance to mate)
-  for every legal move.
-- Supervised training: value head target = `tanh(DTM-normalised)`, policy target = move that
-  minimises DTM (or maximises for the losing side).
-- Light LR (1e-5); only a few epochs to avoid catastrophic forgetting.
+- Sample positions from across the full game (all piece counts, all phases) from the Malom DB.
+- For each position, query Malom W/L/D for every legal move.
+- Supervised training:
+  - **Value head target:** W=+1.0, D=0.0, L=−1.0 (exact WDL for the side to move).
+  - **Policy head target:** cross-entropy toward the distribution of Malom-winning moves
+    (uniform over all "W" moves if any exist; otherwise uniform over "D" moves; otherwise "L").
+- Light LR (1e-5); only a few epochs to avoid catastrophic forgetting of generalisation learned
+  in Stages 2–4.
 
-**Why at the end:** fine-tuning a strong generalising model on perfect labels is much more
-effective than injecting perfect-label supervision when the rest of the network is random.
-This mirrors what worked in the sentinel retraining.
+**Key distinction from Stages 2–4:** The model now *sees* the Malom W/L/D labels as
+supervised targets, not just as a reward shaping signal.  This is the first time perfect
+knowledge is injected directly into the policy rather than learned from reward alone.
+
+**Why at the end:** supervised distillation from perfect labels onto a strong generalising
+model is much more effective than early injection when the rest of the network is random.
+Catastrophic forgetting risk is low because the generalisation was learned first.
 
 ---
 
@@ -252,9 +333,13 @@ Scripts that were part of the first attempt and are now stale:
 | After Stage 2 | ≥ 65% win rate vs heuristic difficulty 3 |
 | After Stage 3 | ≥ 55% win rate vs heuristic difficulty 8 + vn80% |
 | After Stage 4 | ≥ 70% win rate vs heuristic + vn80% baseline |
-| After Stage 5 | Near-perfect play in positions with ≤ 7 pieces (Malom-verifiable) |
+| After Stage 5 | Policy selects a Malom-winning move (where one exists) in ≥ 85% of full-game positions; value head WDL accuracy ≥ 80% across all phases |
 
 The Stage 4 target is deliberately aggressive: +17.5 pp was achieved with a simple linear
 value blend.  A learned policy + value head should be able to do better, but 70% is a
 meaningful bar that requires genuine tactical and strategic understanding, not just better leaf
 evaluation.
+
+Stage 5 is distinct from all prior stages: it is the only stage where the model directly *sees*
+perfect Malom labels rather than learning from reward alone.  Stages 2–4 built the strategic
+intuition; Stage 5 sharpens it to Malom precision across the full game.
