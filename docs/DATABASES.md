@@ -124,6 +124,40 @@ Omit `--rebuild` to avoid starting from scratch — new game files are appended 
 
 ---
 
+## 6. AIDB — AI-vs-AI Game Database (`data/ai_games/`)
+
+**Directory:** `data/ai_games/` (created by `scripts/gen_aidb.py`)
+
+**What it stores:** AI-vs-AI game records in the same JSONL format as `data/games/`. Each move carries three extra Malom-derived annotation fields:
+
+| Field | Type | Content |
+|-------|------|---------|
+| `malom_wdl` | `str\|null` | Position quality before the move: `"win"` / `"loss"` / `"draw"` (mover's perspective) |
+| `malom_dtw` | `int\|null` | Distance-to-win (plies) from the Malom DB |
+| `malom_move_wdl` | `str\|null` | Quality of the move played (apply move → flip opponent outcome → mover's perspective) |
+
+Game-level fields: `white_personality`, `black_personality`, `white_vn_blend`, `black_vn_blend`, `white_sentinel`, `black_sentinel`.
+
+**Agent pool:** 6 personalities × 2 value-net-blend settings (0 / 80%) × 2 sentinel settings = 24 configs drawn independently for each side. The first 4 plies are random to diversify opening positions.
+
+**How it is built:** `scripts/gen_aidb.py`. Reads the Malom DB path from `--db-path` or `settings.json`. Requires: Malom DB configured, optional: value net + sentinel checkpoint.
+
+```bash
+.venv/bin/python scripts/gen_aidb.py \
+  --games 5000 \
+  --db-path "/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted" \
+  --sentinel learned_ai/sentinel/checkpoints/best.pt \
+  --out-dir data/ai_games
+```
+
+**Smoke test:** `--smoke-test` generates 2 games without a DB (malom fields will be `null`) to verify the pipeline.
+
+**When consulted:** Read by `SentinelDataset.load_from_games()` when `--ai-game-dir data/ai_games` is passed to `train_sentinel.py`. Pre-computed `malom_move_wdl` fields are used as solved-DB quality labels for the played move even when the live Malom DB is unavailable during training.
+
+**Not used at game-play runtime.** Only read during sentinel training.
+
+---
+
 ## 7. Opening Book (`ai/opening_book.py`)
 
 **Files:** `data/openings/learned_openings.json`, `data/openings/book_openings.json`
@@ -219,6 +253,7 @@ Omit `--rebuild` to avoid starting from scratch — new game files are appended 
 | EndgameSolvedDB | `data/endgame/*.wdl` | `build_endgame_db.py` | `game_ai.py` | Exact retrograde WDL (3v3+) |
 | FullGameDB | `data/fullgame.bin` | `build_fullgame_db.py` | `game_ai.py` | BFS-expanded position WDL |
 | HumanDB | `data/human_db.sqlite` | `build_human_db.py` | Stage 1 training, sentinel | Human game frequencies + win rates |
+| AIDB | `data/ai_games/` | `gen_aidb.py` | `train_sentinel.py` | AI-vs-AI games with Malom move labels |
 | Opening Book | `data/openings/*.json` | web server, tools | `opening_book.py` | UCB1-selected opening lines |
 | ChromaDB | `data/chroma/` | `memory_manager.py` | `mills_llm.py` | LLM strategic vector memory |
 | Malom DB | (external, user-configured) | Gévay/Danner | `db_teacher.py` | Perfect-play WDL labels (training only) |

@@ -36,44 +36,58 @@ was making the model *worse* than the Stage 1 imitation baseline.
 
 ---
 
-## Architecture: NMMGNNNet (GNN backbone)
+## Architecture: NMMNet (MLP backbone) ← primary
 
-### Why GNN over flat MLP
+The MLP backbone (NMMNet) is the confirmed training architecture.  A GNN variant
+(NMMGNNNet) was built and evaluated — see **GNN Post-mortem** below — but failed
+imitation learning and is not used for training.
 
-The flat MLP (NMMNet) must infer all positional structure — which squares share mill lines,
-which squares are adjacent — entirely from data.  A GNN bakes the board graph in as a
-structural prior so message passing propagates "this square is adjacent to a mill threat"
-from the first episode, not after thousands of games.
-
-For NMM's 24-node graph this is a significant sample-efficiency win: mill patterns are
-exactly the edges of the graph.
-
-### Graph construction
-
-- **Nodes:** 24 board positions (same order as `POSITIONS`)
-- **Node features:** 3-way one-hot per position (empty / W / B) = state[:72].view(24, 3)
-- **Edges:** Union of (a) mill edges — every pair of positions sharing a mill line, and
-  (b) move-adjacency edges — physical movement connections from `ADJACENCY`.
-  Both edge types matter: mill edges encode strategic threat, adjacency encodes mobility.
-- **Self-loops:** added before symmetric normalisation (D⁻¹/²AD⁻¹/²)
-- **Global features:** state[72:84] (side-to-move, phase one-hot, piece counts/mills) → Linear(12→32)
-
-### Architecture layers
+### MLP architecture
 
 | Layer | Shape | Note |
 |-------|-------|------|
-| node_embed | Linear(3→64) + ReLU | per-node input projection |
-| GCNLayer × 2 | 64→64 each | σ(A_norm · X · W) |
-| mean pool | [B,24,64] → [B,64] | aggregate over nodes |
-| global_mlp | Linear(12→32) + ReLU | project global features |
-| cat + project | [B,96] → [B,128] + ReLU | backbone output |
-| phase_heads | 5× Linear(128→64→624) | same as NMMNet |
-| value_head | Linear(128→64→1) | same as NMMNet |
+| backbone | Linear(84→256) → Linear(256→256) → Linear(256→128) + ReLU | 120K params |
+| phase_heads | 5× Linear(128→64→624) | one per game phase |
+| value_head | Linear(128→64→1) | scalar position value |
 
-`NMMGNNNet` is a drop-in replacement for `NMMNet`: same `.backbone()`, `.phase_heads`,
-`.value_head`, and `.forward()` interface.  All existing training code works unchanged.
+File: `learned_ai/models/backbone.py`  
+Checkpoint format: `{"model": state_dict, "model_type": "mlp"}`
 
-File: `learned_ai/models/gnn_backbone.py`
+---
+
+## GNN Post-mortem (2026-06-18)
+
+A GCN backbone was designed and evaluated. Stage 0 value prediction succeeded; imitation
+learning (Stage 1) failed completely.
+
+### Results
+
+| Metric | MLP | GNN |
+|--------|-----|-----|
+| Stage 0 val MSE | **0.012** | 0.075 |
+| Stage 1 val accuracy | **51.5%** | 4.6% |
+| Random baseline | — | 0.3% |
+| Stage 1 outcome | ✓ Strong prior | ✗ Near-random |
+
+### Root causes
+
+1. **5.6× fewer backbone parameters** (21K vs 120K). The GCN is compact — efficient for
+   value prediction but under-capacity for the 624-action policy space.
+
+2. **Wrong inductive bias for policy.** Stage 0 tuned GCN features for scalar value
+   prediction. With the backbone frozen in Phase 1, the phase heads could not learn useful
+   policy from those value-tuned features. Loss started at 11.47 — *above* the random CE
+   baseline — indicating the frozen GCN features were actively anti-informative for policy.
+
+3. **Representation mismatch.** GCN mean-pools over 24 nodes, discarding positional
+   identity. The 84-feature flat state retains per-square identity that the MLP backbone
+   can use directly for placement/movement policy.
+
+### Decision
+
+GNN training is **abandoned**. MLP Stage 1 checkpoint (`checkpoints/stage1/best.pt`,
+51.5% val accuracy) is the RL starting point.  The GNN code is kept for potential future
+use in a different context (e.g. pure value estimation at inference time).
 
 ---
 
@@ -130,7 +144,7 @@ Both signals slot directly into r(t) in the A2C update.
 
 ## Training Stages
 
-### Stage 0 — Supervised Value Pre-training  *(re-run with GNN)*
+### Stage 0 — Supervised Value Pre-training  ✓ complete
 
 **Goal:** Bootstrap the value head so it is not random noise from episode 1.
 
@@ -143,50 +157,48 @@ Both signals slot directly into r(t) in the A2C update.
 
 **Command:**
 ```
-.venv/bin/python scripts/train_stage0.py --gnn --out-dir learned_ai/checkpoints/stage0_gnn
+.venv/bin/python scripts/train_stage0.py --out-dir learned_ai/checkpoints/stage0
 ```
 
-#### Stage 0 — MLP baseline results (archived)
+#### Stage 0 — results
 
 | Item | Value |
 |------|-------|
 | Positions | 28,537 across all phases |
 | Phase 1 | frozen backbone, lr=3e-3 — val MSE 0.384 → **0.230** |
 | Phase 2 | full network, lr=5e-4 — val MSE 0.295 → **0.012** |
-| Checkpoint | `learned_ai/checkpoints/stage0/best.pt` (MLP only — not usable for GNN) |
-
-Stage 0 will be re-run from scratch with `--gnn` to produce a GNN checkpoint.
+| Checkpoint | `learned_ai/checkpoints/stage0/best.pt` |
 
 ---
 
-### Stage 1 — Imitation Learning from Human Games  *(re-run with GNN)*
+### Stage 1 — Imitation Learning from Human Games  ✓ complete
 
 **Goal:** Give the policy head a strong prior over move selection before RL begins.
 
-**Data:** HumanDB (30,256 games, 820,495 positions).  Label: win-rate of each move as CE weight.
+**Data:** HumanDB (169,048 samples, 8× D4 augmented).  Label: win-rate of each move as CE weight.
 
 **Method:**
 - CE loss on primary action (placement/movement slice) weighted by win-rate.
-- 8× D4 symmetry augmentation so the policy sees all board orientations.
 - Two-phase: frozen backbone (high LR) → full network (low LR, early stop).
 
 **Command:**
 ```
-.venv/bin/python scripts/train_stage1.py --gnn \
-    --resume learned_ai/checkpoints/stage0_gnn/best.pt \
-    --out-dir learned_ai/checkpoints/stage1_gnn
+.venv/bin/python scripts/train_stage1.py \
+    --resume learned_ai/checkpoints/stage0/best.pt \
+    --out-dir learned_ai/checkpoints/stage1
 ```
 
-#### Stage 1 — MLP baseline results (archived)
+#### Stage 1 — results
 
 | Item | Value |
 |------|-------|
 | Samples | 169,048 (8× augmented) |
 | Phase 1 | frozen backbone — val_acc 4% → **23.5%** |
-| Phase 2 | full network — val_acc 30% → **45.3%** (early stop ep 37) |
-| Checkpoint | `learned_ai/checkpoints/stage1/best.pt` (MLP only) |
+| Phase 2 | full network — val_acc 30% → **51.5%** (full dataset eval) |
+| Checkpoint | `learned_ai/checkpoints/stage1/best.pt` |
 
-Stage 1 will be re-run from scratch with `--gnn` to produce the RL starting point.
+> GNN was also evaluated at Stage 1 — see **GNN Post-mortem** above. Result: 4.6% accuracy
+> (near-random). GNN abandoned; MLP is the RL starting point.
 
 ---
 
@@ -198,7 +210,7 @@ Confirms imitation learning gives defensive play but no winning ability without 
 
 ---
 
-### Stage 2 — A2C Self-play vs Weak Heuristic
+### Stage 2 — A2C Self-play vs Weak Heuristic  ⟳ running
 
 **Goal:** First RL stage; model learns to win reliably vs a weak opponent.
 
@@ -211,10 +223,13 @@ Confirms imitation learning gives defensive play but no winning ability without 
 **Command:**
 ```
 .venv/bin/python scripts/train_stage2.py \
-    --resume learned_ai/checkpoints/stage1_gnn/best.pt \
-    --out-dir learned_ai/checkpoints/stage2_gnn \
-    --max-games 10000
+    --resume learned_ai/checkpoints/stage1/best.pt \
+    --out-dir learned_ai/checkpoints/stage2 \
+    --max-games 10000 \
+    --no-gnn
 ```
+
+Log: `/tmp/stage2_mlp.log`
 
 **Exit criterion:** Rolling 200-game win rate ≥ 60% at difficulty 3.
 
@@ -333,51 +348,43 @@ The hybrid mode is the lowest-risk path to a playable improvement.
 
 | Component | Status |
 |-----------|--------|
-| `learned_ai/models/gnn_backbone.py` — NMMGNNNet | **New** — GNN backbone, drop-in for NMMNet |
-| `learned_ai/models/backbone.py` — NMMNet | Keep (MLP fallback, `--no-gnn` flag) |
-| `learned_ai/models/action_encoder.py`, `state_encoder.py` | **Keep as-is** |
-| `learned_ai/agents/` — LearnedAgent, HeuristicAgent | **Keep as-is** |
-| `learned_ai/training/a2c.py` | **New** — A2C per-step TD update |
-| `learned_ai/training/ppo.py` | **New** — PPO clipped surrogate update |
+| `learned_ai/models/backbone.py` — NMMNet | **Primary** — MLP, 120K params |
+| `learned_ai/models/gnn_backbone.py` — NMMGNNNet | **Kept, not used for training** — failed Stage 1 (see post-mortem) |
+| `learned_ai/models/action_encoder.py`, `state_encoder.py` | Keep as-is |
+| `learned_ai/agents/` — LearnedAgent, HeuristicAgent | Keep as-is |
+| `learned_ai/training/a2c.py` | A2C per-step TD update |
+| `learned_ai/training/ppo.py` | PPO clipped surrogate update |
 | `learned_ai/training/replay_buffer.py` | Keep |
-| `scripts/train_stage0.py` | Updated — `--gnn` flag, fixed checkpoint save |
-| `scripts/train_stage1.py` | Updated — `--gnn` flag |
-| `scripts/train_stage2.py` | Rewritten — A2C/PPO + three bug fixes |
-| `scripts/train_stage3.py` | Keep (update algorithm in next session) |
+| `scripts/train_stage0.py` | MLP only (drop `--gnn`) |
+| `scripts/train_stage1.py` | MLP only (drop `--gnn`) |
+| `scripts/train_stage2.py` | A2C/PPO + `--no-gnn` required; device bug fixed 2026-06-18 |
+| `scripts/train_stage3.py` | As-is |
 
 ---
 
 ## Success Metrics
 
-| Milestone | Target |
-|-----------|--------|
-| After Stage 0 (GNN) | Value-head MSE < 0.08 on held-out positions |
-| After Stage 1 (GNN) | Top-1 move accuracy > 30% on held-out human games |
-| After Stage 2 | ≥ 60% win rate vs heuristic difficulty 3 (A2C, no policy collapse) |
-| After Stage 3 | ≥ 55% win rate vs heuristic difficulty 8 + vn80% |
-| After Stage 4 | ≥ 70% win rate vs heuristic + vn80% baseline |
-| After Stage 5 | Malom-winning move selected in ≥ 85% of positions; WDL accuracy ≥ 80% |
+| Milestone | Status | Target |
+|-----------|--------|--------|
+| Stage 0 MLP | ✓ val MSE **0.012** | < 0.05 |
+| Stage 1 MLP | ✓ val_acc **51.5%** | > 30% |
+| Stage 2 | ⟳ running | ≥ 60% win rate vs difficulty 3 |
+| Stage 3 | pending | ≥ 55% win rate vs difficulty 8 + vn80% |
+| Stage 4 | pending | ≥ 70% win rate vs heuristic + vn80% |
+| Stage 5 | pending | Malom-winning move ≥ 85% of positions; WDL ≥ 80% |
 
 ---
 
-## Contingency: If GNN + A2C Also Plateaus
+## Contingency: If MLP A2C Also Plateaus
 
-The GNN + A2C restart is the current primary plan.  If it also fails to produce a learning
-signal, the following options should be checked in order before concluding the architecture is
-the bottleneck.
+1. **Confirm A2C is learning:** After 500 games, entropy should decrease, value loss should
+   decrease.  If both diverge, the problem is implementation-level, not architecture.
 
-1. **Confirm A2C is actually learning:** After 500 games, entropy should decrease (model
-   becoming less random), value loss should decrease (value head improving).  If both are
-   diverging, something is wrong at the implementation level before worrying about the model.
+2. **Switch to PPO:** Add `--ppo` flag. Clipped surrogate prevents destructive updates.
 
-2. **Structural feature enrichment (no restart):** Add pre-computed structural features to the
-   state encoder — mill threat count, open triples, mobility — before Stage 3 or a second
-   Stage 2.  The sentinel's `feature_builder.py` already computes these.  Low-risk additive
-   change; expected 8–10% sample efficiency gain.
+3. **Structural feature enrichment:** Add pre-computed structural features to the state
+   encoder — mill threat count, open triples, mobility — before Stage 3 or a second Stage 2.
+   The sentinel's `feature_builder.py` already computes these.
 
-3. **PPO for instability:** If A2C shows oscillating policy loss, switch to PPO with the
-   `--ppo` flag.  The clipped surrogate prevents large destructive updates.
-
-4. **Increase Stage 1 coverage:** The MLP achieved 45.3% val accuracy.  If the GNN achieves
-   significantly lower imitation accuracy, the RL starting point is worse — extend Stage 1
-   training or generate more HumanDB data.
+4. **Extend Stage 1:** MLP achieved 51.5% accuracy. If RL is unstable from the start,
+   further imitation training (more HumanDB data, longer training) may improve the prior.

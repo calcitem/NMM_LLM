@@ -744,19 +744,19 @@ python tools/self_play.py \
 ### Training
 
 ```bash
-# Standard — 30 epochs, decisive games only
+# Production command — used to train the current data/value_net.npz
+.venv/bin/python tools/train_value_net.py \
+  --epochs 100 --lr 0.009 --decisive_only \
+  --games-dir data/games \
+  --games-dir data/games/self_play \
+  --games-dir data/human_games
+
+# Quick smoke run — 30 epochs, AI games only
 .venv/bin/python tools/train_value_net.py \
   --games-dir data/games \
   --decisive-only \
   --epochs 30 \
   --output data/value_net.npz
-
-# Extended — include self-play and human games, more epochs
-python tools/train_value_net.py \
-  --epochs 100 --lr 0.009 --decisive_only \
-  --games-dir data/games \
-  --games-dir data/games/self_play \
-  --games-dir data/human_games
 ```
 
 **FEN deduplication:** Each unique board position (identified by `board_fen_before`) is included exactly once. When the same position appears in multiple games with different outcomes, the label is the **mean** of all outcomes (+1.0 / −1.0 / 0.0). This prevents repeated opening positions from dominating the training signal.
@@ -902,7 +902,50 @@ Resume from Stage 4. DB feature slots are now **visible**. At a very low learnin
 
 > **Epoch arithmetic:** `--resume` loads Stage 4's epoch counter. Pass `--epochs N` where N = Stage 4 best epoch + 8. With `epochs: 30` in the Stage 4 config, use `--epochs 38`. Omitting `--epochs` causes the config's `epochs: 8` to produce an empty range.
 
-**One-command pipeline (recommended):**
+**Stage 3 — Archived (feature leakage)**
+
+Stage 3 was run without `--drop-db-features`. `feat[57]` (DTM quality) equalled the training label for 86% of examples — the model learned `output ≈ feat[57]`. At inference (feat[57] = 0) Spearman r was ~0.10 (near-random). Checkpoint at `checkpoints/stage3/best.pt` must not be used. Stage 4 is the corrected replacement.
+
+---
+
+**Stage 6 — AIDB + Contrastive fine-tuning (current production plan)**
+
+Resume from Stage 4+5 `best.pt`. Adds AI-vs-AI games with pre-computed Malom labels (`data/ai_games/`) and trains a contrastive ranking loss alongside BCE. `--curriculum` freezes the trunk for the first 7 epochs (Phase 1) so the quality head stabilises before the full network adapts (Phase 2).
+
+Generate AIDB games first (requires Malom DB):
+
+```bash
+.venv/bin/python scripts/gen_aidb.py --games 2000 --out-dir data/ai_games
+```
+
+Then retrain:
+
+```bash
+.venv/bin/python scripts/train_sentinel.py \
+  --game-dir data/games \
+  --human-game-dir data/human_games \
+  --ai-game-dir data/ai_games \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+  --resume learned_ai/sentinel/checkpoints/best.pt \
+  --drop-db-features --aux-wdl --lambda-wdl 0.3 \
+  --contrastive --lambda-contrastive 0.3 \
+  --curriculum --epochs 20 --epochs-phase1 7 --lr-phase2 5e-5 \
+  --out-dir learned_ai/sentinel/checkpoints/stage6 \
+  --device cuda
+```
+
+After training, promote the checkpoint:
+
+```bash
+cp learned_ai/sentinel/checkpoints/stage6/best.pt \
+   learned_ai/sentinel/checkpoints/best.pt
+```
+
+Key settings: two-phase curriculum (7 frozen + 13 full), `margin=0.2` hinge loss for contrastive pairs, `ContrastiveSentinelDataset` groups examples by `position_key` (board FEN) and samples up to 200K (good≥0.65, bad≤0.35) pairs per epoch.
+
+---
+
+**One-command pipeline (Stages 1→2→4→5, recommended for full retrain):**
 
 ```bash
 bash scripts/retrain_pipeline.sh cuda
@@ -910,7 +953,7 @@ bash scripts/retrain_pipeline.sh cuda
 bash scripts/retrain_pipeline.sh cpu
 ```
 
-Runs all four stages in sequence with human games, dynamically computes Stage 5's epoch count, and promotes the final checkpoint to `best.pt`.
+Runs Stages 1→2→4→5 in sequence with human games, dynamically computes Stage 5's epoch count, and promotes the final checkpoint to `best.pt`. Run Stage 6 separately after AIDB generation completes.
 
 ### Light retrain (incremental, on top of existing checkpoint)
 
