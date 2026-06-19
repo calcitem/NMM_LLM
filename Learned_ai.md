@@ -1,390 +1,361 @@
 # Learned AI — Training Plan
 
-The original `learned_ai/` attempt used REINFORCE self-play from a random initialisation and
-never produced a model that could beat the heuristic engine.  Three subsequent REINFORCE
-attempts (v1/v2/v3 of Stage 2) also failed to converge.  This document explains why they
-failed, what the correct approach is, and the concrete staged plan now in use.
+This document tracks every attempt to train a learned NMM agent, why each one failed,
+and the current plan.  The history matters: each failure narrowed the diagnosis.
 
 ---
 
-## Why REINFORCE Failed (Root Cause Analysis)
+## Failure History
 
-| Root cause | Effect |
-|------------|--------|
-| Terminal-only reward | 60-ply game → one gradient signal.  Model mostly lost → log_probs pushed down on *every* action, destroying the Stage 1 imitation prior |
-| No per-step value bootstrap | REINFORCE disadvantage = reward − V(s).  With no TD, V is useless until the model converges — which it can't without a good V |
-| win_reward = 2.0 vs Stage 0 trained on [−1,+1] | Value head oscillated; gradients had the wrong scale |
-| temperature = 0.5 for a pre-trained checkpoint | Too noisy; erased the imitation prior within 50 games |
-| lr = 1e-4 for fine-tuning | Too aggressive; destroyed Stage 1 prior within the first update |
-| Policy collapse | ~95% loss rate → REINFORCE maximised −log_prob on all actions → worse than random initialisation |
+### Attempt 1–3: REINFORCE (v1/v2/v3)
 
-v3 was killed at game 500 with 2.0% win rate (down from 2.5% at game 200).  The algorithm
-was making the model *worse* than the Stage 1 imitation baseline.
+Three REINFORCE attempts all ended in **policy collapse** within 500 games.
 
----
+| Version | What changed | Killed at | Final win rate | Root cause |
+|---------|--------------|-----------|----------------|------------|
+| v1 | baseline REINFORCE | game 4372 | 7.5% | sentinel over-filtered, value collapse, T=1.0 |
+| v2 | + Malom move quality reward | game ~200 | 2.3% | too early to judge; restarted |
+| v3 | + Malom trap reward, T=0.2→0.6, reward=1.0 | game 500 | 2.0% (declining) | three compounded bugs |
 
-## What We Now Know Works
-
-| Component | Evidence |
-|-----------|----------|
-| **Value net at 80% blend** | +17.5 pp vs plain heuristic (8W/1L/31D in 40-game bench) |
-| **Malom DB** | Perfect DTM labels for any position; both reward signals work (move quality + trap) |
-| **HumanDB** | 22,895 real games, 642,703 positions; quality labels from win/loss outcome |
-| **Sentinel** | Reliable move-quality classifier; advisory mode well-calibrated |
-| **A2C bootstrapping** | Per-step advantage = r(t) + γV(s') − V(s): dense gradient, no collapse |
-| **GNN backbone** | Mill + move adjacency edges give the network positional structure as a prior |
+**Root cause of all three:** Terminal-only reward in a 40-ply game means one gradient
+signal per game.  With 95% loss rate, every log_prob in every game got pushed down
+uniformly.  The model collapsed to near-random before it could discover any winning moves.
 
 ---
 
-## Architecture: NMMNet (MLP backbone) ← primary
+### Attempt 4: A2C with raw board state
 
-The MLP backbone (NMMNet) is the confirmed training architecture.  A GNN variant
-(NMMGNNNet) was built and evaluated — see **GNN Post-mortem** below — but failed
-imitation learning and is not used for training.
+Switched from REINFORCE to **A2C** (actor-critic, per-step TD bootstrapping) to solve the
+variance problem.  Three concrete bug fixes: win_reward 2.0→1.0, lr 1e-4→5e-6, temperature
+0.5→0.2 annealed to 0.6.
 
-### MLP architecture
+**Model:** `NMMNet` — 84-float raw board one-hot → MLP backbone (256→256→128) → 5 phase
+heads → 624 fixed action logits.
 
-| Layer | Shape | Note |
-|-------|-------|------|
-| backbone | Linear(84→256) → Linear(256→256) → Linear(256→128) + ReLU | 120K params |
-| phase_heads | 5× Linear(128→64→624) | one per game phase |
-| value_head | Linear(128→64→1) | scalar position value |
+**Result after 10,000 games vs heuristic difficulty 2:** **2% win rate peak, 2% final.**
+Many games hit the 200-step draw cap.  Loss never meaningfully decreased.
 
-File: `learned_ai/models/backbone.py`  
-Checkpoint format: `{"model": state_dict, "model_type": "mlp"}`
+**Why this also failed — the real root cause, finally identified:**
 
----
+The 84-float raw board encoding gives the model no strategic context.  It receives 24
+positions × 3-way one-hot, side-to-move, phase, and piece counts — nothing about
+which moves are good, which pieces are in danger, what the heuristic thinks, or
+what Malom says.  To win from this starting point, the model would have to independently
+rediscover all of NMM strategy through trial and error against a competent heuristic.
 
-## GNN Post-mortem (2026-06-18)
+After 10,000 games it had still not managed this.  The signal-to-noise ratio is simply
+too low: the heuristic consistently outplays a confused random-ish policy, so almost
+every game is a loss, and the per-move TD signal only helps if the model can already
+produce occasionally good moves to learn from.
 
-A GCN backbone was designed and evaluated. Stage 0 value prediction succeeded; imitation
-learning (Stage 1) failed completely.
-
-### Results
-
-| Metric | MLP | GNN |
-|--------|-----|-----|
-| Stage 0 val MSE | **0.012** | 0.075 |
-| Stage 1 val accuracy | **51.5%** | 4.6% |
-| Random baseline | — | 0.3% |
-| Stage 1 outcome | ✓ Strong prior | ✗ Near-random |
-
-### Root causes
-
-1. **5.6× fewer backbone parameters** (21K vs 120K). The GCN is compact — efficient for
-   value prediction but under-capacity for the 624-action policy space.
-
-2. **Wrong inductive bias for policy.** Stage 0 tuned GCN features for scalar value
-   prediction. With the backbone frozen in Phase 1, the phase heads could not learn useful
-   policy from those value-tuned features. Loss started at 11.47 — *above* the random CE
-   baseline — indicating the frozen GCN features were actively anti-informative for policy.
-
-3. **Representation mismatch.** GCN mean-pools over 24 nodes, discarding positional
-   identity. The 84-feature flat state retains per-square identity that the MLP backbone
-   can use directly for placement/movement policy.
-
-### Decision
-
-GNN training is **abandoned**. MLP Stage 1 checkpoint (`checkpoints/stage1/best.pt`,
-51.5% val accuracy) is the RL starting point.  The GNN code is kept for potential future
-use in a different context (e.g. pure value estimation at inference time).
+This is not an algorithm problem.  A2C is correct.  The problem is the **input
+representation**.
 
 ---
 
-## Algorithm: A2C (default) / PPO (optional)
+## The Real Problem: No Scaffold
 
-### Why A2C over REINFORCE
+The pattern across all four attempts is the same:
 
-REINFORCE accumulates gradients until the terminal reward.  In a 40-ply NMM game where the
-model loses 95% of the time, every log_prob in every losing game gets pushed down uniformly —
-which is exactly policy collapse.
+> A model learning NMM from raw board encodings must discover the entire strategy of the
+> game before it can produce a single positive gradient signal in a game against a
+> competent opponent.  It can't do this from 10,000 games of repeated losing.
 
-A2C bootstraps the return at every step:
+The sentinel does not have this problem.  It was trained with 58 rich per-move features:
+resulting piece counts, mobility, mill threats, heuristic rank, DB win rates, DTM quality.
+It knew, from day one, that closing a mill is good and walking into a trap is bad.
 
-    advantage(t) = r(t) + γ·V(s_{t+1}) − V(s(t))
-
-This gives a dense gradient signal even in losing games.  If the model chose a good move in
-a losing game, the local advantage can still be positive (the position improved, even if the
-game was ultimately lost).  The value head trains on TD targets, not terminal outcomes.
-
-### PPO (--ppo flag)
-
-PPO adds a clipped surrogate to A2C:
-
-    L_clip = min(ratio · adv,  clip(ratio, 1−ε, 1+ε) · adv)
-    where ratio = π_new(a|s) / π_old(a|s)
-
-This prevents large destructive policy updates.  Use PPO if A2C still shows instability on
-longer curricula (Stage 3+).
-
-Files: `learned_ai/training/a2c.py`, `learned_ai/training/ppo.py`
-
-### Three bug fixes (vs REINFORCE v3)
-
-| Bug | Old value | Fixed value | Why |
-|-----|-----------|-------------|-----|
-| win_reward | 2.0 | **1.0** | Stage 0 trains value head on [−1,+1]; reward must match |
-| temperature start | 0.5 | **0.2** (annealed to 0.6) | Preserve Stage 1 imitation prior; anneal exploration gradually |
-| learning rate | 1e-4 | **5e-6** | Safe fine-tuning rate for pre-trained checkpoint |
-
-### Malom reward shaping in A2C
-
-Both Malom signals carry over from REINFORCE, but `malom_weight` is reduced from 0.3 to
-**0.1** because A2C processes per-step rewards directly (not just at terminal).  Over 40+
-learner moves, 0.3 × (up to 0.6 per step) accumulates to ±24 — completely swamping the ±1
-terminal signal.  With 0.1, accumulated shaping peaks at ±4 and stays commensurate with the
-terminal.
-
-1. **Move quality:** `query_move_quality(board, move)` → δ ∈ [−2,+2] × 0.1 added to r(t)
-2. **Trap reward:** `query(board)` after learner move; if opponent position is "L" → +0.1
-
-Both signals slot directly into r(t) in the A2C update.
+The learned policy needs the same scaffold.
 
 ---
 
-## Training Stages
+## New Approach: Scaffolded Meta-Policy
 
-### Stage 0 — Supervised Value Pre-training  ✓ complete
+**Core idea:** Instead of learning NMM from scratch, teach the model to learn *when to
+agree or disagree with the experts* (sentinel, heuristic engine, Malom DB).
 
-**Goal:** Bootstrap the value head so it is not random noise from episode 1.
+The model is not given the raw board.  It is given, for every legal move:
+- What the sentinel thinks of this move (quality score)
+- What the heuristic engine thinks (rank, absolute evaluation, delta from current position)
+- What Malom says (WDL, distance-to-win)
+- The structural move properties (mill closing, piece counts, mobility, etc.)
 
-**Method:**
-1. Generate ~50k positions by running heuristic engine (difficulty 6, vn_blend=80%) self-play.
-2. Label each position with `value_net.predict(board, board.turn)` — side-to-move relative.
-3. Supervised regression on the value head (frozen backbone first, then full network).
+The task becomes: "given everything the experts know about this move, should I play it?"
+This is learnable in far fewer games because the model starts with meaningful signal.
 
-**Exit criterion:** val MSE plateaus (no improvement for 3 epochs).
+It is fine if the model remains dependent on the sentinel and heuristic at deployment — it
+has them available anyway.  The goal is to *improve on top of that baseline*, not to
+replace it.
 
-**Command:**
+---
+
+## Architecture: ScaffoldedPolicyNet
+
+### Per-move input (62 floats)
+
+| Slice | Source | Content |
+|-------|--------|---------|
+| [0:20) | `feature_builder.board_context_features()` | Phase, piece counts, mobility, mills — same for all moves in this position |
+| [20:40) | `feature_builder.move_features()` | From/to/capture indices, mill flags, resulting state |
+| [40:58) | `feature_builder.counterfactual_features()` | Heuristic rank, normalised score, DB win/loss fracs, DTM quality |
+| [58] | `SentinelAdvisor.advise().move_scores[i]` | Sentinel's quality score for this move, [0,1] |
+| [59] | `evaluate(board_after, player, strength_mode=True)` → mapped [0,1] | Absolute heuristic evaluation of the resulting position |
+| [60] | `is_top1` | 1.0 if this is the heuristic engine's #1 ranked move |
+| [61] | `tanh(h_after − h_before)` | Heuristic improvement after this move |
+
+### Value head input (23 floats)
+
+| Slice | Content |
+|-------|---------|
+| [0:20) | Board context features (same as above) |
+| [20] | `evaluate(board, player, strength_mode=True)` — absolute position strength |
+| [21] | `max(sentinel_scores)` across legal moves |
+| [22] | `mean(sentinel_scores)` across legal moves |
+
+### Network structure
+
 ```
-.venv/bin/python scripts/train_stage0.py --out-dir learned_ai/checkpoints/stage0
+Policy: shared MLP applied independently to each move's 62-float row
+  62 → 128 → 64 → 1  (scalar logit per move)
+  softmax over k legal moves → policy distribution
+
+Value: board-level MLP
+  23 → 64 → 32 → tanh → 1  (scalar in [-1, 1])
 ```
 
-#### Stage 0 — results
+Variable move count handled naturally: k varies by position, no padding or masking needed.
 
-| Item | Value |
-|------|-------|
-| Positions | 28,537 across all phases |
-| Phase 1 | frozen backbone, lr=3e-3 — val MSE 0.384 → **0.230** |
-| Phase 2 | full network, lr=5e-4 — val MSE 0.295 → **0.012** |
-| Checkpoint | `learned_ai/checkpoints/stage0/best.pt` |
+**Parameter count:** ~20K total (policy 16K + value 4K).  Deliberately small — the heavy
+lifting is done by the feature computation, not the network.
 
----
-
-### Stage 1 — Imitation Learning from Human Games  ✓ complete
-
-**Goal:** Give the policy head a strong prior over move selection before RL begins.
-
-**Data:** HumanDB (169,048 samples, 8× D4 augmented).  Label: win-rate of each move as CE weight.
-
-**Method:**
-- CE loss on primary action (placement/movement slice) weighted by win-rate.
-- Two-phase: frozen backbone (high LR) → full network (low LR, early stop).
-
-**Command:**
-```
-.venv/bin/python scripts/train_stage1.py \
-    --resume learned_ai/checkpoints/stage0/best.pt \
-    --out-dir learned_ai/checkpoints/stage1
-```
-
-#### Stage 1 — results
-
-| Item | Value |
-|------|-------|
-| Samples | 169,048 (8× augmented) |
-| Phase 1 | frozen backbone — val_acc 4% → **23.5%** |
-| Phase 2 | full network — val_acc 30% → **51.5%** (full dataset eval) |
-| Checkpoint | `learned_ai/checkpoints/stage1/best.pt` |
-
-> GNN was also evaluated at Stage 1 — see **GNN Post-mortem** above. Result: 4.6% accuracy
-> (near-random). GNN abandoned; MLP is the RL starting point.
+Files:
+- `learned_ai/models/scaffolded_encoder.py` — `encode_position()` → `EncodedPosition`
+- `learned_ai/models/scaffolded_net.py` — `ScaffoldedPolicyNet`
+- `learned_ai/agents/scaffolded_agent.py` — `ScaffoldedAgent` (inference)
+- `learned_ai/training/scaffolded_a2c.py` — `ScaffoldedStep` + `scaffolded_a2c_update()` + PPO variant
 
 ---
 
-### Pre-Stage 2 Baseline
+## Reward Structure
 
-Stage 1 MLP checkpoint (greedy, temp=0) vs heuristic difficulty 2, vn_blend=0:
-W=0, D=25, L=15 over 40 games — 0% win rate, 62.5% draw rate.
-Confirms imitation learning gives defensive play but no winning ability without RL.
+### Per-move shaped rewards (dense — every learner turn)
 
----
-
-### Stage 2 — A2C Self-play vs Weak Heuristic  ⟳ running
-
-**Goal:** First RL stage; model learns to win reliably vs a weak opponent.
-
-**Algorithm:** A2C (or `--ppo` for PPO variant)
-
-**Opponent:** Heuristic engine, difficulty 2 → 3, vn_blend=0%, 0.05s/move.
-
-**Malom shaping:** Both signals active for the first 50% of games, weight=0.1.
-
-**Command:**
 ```
-.venv/bin/python scripts/train_stage2.py \
-    --resume learned_ai/checkpoints/stage1/best.pt \
-    --out-dir learned_ai/checkpoints/stage2 \
-    --max-games 10000 \
-    --no-gnn
+r_sentinel   = 0.15 × (sentinel_score_played − mean_sentinel_score)
+               Did we play above the average quality sentinel sees for this position?
+
+r_heuristic  = 0.10 × tanh(h_after − h_before)
+               Did the heuristic evaluation improve after our move?
+
+r_malom_win  = 0.25 × dtm_quality(move)    if Malom says this move wins
+               dtm_quality = 1 − dtm/100, so win-in-1 ≈ 0.99, win-in-50 ≈ 0.50
+               Winning moves rewarded more for faster wins.
+
+r_malom_trap = 0.15                        if resulting opponent position is Malom "loss"
+               Opponent is now provably losing — clearest possible signal.
 ```
 
-Log: `/tmp/stage2_mlp.log`
+These fire every turn, giving dense gradient signal regardless of whether the game is won
+or lost.  The model learns to improve positions incrementally.
 
-**Exit criterion:** Rolling 200-game win rate ≥ 60% at difficulty 3.
+### Game-level retroactive rescoring (after game ends)
 
-#### Stage 2 — REINFORCE Attempt History (killed)
+```
+outcome = +1.0 (win) | −1.0 (loss) | +0.15 (draw < 100 plies) | −0.05 (draw ≥ 100 plies)
 
-Three REINFORCE attempts all failed due to policy collapse (see root cause analysis above).
+for each move t in trajectory (from end):
+    r_t += 0.50 × outcome × 0.98^(plies_remaining)
+```
 
-| Version | Algorithm | Killed at | Final win rate | Root cause |
-|---------|-----------|-----------|----------------|------------|
-| v1 | REINFORCE | game 4372 | 7.5% | sentinel over-filtered, value collapse, T=1.0 |
-| v2 | REINFORCE + malom quality | game ~200 | 2.3% | too early to judge; restarted with trap reward |
-| v3 | REINFORCE + both malom signals | game 500 | 2.0% (declining) | all three algorithm bugs |
+This retroactively credits early moves in a winning game and penalises early moves in
+a losing game, decayed so recent moves get more credit.  It prevents the per-move
+signals from drowning out the ultimate game result.
 
-v3 post-mortem: the three concrete bugs (win_reward=2.0, T=0.5, lr=1e-4) compounded the
-fundamental REINFORCE variance problem.  Switching to A2C with bug fixes is the correct path.
+### Why this is better than the previous reward structure
 
-#### Stage 2 — A2C Parameters
-
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| LR | 5e-6 | Bug fix 3: safe fine-tune rate |
-| Temperature | 0.2 → 0.6 (linear anneal) | Bug fix 2: preserve prior, gradually explore |
-| win_reward | 1.0 | Bug fix 1: match Stage 0 [−1,+1] scale |
-| Malom weight | 0.1 | Reduced for A2C per-step amplification |
-| γ (discount) | 0.99 | Standard; A2C bootstraps so full discount is ok |
-| UPDATE_EVERY | 16 | Batch 16 games before each gradient step |
-| entropy_coef | 0.01 | Prevent premature determinism |
+| Old (A2C, raw board) | New (Scaffolded) |
+|----------------------|------------------|
+| r_malom = 0.1 × Δ(WDL) — small, infrequent (endgame only) | r_sentinel fires every move, calibrated to quality delta |
+| Terminal outcome dominates | Per-move + retroactive are balanced |
+| Model needs to form strategic understanding to get any reward | Model gets reward for playing sentinel/heuristic-aligned moves from game 1 |
 
 ---
 
-### Stage 3 — Curriculum vs Heuristic + Value Net
+## Training Pipeline
 
-**Goal:** Climb from weak to strong heuristic opponent.
+### Stage 1 — Imitation warmup
 
-**Opponent:** Heuristic engine, difficulty 3 → 8, vn_blend=80% at difficulties 6+.
+**Goal:** Give the model a solid starting policy before RL begins.  Without this, the
+model is near-random and the per-move rewards are noisy.
 
-**Algorithm:** A2C (or PPO — preferred at this stage since opponent is stronger).
+**Method:** Play heuristic (diff 3) vs heuristic self-play.  At each position, record the
+heuristic's actual move as the supervised target.  Train with cross-entropy (policy) +
+MSE (value against heuristic evaluation).
 
-**Difficulty ramp rule:** ≥ 55% win rate over 200-game rolling window before bumping.
+**Why this works:** The heuristic already plays well.  Imitating it gives the model a
+baseline that generates non-trivial per-move reward from the first game of Stage 2.
 
-**Malom DB reward shaping:** Both Malom signals remain active throughout Stage 3.  The model
-does **not** receive raw W/L/D labels as input — reward shaping only.
+**Expected outcome:** Model learns to play at roughly heuristic quality.  Confirmed
+by checking that policy cross-entropy loss decreases and val accuracy > 20%.
 
-**Opponent move replay (new):** In every lost game, record opponent moves where
-`query_move_quality >= 0` (Malom confirms good for opponent).  Train a small supervised CE
-loss (`imitation_weight=0.1`) on these transitions alongside A2C.  Teaches the model what
-winning positions look like from the exact board states it failed at.
+**Commands:**
+```bash
+# Generate dataset (~2h for 2000 games)
+.venv/bin/python scripts/gen_imitation_data.py \
+    --games 2000 --diff 3 \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt
 
-**Training quality:** Stage 3+ uses longer time budgets (0.3s–1.0s/move), vn_blend=80% at
-difficulty 6+, full DB access for the opponent.  Extended wall-clock time is acceptable.
+# Train imitation model (~10 min)
+.venv/bin/python scripts/train_scaffolded_s1.py \
+    --data learned_ai/data/imitation_scaffolded.npz \
+    --epochs 20
 
-**Exit criterion:** 55% win rate at difficulty 8 + vn_blend=80%.
-
-**Coverage note:** Malom DB coverage drops in midgame (many pieces, complex positions) —
-`query()` returns `None` more often.  Monitor per-phase signal frequency to confirm the model
-still receives useful reward in midgame, not only in placement/endgame phases.
-
----
-
-### Stage 4 — Self-play Pool
-
-**Goal:** Open-ended strength improvement through self-play against a pool of past checkpoints.
-
-**Method:** Pool-based self-play (keep N past checkpoints; randomly sample opponents).
-Remove sentinel blunder filter — the model should be strong enough that blunders are rare.
-
-**Malom DB shaping:** Both signals remain active.  The model still does not see raw W/L/D
-labels — reward shaping only.
-
-**Exit criterion:** ≥ 70% win rate vs heuristic + vn_blend=80%, or episode budget reached.
+# Checkpoint → learned_ai/checkpoints/scaffolded/s1/best.pt
+```
 
 ---
 
-### Stage 5 — Malom Full-game Supervised Distillation
+### Stage 2 — A2C self-play with full scaffolded rewards
 
-**Goal:** Skill refinement by directly learning from Malom's perfect play across the entire game.
+**Goal:** Learn to actually win, using dense per-move rewards + retroactive rescoring.
 
-**Why at the end:** Supervised distillation onto a strong generalising model is far more
-effective than early injection when the rest of the network is random.  Stages 2–4 build the
-strategic intuition; Stage 5 sharpens it to Malom precision.
+**Opponent:** Heuristic engine, difficulty 2 → 3.
+**Algorithm:** A2C (or `--ppo` for PPO).
+**Temperature:** 0.5 annealed to 1.2 (model starts near imitation prior; explore more as training progresses).
+**LR:** 1e-4 (model is new, not fine-tuning a pre-trained checkpoint — we can use a higher rate).
 
-**Method:**
-- Sample positions from all phases / piece counts from the Malom DB.
-- For each position, query Malom W/L/D for every legal move.
-- Supervised training:
-  - **Value head target:** W=+1.0, D=0.0, L=−1.0 (exact WDL for side to move)
-  - **Policy head target:** CE toward distribution of Malom-winning moves (uniform over "W"
-    moves; fallback to "D"; fallback to "L")
-- Light LR (1e-5), few epochs to avoid catastrophic forgetting.
+**Curriculum:**
+- Start vs diff 2.
+- Advance to diff 3 when rolling-200 win rate ≥ 60%.
+- Exit when rolling-200 win rate ≥ 60% at diff 3.
 
-**Full-game scope:** Unlike "endgame only" (≤7 pieces), this stage covers all phases.  The
-model trained on Stages 2–4 sees Malom reward shaping throughout the game; Stage 5 closes
-the loop by directly showing it the W/L/D labels for every move in every position.
+**Why higher LR than old Stage 2:** Old Stage 2 used 5e-6 to protect a pre-trained
+checkpoint.  ScaffoldedNet starts from Stage 1 imitation, not a pre-trained NMMNet
+backbone — a fresh model that needs to learn.  1e-4 is appropriate.
 
-**Policy target refinement (future option):** DTM-weighted targets — faster wins get higher
-probability mass.  Implement only if "uniform over W moves" plateau is confirmed.
+**Commands:**
+```bash
+.venv/bin/python scripts/train_scaffolded_s2.py \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --max-games 10000
 
-**Exit criterion:** Policy selects a Malom-winning move (where one exists) in ≥ 85% of
-sampled full-game positions; value head WDL accuracy ≥ 80% across all phases.
+# Resumes automatically from s1/best.pt
+# Checkpoint → learned_ai/checkpoints/scaffolded/s2/best.pt
+# Log → learned_ai/checkpoints/scaffolded/s2/train_log.jsonl
+```
 
----
-
-## Integration Points
-
-| Mode | What happens |
-|------|-------------|
-| **Evaluation** | `bench_sentinel.py`-style A/B: new learned agent vs heuristic+vn80% |
-| **Advisory** | Display learned agent's top move alongside heuristic in AI Discussion panel |
-| **Hybrid** | Blend learned value head at 20% alongside existing value net (80%) once it reaches parity |
-
-The hybrid mode is the lowest-risk path to a playable improvement.
+To use PPO instead:
+```bash
+.venv/bin/python scripts/train_scaffolded_s2.py --ppo --max-games 10000
+```
 
 ---
 
-## What to Reuse vs Rewrite
+### Stage 3 — Malom supervised fine-tuning
 
-| Component | Status |
-|-----------|--------|
-| `learned_ai/models/backbone.py` — NMMNet | **Primary** — MLP, 120K params |
-| `learned_ai/models/gnn_backbone.py` — NMMGNNNet | **Kept, not used for training** — failed Stage 1 (see post-mortem) |
-| `learned_ai/models/action_encoder.py`, `state_encoder.py` | Keep as-is |
-| `learned_ai/agents/` — LearnedAgent, HeuristicAgent | Keep as-is |
-| `learned_ai/training/a2c.py` | A2C per-step TD update |
-| `learned_ai/training/ppo.py` | PPO clipped surrogate update |
-| `learned_ai/training/replay_buffer.py` | Keep |
-| `scripts/train_stage0.py` | MLP only (drop `--gnn`) |
-| `scripts/train_stage1.py` | MLP only (drop `--gnn`) |
-| `scripts/train_stage2.py` | A2C/PPO + `--no-gnn` required; device bug fixed 2026-06-18 |
-| `scripts/train_stage3.py` | As-is |
+**Goal:** Sharpen strategy with explicit DB supervision.  When Malom knows the WDL for
+all legal moves, push the policy toward the winning move(s), weighted by DTM quality.
+
+**Loss:** `total = 0.6 × A2C_loss + 0.4 × KL(policy → malom_target)`
+
+The Malom target is a probability distribution over legal moves:
+- Win moves: weight = dtm_quality (faster wins get more weight)
+- Draw moves: weight = 0.15
+- Loss moves: weight = 0.0
+
+The SL loss fires only when Malom has entries — in endgame and tractable midgame positions.
+It is zero in opening positions where the DB is unavailable.
+
+**Opponent:** Heuristic diff 3, advancing to diff 4.
+**LR:** 3e-5 (fine-tuning, lower than Stage 2).
+
+**Exit criterion:** Rolling-200 win rate ≥ 40% vs diff 4.
+
+**Commands:**
+```bash
+.venv/bin/python scripts/train_scaffolded_s3.py \
+    --malom /path/to/malom/db \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --diff 3
+
+# Resumes from s2/best.pt automatically
+# Checkpoint → learned_ai/checkpoints/scaffolded/s3/best.pt
+```
+
+If Malom DB is not yet built:
+```bash
+# Stage 3 still runs — SL signal will be zero, it falls back to pure A2C
+.venv/bin/python scripts/train_scaffolded_s3.py --diff 3
+```
+
+---
+
+## Integration with Existing Engine
+
+The `ScaffoldedAgent` has a `choose_move(board)` interface identical to `HeuristicAgent`
+and `LearnedAgent`.  At deployment it calls:
+
+1. `SentinelAdvisor.advise()` — already called by the Coordinator anyway
+2. `evaluate(board_after, player, strength_mode=True)` — per legal move, instantaneous static eval
+3. `ScaffoldedPolicyNet.policy_logits()` — tiny MLP, <1ms
+
+Total added latency: negligible.  The sentinel was already the bottleneck.
+
+To wire into the game, add `ScaffoldedAgent` as an option in `ai/coordinator.py`
+alongside the existing learned agent path.
 
 ---
 
 ## Success Metrics
 
-| Milestone | Status | Target |
-|-----------|--------|--------|
-| Stage 0 MLP | ✓ val MSE **0.012** | < 0.05 |
-| Stage 1 MLP | ✓ val_acc **51.5%** | > 30% |
-| Stage 2 | ⟳ running | ≥ 60% win rate vs difficulty 3 |
-| Stage 3 | pending | ≥ 55% win rate vs difficulty 8 + vn80% |
-| Stage 4 | pending | ≥ 70% win rate vs heuristic + vn80% |
-| Stage 5 | pending | Malom-winning move ≥ 85% of positions; WDL ≥ 80% |
+| Stage | Target | Why |
+|-------|--------|-----|
+| Stage 1 | Val policy loss decreasing; model plays legal moves better than random | Confirms imitation is working |
+| Stage 2 | Rolling-200 win rate ≥ 60% vs difficulty 2 in < 3,000 games | Per-move rewards should produce visible improvement within 500 games |
+| Stage 2 → diff 3 | Rolling-200 win rate ≥ 60% | |
+| Stage 3 | Rolling-200 win rate ≥ 40% vs difficulty 4 | Fine-tuning on top of a working Stage 2 model |
+
+Early warning (check after 500 games of Stage 2): if win rate is still below 5% and
+not trending up, the per-move reward signal is not working.  Check:
+- Are sentinel scores varying across moves? (should not all be 0.5)
+- Is `h_delta` varying? (should see positive and negative values)
+- Is A2C advantage non-zero? (log in training loop)
 
 ---
 
-## Contingency: If MLP A2C Also Plateaus
+## What Changed vs All Previous Attempts
 
-1. **Confirm A2C is learning:** After 500 games, entropy should decrease, value loss should
-   decrease.  If both diverge, the problem is implementation-level, not architecture.
+| | REINFORCE | A2C raw board | **Scaffolded A2C** |
+|--|-----------|---------------|-------------------|
+| State input | 84-float one-hot board | 84-float one-hot board | **62-float expert features per move** |
+| Knows what a good move looks like? | No | No | **Yes — sentinel + heuristic say so explicitly** |
+| Reward density | 1 signal / game | per-step TD | **per-step TD + dense per-move shaping** |
+| Starting quality | random | imitation prior | **imitation prior at heuristic level** |
+| Must discover NMM strategy from scratch? | Yes | Yes | **No** |
+| Model can be dependent on sentinel/heuristic? | N/A | N/A | **Yes — they're available at deployment** |
 
-2. **Switch to PPO:** Add `--ppo` flag. Clipped surrogate prevents destructive updates.
+---
 
-3. **Structural feature enrichment:** Add pre-computed structural features to the state
-   encoder — mill threat count, open triples, mobility — before Stage 3 or a second Stage 2.
-   The sentinel's `feature_builder.py` already computes these.
+## Files
 
-4. **Extend Stage 1:** MLP achieved 51.5% accuracy. If RL is unstable from the start,
-   further imitation training (more HumanDB data, longer training) may improve the prior.
+| File | Purpose |
+|------|---------|
+| `learned_ai/models/scaffolded_encoder.py` | `encode_position()` — builds (k,62) feat matrix + (23,) value input |
+| `learned_ai/models/scaffolded_net.py` | `ScaffoldedPolicyNet` — per-move MLP policy + value head |
+| `learned_ai/training/scaffolded_a2c.py` | `ScaffoldedStep`, `scaffolded_a2c_update()`, `scaffolded_ppo_update()` |
+| `learned_ai/agents/scaffolded_agent.py` | `ScaffoldedAgent` — inference wrapper for gameplay |
+| `scripts/gen_imitation_data.py` | Generate supervised dataset from heuristic self-play |
+| `scripts/train_scaffolded_s1.py` | Stage 1: imitation training |
+| `scripts/train_scaffolded_s2.py` | Stage 2: A2C/PPO with full scaffolded rewards |
+| `scripts/train_scaffolded_s3.py` | Stage 3: Malom supervised fine-tuning |
+| `tests/test_scaffolded_policy.py` | 25 unit tests (encoder shapes, net forward, A2C update, agent legality) |
+
+### Previous architecture (kept, not used for scaffolded training)
+
+| File | Status |
+|------|--------|
+| `learned_ai/models/backbone.py` — NMMNet (84→624) | Kept; used by old LearnedAgent |
+| `learned_ai/models/gnn_backbone.py` — NMMGNNNet | Kept, abandoned (Stage 1 accuracy 4.6%) |
+| `learned_ai/training/a2c.py` | Old A2C for NMMNet |
+| `scripts/train_stage2.py` | Old Stage 2 (failed at 2% win rate) |
+| `learned_ai/checkpoints/stage0/`, `stage1/`, `stage2/` | Old checkpoints |
