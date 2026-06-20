@@ -420,7 +420,6 @@ export class Board {
       if (pct < 1) return null;
       return `O:${pct}%`;
     };
-
     if (phase === "place" || phase === "capture") {
       // Halos on destination squares — no arrows needed (no source)
       for (const mv of moves) {

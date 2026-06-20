@@ -2712,11 +2712,16 @@ async def ws_endpoint(websocket: WebSocket):
                                 diag_board, ov_candidates, color,
                             )
                             if ov_probs is not None:
+                                log.debug("Overseer OK: %d probs, top=%.3f (mode=%s)",
+                                          len(ov_probs), max(ov_probs), diag_mode)
                                 for i, mv_e in enumerate(moves_out):
                                     if i < len(ov_probs):
                                         mv_e["overseer_prob"] = round(ov_probs[i], 4)
+                            else:
+                                log.info("Overseer score_moves returned None (mode=%s, n=%d)",
+                                         diag_mode, len(ov_candidates))
                     except Exception as _oe:
-                        log.debug("Overseer diagnostic scoring failed: %s", _oe)
+                        log.warning("Overseer diagnostic scoring failed: %s", _oe, exc_info=True)
                 for mv_e in moves_out:
                     if "overseer_prob" not in mv_e:
                         mv_e["overseer_prob"] = None

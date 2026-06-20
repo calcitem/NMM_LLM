@@ -15,7 +15,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("nmm.overseer")
 
 
 def _move_key(mv: dict) -> tuple:
@@ -93,7 +93,7 @@ class OverseerAdvisor:
             return result
 
         except Exception as e:
-            log.debug("OverseerAdvisor.score_moves failed: %s", e)
+            log.warning("OverseerAdvisor.score_moves failed: %s", e, exc_info=True)
             return None
 
 
