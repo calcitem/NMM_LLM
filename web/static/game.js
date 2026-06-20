@@ -49,6 +49,7 @@ let diagNegamax     = false;        // show negamax scores
 let diagTraj        = false;        // show trajectory DB frequencies
 let diagDB          = false;        // show fullgame/endgame DB arrows
 let diagSentinel    = false;        // show Sentinel AI move quality overlay
+let diagOverseer    = false;        // show Overseer pick-probability overlay
 let diagDepth       = 3;            // negamax depth
 let currentDifficulty = 3;          // updated from state messages; gates overlay visibility
 let _diagStaticData  = null;        // last received static diagnostic response
@@ -224,6 +225,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if (rowPerfect) rowPerfect.style.opacity = "0.45";
       const hint = $("perfect-db-hint");
       if (hint) hint.textContent = "(Malom DB not loaded)";
+    }
+  }).catch(() => {});
+
+  // Overseer chip + settings row availability
+  fetch("/api/overseer_status").then(r => r.json()).then(s => {
+    const chip   = $("diag-btn-overseer");
+    const status = $("diag-overseer-status");
+    const row    = $("row-overseer");
+    const chk    = $("chk-overseer");
+    if (s.available) {
+      if (row) row.style.display = "flex";
+      if (chk) chk.disabled = false;
+    } else {
+      if (chip)   { chip.disabled = true; chip.title = "Overseer model not loaded"; }
+      if (status) status.style.display = "inline";
     }
   }).catch(() => {});
 
@@ -429,6 +445,28 @@ document.addEventListener("DOMContentLoaded", () => {
     $("diag-btn-sentinel").classList.toggle("diag-chip-active", diagSentinel);
     _diagRender();
   });
+
+  $("diag-btn-overseer") && $("diag-btn-overseer").addEventListener("click", () => {
+    diagOverseer = !diagOverseer;
+    if (diagOverseer) {
+      _diagRequestStatic();  // ensure server has computed overseer_prob
+    }
+    $("diag-btn-overseer").classList.toggle("diag-chip-active", diagOverseer);
+    const chkOv = $("chk-overseer");
+    if (chkOv) chkOv.checked = diagOverseer;
+    _diagRender();
+  });
+
+  const chkOverseer = $("chk-overseer");
+  if (chkOverseer) {
+    chkOverseer.addEventListener("change", () => {
+      diagOverseer = chkOverseer.checked;
+      if (diagOverseer) _diagRequestStatic();
+      const chip = $("diag-btn-overseer");
+      if (chip) chip.classList.toggle("diag-chip-active", diagOverseer);
+      _diagRender();
+    });
+  }
 
   $("rng-replay-speed").addEventListener("input", () => {
     const ms = parseInt($("rng-replay-speed").value);
@@ -2644,7 +2682,7 @@ function _diagRender() {
   const negamaxD = diagNegamax ? _diagNegamaxData : null;
   const anyScore = staticD || negamaxD;
 
-  if (!anyScore && !diagTraj && !diagDB && !diagSentinel) { board.clearDiag(); return; }
+  if (!anyScore && !diagTraj && !diagDB && !diagSentinel && !diagOverseer) { board.clearDiag(); return; }
 
   // Pick primary data source (static preferred for phase/color info)
   const primary   = staticD || negamaxD;
@@ -2660,6 +2698,7 @@ function _diagRender() {
   if (diagTraj) modeLabel.push("traj");
   if (diagDB)   modeLabel.push("DB");
   if (diagSentinel) modeLabel.push("Sentinel");
+  if (diagOverseer) modeLabel.push("Overseer");
   $("diag-mode-label").textContent = modeLabel.join(" + ") || "off";
 
   // Score label overlay (heuristic / negamax numbers)
@@ -2673,19 +2712,20 @@ function _diagRender() {
     board._diagGroup.innerHTML = "";
   }
 
-  // DB / Sentinel overlay — gated by difficulty
+  // DB / Sentinel / Overseer overlay — gated by difficulty
   const visFrac = _overlayVisibilityFraction(currentDifficulty);
   if (visFrac === 0.0) {
     board._dbGroup.innerHTML = "";
   } else {
     const dbSource = anyScore || _diagStaticData;  // prefer static for DB data
-    if ((diagTraj || diagDB || diagSentinel) && dbSource && dbSource.moves) {
+    if ((diagTraj || diagDB || diagSentinel || diagOverseer) && dbSource && dbSource.moves) {
       board.renderDiagDB(dbSource.moves, {
         phase:              curPhase,
         selectedSrc:        board.selected,
         showTraj:           diagTraj,
         showDB:             diagDB,
         showSentinel:       diagSentinel,
+        showOverseer:       diagOverseer,
         visibilityFraction: visFrac,
       });
     } else {

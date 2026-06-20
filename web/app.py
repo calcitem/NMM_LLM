@@ -241,6 +241,18 @@ try:
 except Exception as _le:
     log.warning("Learned AI sentinel unavailable: %s", _le)
 
+# ── Overseer (ScaffoldedPolicyNet) — advisory pick-probability overlay ───────
+_overseer_advisor = None
+try:
+    from learned_ai.models.overseer import load_overseer as _load_overseer
+    _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor)
+    if _overseer_advisor is not None:
+        log.info("Overseer advisor loaded")
+    else:
+        log.info("Overseer advisor: no checkpoint found — overlay disabled")
+except Exception as _oe:
+    log.warning("Overseer advisor unavailable: %s", _oe)
+
 # ── Malom perfect DB (ExternalSolvedDB) — used for DB Lines overlay and DB fallback ──
 # Path is read from settings.json "malom_db_path" (user-configurable via Tools page);
 # falls back to the sentinel config's external_db_path when the setting is absent.
@@ -263,6 +275,10 @@ try:
         log.info("Malom DB not configured (no malom_db_path in settings)")
 except Exception as _e:
     log.warning("Malom DB load failed (non-fatal): %s", _e)
+
+# Wire Malom DB into Overseer now that both are loaded.
+if _overseer_advisor is not None and _malom_db is not None:
+    _overseer_advisor.set_db(_malom_db)
 
 # Probability that sentinel (or DB fallback) intervenes, by difficulty level.
 SENTINEL_PROB_BY_DIFF: dict[int, float] = {
@@ -715,6 +731,13 @@ async def sentinel_status():
         "available":    _sentinel_advisor is not None and _sentinel_advisor.is_loaded(),
         "checkpoint":   str(_sentinel_ckpt) if _sentinel_advisor else "",
         "malom_db":     _malom_db is not None and _malom_db.is_available(),
+    }
+
+
+@app.get("/api/overseer_status")
+async def overseer_status():
+    return {
+        "available": _overseer_advisor is not None and _overseer_advisor.is_loaded(),
     }
 
 
@@ -2645,6 +2668,37 @@ async def ws_endpoint(websocket: WebSocket):
                 for mv_e in moves_out:
                     if "sentinel_score" not in mv_e:
                         mv_e["sentinel_score"] = None
+
+                # ── Overseer overlay: per-move pick probabilities ─────────────
+                if _overseer_advisor is not None and _overseer_advisor.is_loaded():
+                    try:
+                        if diag_mode == "capture" and session._pending is not None:
+                            _pend = session._pending
+                            ov_candidates = [
+                                {"from": _pend.get("from"), "to": _pend.get("to"),
+                                 "capture": mv_e.get("to")}
+                                for mv_e in moves_out
+                            ]
+                        else:
+                            ov_candidates = [
+                                {"from": mv_e.get("from"), "to": mv_e.get("to"),
+                                 "capture": mv_e.get("capture")}
+                                for mv_e in moves_out
+                            ]
+                        if ov_candidates:
+                            ov_probs = await asyncio.to_thread(
+                                _overseer_advisor.score_moves,
+                                diag_board, ov_candidates, color,
+                            )
+                            if ov_probs is not None:
+                                for i, mv_e in enumerate(moves_out):
+                                    if i < len(ov_probs):
+                                        mv_e["overseer_prob"] = round(ov_probs[i], 4)
+                    except Exception as _oe:
+                        log.debug("Overseer diagnostic scoring failed: %s", _oe)
+                for mv_e in moves_out:
+                    if "overseer_prob" not in mv_e:
+                        mv_e["overseer_prob"] = None
 
                 await _send(websocket, {
                     "type":    "diagnostic",

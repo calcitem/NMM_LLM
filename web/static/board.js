@@ -381,6 +381,7 @@ export class Board {
     const showTraj     = opts.showTraj !== false;
     const showDB       = opts.showDB  !== false;
     const showSentinel = opts.showSentinel || false;
+    const showOverseer = opts.showOverseer || false;
     const visFrac      = opts.visibilityFraction != null ? opts.visibilityFraction : 1.0;
 
     // Deterministic per-move hash for stable visibility thinning (no flicker on redraws)
@@ -411,6 +412,14 @@ export class Board {
       if (!showSentinel || sentinelScore == null) return null;
       return `S:${Math.round(sentinelScore * 100)}%`;
     };
+    // Helper: overseer pick-probability label ("O:45%"), or null when not applicable.
+    // Suppress when prob < 1% (noise) — k==1 always hits 100% and is also suppressed.
+    const overseerLabel = (prob) => {
+      if (!showOverseer || prob == null) return null;
+      const pct = Math.round(prob * 100);
+      if (pct < 1) return null;
+      return `O:${pct}%`;
+    };
 
     if (phase === "place" || phase === "capture") {
       // Halos on destination squares — no arrows needed (no source)
@@ -418,16 +427,17 @@ export class Board {
         if (visFrac < 1.0 && (_mvHash(mv) % 100) >= Math.round(visFrac * 100)) continue;
         const pos = mv.to;
         if (!pos) continue;
-        const col = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
+        const col  = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
         const slbl = sentinelLabel(mv.sentinel_score);
+        const olbl = overseerLabel(mv.overseer_prob);
 
         if (col) {
           const [x, y] = nodeXY(pos);
           this._dbGroup.appendChild(_el("circle", { cx:x, cy:y, r: PIECE_R + 9,
             fill: "none", stroke: col, "stroke-width": 2.5, opacity: 0.7 }));
         }
-        if (slbl || freq > 0) {
+        if (slbl || olbl || freq > 0) {
           const [x, y] = nodeXY(pos);
           const hasPiece = !!this.grid[pos];
           let ty = hasPiece ? y - PIECE_R - 5 : y - NODE_R - 5;
@@ -449,6 +459,15 @@ export class Board {
               "paint-order":"stroke" });
             t.textContent = slbl;
             this._dbGroup.appendChild(t);
+            ty -= 11;
+          }
+          if (olbl) {
+            const t = _el("text", { x, y: ty, "font-size":"10", "font-weight":"bold",
+              fill: "#f5a623", "text-anchor":"middle", "font-family":"monospace",
+              stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = olbl;
+            this._dbGroup.appendChild(t);
           }
         }
       }
@@ -461,10 +480,11 @@ export class Board {
       for (const mv of toRender) {
         if (visFrac < 1.0 && (_mvHash(mv) % 100) >= Math.round(visFrac * 100)) continue;
         if (!mv.from || !mv.to) continue;
-        const col = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
+        const col  = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
         const slbl = selSrc ? sentinelLabel(mv.sentinel_score) : null;
-        if (!col && freq === 0 && !slbl) continue;
+        const olbl = selSrc ? overseerLabel(mv.overseer_prob)  : null;
+        if (!col && freq === 0 && !slbl && !olbl) continue;
 
         const [x1, y1] = nodeXY(mv.from);
         const [x2, y2] = nodeXY(mv.to);
@@ -487,7 +507,7 @@ export class Board {
             }));
           }
         }
-        if (slbl || freq > 0) {
+        if (slbl || olbl || freq > 0) {
           const [x, y] = nodeXY(mv.to);
           let ty = y - PIECE_R - 4;
           if (freq > 0 && (!selSrc || mv.from === selSrc)) {
@@ -507,6 +527,15 @@ export class Board {
               stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
               "paint-order":"stroke" });
             t.textContent = slbl;
+            this._dbGroup.appendChild(t);
+            ty -= 11;
+          }
+          if (olbl) {
+            const t = _el("text", { x: x + 1, y: ty, "font-size":"10", "font-weight":"bold",
+              fill: "#f5a623", "text-anchor":"middle", "font-family":"monospace",
+              stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = olbl;
             this._dbGroup.appendChild(t);
           }
         }
@@ -551,6 +580,39 @@ export class Board {
             stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
             "paint-order":"stroke" });
           t.textContent = `S:${Math.round(score * 100)}%`;
+          this._dbGroup.appendChild(t);
+        }
+      }
+
+      // Per-source best Overseer pick-probability when no piece is selected.
+      // Shows the highest prob move for each piece as O:XX% above it.
+      // Stacks above the sentinel label when both overlays are active.
+      if (!selSrc && showOverseer) {
+        // Build source → highest prob map and source → has_sentinel_label map in one pass.
+        const srcBestOv   = new Map();  // source → highest overseer_prob
+        const srcHasSent  = new Set();  // sources that have a non-null sentinel_score
+        for (const mv of moves) {
+          if (!mv.from) continue;
+          if (mv.overseer_prob != null) {
+            const prev = srcBestOv.get(mv.from);
+            if (prev == null || mv.overseer_prob > prev)
+              srcBestOv.set(mv.from, mv.overseer_prob);
+          }
+          if (showSentinel && mv.sentinel_score != null)
+            srcHasSent.add(mv.from);
+        }
+        for (const [src, prob] of srcBestOv) {
+          const olbl = overseerLabel(prob);
+          if (!olbl) continue;
+          const [x, y] = nodeXY(src);
+          // Shift up by 11px when a sentinel label is also shown for this source.
+          const sentOffset = srcHasSent.has(src) ? -11 : 0;
+          const t = _el("text", { x, y: y - PIECE_R - 3 + sentOffset,
+            "font-size":"10", "font-weight":"bold",
+            fill: "#f5a623", "text-anchor":"middle", "font-family":"monospace",
+            stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
+            "paint-order":"stroke" });
+          t.textContent = olbl;
           this._dbGroup.appendChild(t);
         }
       }
