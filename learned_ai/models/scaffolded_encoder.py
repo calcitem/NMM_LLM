@@ -3,10 +3,15 @@ the scaffolded meta-policy.
 
 Each legal move is encoded as a 62-float vector that combines the existing
 58-float sentinel feature vector with 4 additional expert-context floats:
-  [58]  sentinel_score: SentinelAdvisor quality score in [0, 1]
-  [59]  h_abs:          evaluate(board_after, player, strength_mode=True) → [0,1]
-  [60]  is_engine_top1: 1.0 if this is the heuristic's best move
-  [61]  h_delta_tanh:   tanh(h_after - h_before) — signed improvement
+  [58]  sentinel_score : SentinelAdvisor quality score in [0, 1]
+  [59]  blended_abs    : 0.5 * h_abs_norm + 0.5 * vn_abs_norm → [0,1]
+                         (heuristic + value-net absolute eval, each mapped from [-1,1])
+  [60]  is_engine_top1 : 1.0 if this is the heuristic's best move
+  [61]  blended_delta  : tanh(0.5 * h_delta + 0.5 * vn_delta)
+                         (blended signed improvement from heuristic and value-net)
+
+When value_net=None (inference without VN), features 59/61 fall back to pure
+heuristic values, preserving exact backward-compatibility with existing checkpoints.
 
 The value head takes a fixed 23-float board-level vector:
   [0:20)  board_context_features (phase, piece counts, mobility, mills)
@@ -14,12 +19,18 @@ The value head takes a fixed 23-float board-level vector:
   [21]    max_sentinel_score across legal moves
   [22]    mean_sentinel_score across legal moves
 
+NOTE — Future Option A: when the next checkpoint is trained from scratch, extend
+MOVE_FEAT_DIM to 64 by adding vn_score_abs and vn_delta_tanh as independent
+features [62] and [63] instead of blending them into [59] and [61].  This gives
+the model clean, separable signals from the two evaluators.  See Learned_ai.md.
+
 Public API
 ----------
   MOVE_FEAT_DIM   = 62
   VALUE_INPUT_DIM = 23
+  VN_BLEND        = 0.5   (weight of value-net signal in features 59 and 61)
 
-  encode_position(board, player, sentinel_advisor, db) -> EncodedPosition
+  encode_position(board, player, sentinel_advisor, db, value_net) -> EncodedPosition
     Returns feat_matrix (k, 62), value_input (23,), legal_moves list, and
     a dict of raw scores for use in reward computation.
 
@@ -43,6 +54,10 @@ from learned_ai.sentinel.feature_builder import (
 
 MOVE_FEAT_DIM: int = _SENT_FEAT_DIM + 4   # 62
 VALUE_INPUT_DIM: int = 23
+
+# Blend weight: fraction of value-net signal mixed into features 59 and 61.
+# 0.0 = pure heuristic (old behaviour); 1.0 = pure value-net; 0.5 = equal blend.
+VN_BLEND: float = 0.5
 
 
 # ── heuristic evaluate import (avoids ai/__init__ heavy imports) ───────────────
@@ -106,6 +121,8 @@ def build_enriched_row(
     h_abs_norm: float,
     is_top1: bool,
     h_delta: float,
+    vn_abs_norm: float = 0.0,
+    vn_delta: float = 0.0,
     move_ctx: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
     """Build one 62-float row for ``move``.
@@ -118,17 +135,26 @@ def build_enriched_row(
     sentinel_score : [0,1] quality from SentinelAdvisor (0.5 if unavailable)
     h_abs_norm     : heuristic eval after move, mapped to [0,1]: (h+1)/2
     is_top1        : True if this is the heuristic's best-ranked move
-    h_delta        : h_after - h_before (raw, tanh-compressed before storage)
-    move_ctx       : dict for build_move_features() counterfactual block:
-                     {all_moves, heuristic_rank, n_legal, heuristic_score_norm}
+    h_delta        : h_after - h_before (raw; used in blend, not tanh'd here)
+    vn_abs_norm    : value-net eval after move, mapped to [0,1]: (vn+1)/2
+                     (0.0 when value_net not available)
+    vn_delta       : vn_after - vn_before (0.0 when value_net not available)
+    move_ctx       : dict for build_move_features() counterfactual block
     """
     base = build_move_features(board, move, player, move_ctx)  # (58,)
+
+    # Feature 59: blend of heuristic and value-net absolute eval
+    blended_abs = (1.0 - VN_BLEND) * h_abs_norm + VN_BLEND * vn_abs_norm
+
+    # Feature 61: blend of heuristic and value-net delta, then tanh
+    blended_delta = (1.0 - VN_BLEND) * h_delta + VN_BLEND * vn_delta
+
     extra = np.array(
         [
             float(np.clip(sentinel_score, 0.0, 1.0)),
-            float(np.clip(h_abs_norm, 0.0, 1.0)),
+            float(np.clip(blended_abs, 0.0, 1.0)),
             1.0 if is_top1 else 0.0,
-            float(math.tanh(h_delta)),
+            float(math.tanh(blended_delta)),
         ],
         dtype=np.float32,
     )
@@ -158,15 +184,18 @@ def build_value_input(
 class EncodedPosition:
     """All data produced by encode_position() for one board state."""
 
-    feat_matrix: np.ndarray         # (k, MOVE_FEAT_DIM) — one row per legal move
-    value_input: np.ndarray         # (VALUE_INPUT_DIM,) — for the value head
-    legal_moves: List[Dict[str, Any]]  # same order as feat_matrix rows
+    feat_matrix: np.ndarray          # (k, MOVE_FEAT_DIM) — one row per legal move
+    value_input: np.ndarray          # (VALUE_INPUT_DIM,) — for the value head
+    legal_moves: List[Dict[str, Any]]   # same order as feat_matrix rows
     # For reward computation:
-    sentinel_scores: List[float]    # raw sentinel quality per move
-    h_scores_abs: List[float]       # evaluate(board_after, player, sm=True) per move
-    h_before: float                 # evaluate(board_before, player, sm=True)
-    h_top1_idx: int                 # index of heuristic's best move
-    db_moves: List[Dict[str, Any]]  # query_all_moves() output (may be empty)
+    sentinel_scores: List[float]     # raw sentinel quality per move
+    h_scores_abs: List[float]        # evaluate(board_after, player, sm=True) per move
+    h_before: float                  # evaluate(board_before, player, sm=True)
+    h_top1_idx: int                  # index of heuristic's best move
+    db_moves: List[Dict[str, Any]]   # query_all_moves() output (may be empty)
+    # Value-net scores (0.0 when value_net=None):
+    vn_scores_abs: List[float] = field(default_factory=list)
+    vn_before: float = 0.0
 
 
 def encode_position(
@@ -174,6 +203,7 @@ def encode_position(
     player: str,
     sentinel_advisor=None,
     db=None,
+    value_net=None,
 ) -> Optional[EncodedPosition]:
     """Encode all legal moves at ``board`` into the scaffolded feature format.
 
@@ -183,6 +213,10 @@ def encode_position(
     player          : mover ("W" or "B")
     sentinel_advisor: SentinelAdvisor or None (scores default to 0.5)
     db              : ExternalSolvedDB or None (DB features default to 0)
+    value_net       : ValueNet or None — when provided, blends VN signal into
+                      features 59 (abs eval) and 61 (delta) via VN_BLEND weight.
+                      Also populates EncodedPosition.vn_scores_abs and .vn_before
+                      for use in per-move reward shaping during training.
 
     Returns None when there are no legal moves (terminal position).
     """
@@ -205,15 +239,24 @@ def encode_position(
     else:
         sentinel_scores = [0.5] * k
 
-    # ── Heuristic 1-ply evaluations ────────────────────────────────────────────
+    # ── Heuristic + Value-net 1-ply evaluations (single loop) ─────────────────
     h_before = _heuristic_eval(board, player)
+    vn_before = float(value_net.predict(board, player)) if value_net is not None else 0.0
+
     h_scores_abs: List[float] = []
+    vn_scores_abs: List[float] = []
+
     for mv in legal_moves:
         try:
             board_after = board.apply_move(mv)
             h_scores_abs.append(_heuristic_eval(board_after, player))
+            if value_net is not None:
+                vn_scores_abs.append(float(value_net.predict(board_after, player)))
+            else:
+                vn_scores_abs.append(0.0)
         except Exception:
             h_scores_abs.append(h_before)
+            vn_scores_abs.append(vn_before)
 
     # Rank moves by heuristic score (higher = better for player)
     sorted_by_h = sorted(range(k), key=lambda i: -h_scores_abs[i])
@@ -245,7 +288,9 @@ def encode_position(
             "heuristic_score_norm": h_norms[i],
         }
         h_abs_norm = (h_scores_abs[i] + 1.0) / 2.0   # map [-1,1] to [0,1]
-        h_delta = h_scores_abs[i] - h_before
+        h_delta    = h_scores_abs[i] - h_before
+        vn_abs_norm = (vn_scores_abs[i] + 1.0) / 2.0  # map [-1,1] to [0,1]
+        vn_delta    = vn_scores_abs[i] - vn_before
         row = build_enriched_row(
             board,
             mv,
@@ -254,6 +299,8 @@ def encode_position(
             h_abs_norm=h_abs_norm,
             is_top1=(i == h_top1_idx),
             h_delta=h_delta,
+            vn_abs_norm=vn_abs_norm,
+            vn_delta=vn_delta,
             move_ctx=ctx,
         )
         rows.append(row)
@@ -270,4 +317,6 @@ def encode_position(
         h_before=h_before,
         h_top1_idx=h_top1_idx,
         db_moves=db_moves,
+        vn_scores_abs=vn_scores_abs,
+        vn_before=vn_before,
     )

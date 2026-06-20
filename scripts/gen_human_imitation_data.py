@@ -104,6 +104,19 @@ def run(args: argparse.Namespace) -> None:
     else:
         print("[hgen] No Malom DB — DB features will be 0")
 
+    # ── load Value Net (optional) ──────────────────────────────────────────────
+    value_net = None
+    vn_path = getattr(args, "value_net", None) or str(_ROOT / "data" / "value_net.npz")
+    if vn_path and Path(vn_path).exists():
+        try:
+            from ai.value_net import ValueNet as _ValueNet
+            value_net = _ValueNet.load(vn_path)
+            print(f"[hgen] Value net loaded from {vn_path}")
+        except Exception as e:
+            print(f"[hgen] Value net load failed ({e}) — VN features will be 0")
+    else:
+        print("[hgen] No value net — VN features will be 0")
+
     # ── scan game files ────────────────────────────────────────────────────────
     games_dir = Path(args.games_dir)
     game_files = sorted(games_dir.glob("*.jsonl"))
@@ -113,6 +126,7 @@ def run(args: argparse.Namespace) -> None:
     all_value_inputs:  list[np.ndarray] = []
     all_chosen_idxs:   list[int]        = []
     all_h_evals:       list[float]      = []
+    all_vn_evals:      list[float]      = []
     all_h_top1_idxs:   list[int]        = []
     all_weights:       list[float]      = []
     all_deviates:      list[bool]       = []
@@ -167,7 +181,7 @@ def run(args: argparse.Namespace) -> None:
                     n_errors += 1
                     continue
 
-                enc = encode_position(board, human_color, sentinel_advisor=sentinel, db=db)
+                enc = encode_position(board, human_color, sentinel_advisor=sentinel, db=db, value_net=value_net)
                 if enc is None or not enc.legal_moves:
                     continue
 
@@ -189,6 +203,7 @@ def run(args: argparse.Namespace) -> None:
                 all_value_inputs.append(enc.value_input)
                 all_chosen_idxs.append(chosen_idx)
                 all_h_evals.append(enc.h_before)
+                all_vn_evals.append(enc.vn_before)
                 all_h_top1_idxs.append(enc.h_top1_idx)
                 all_weights.append(weight)
                 all_deviates.append(deviates)
@@ -217,6 +232,7 @@ def run(args: argparse.Namespace) -> None:
         value_inputs=np.array(all_value_inputs,  dtype=np.float32),
         chosen_idxs= np.array(all_chosen_idxs,   dtype=np.int32),
         h_evals=     np.array(all_h_evals,        dtype=np.float32),
+        vn_evals=    np.array(all_vn_evals,        dtype=np.float32),
         h_top1_idxs= np.array(all_h_top1_idxs,   dtype=np.int32),
         weights=     np.array(all_weights,         dtype=np.float32),
         deviates=    np.array(all_deviates,        dtype=bool),
@@ -244,6 +260,7 @@ def main() -> None:
         default=str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"),
     )
     p.add_argument("--malom",       default="")
+    p.add_argument("--value-net",   type=str,   default=str(_ROOT / "data" / "value_net.npz"))
     p.add_argument("--won-weight",  type=float, default=1.0)
     p.add_argument("--draw-weight", type=float, default=0.3)
     args = p.parse_args()

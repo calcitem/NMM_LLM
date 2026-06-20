@@ -25,11 +25,13 @@ def _move_key(mv: dict) -> tuple:
 class OverseerAdvisor:
     """Wraps ScaffoldedPolicyNet for per-move probability scoring."""
 
-    def __init__(self, model, ckpt_path: str, sentinel_advisor=None, db=None) -> None:
+    def __init__(self, model, ckpt_path: str, sentinel_advisor=None, db=None,
+                 value_net=None) -> None:
         self._model = model
         self._ckpt_path = ckpt_path
         self._sentinel = sentinel_advisor
         self._db = db
+        self._value_net = value_net
         model.eval()
 
     def is_loaded(self) -> bool:
@@ -40,6 +42,9 @@ class OverseerAdvisor:
 
     def set_db(self, db) -> None:
         self._db = db
+
+    def set_value_net(self, value_net) -> None:
+        self._value_net = value_net
 
     def score_moves(self, board, candidates: list[dict], color: str) -> Optional[list[float]]:
         """Return per-candidate pick probabilities (sum to 1.0).
@@ -58,7 +63,8 @@ class OverseerAdvisor:
             from learned_ai.models.scaffolded_encoder import encode_position
             enc = encode_position(board, color,
                                   sentinel_advisor=self._sentinel,
-                                  db=self._db)
+                                  db=self._db,
+                                  value_net=self._value_net)
             if enc is None or not enc.legal_moves:
                 return None
 
@@ -95,6 +101,7 @@ def load_overseer(
     ckpt_path: Optional[str] = None,
     sentinel_advisor=None,
     db=None,
+    value_net=None,
 ) -> Optional[OverseerAdvisor]:
     """Load OverseerAdvisor from checkpoint.  Returns None on any failure.
 
@@ -139,7 +146,8 @@ def load_overseer(
         stage = ckpt.get("stage", "unknown")
         log.info("OverseerAdvisor: loaded %s (stage=%s)", chosen, stage)
         return OverseerAdvisor(model, str(chosen),
-                               sentinel_advisor=sentinel_advisor, db=db)
+                               sentinel_advisor=sentinel_advisor, db=db,
+                               value_net=value_net)
     except Exception as e:
         log.warning("OverseerAdvisor: failed to load %s: %s", chosen, e)
         return None

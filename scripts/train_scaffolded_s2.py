@@ -12,6 +12,8 @@ Per-move shaped rewards (computed each learner turn):
                  Winning Malom moves — more reward for shorter distance-to-win
   r_malom_trap = DELTA                       if resulting opp position is Malom "loss"
                  Opponent is now provably losing — big signal
+  r_value_net  = VN_BETA * tanh(vn_after - vn_before)
+                 Did the value-net evaluation improve after our move?
 
 Game-level retroactive rescoring (after game ends):
   Each move in the trajectory receives += LAMBDA * outcome * decay^(plies_remaining)
@@ -78,6 +80,7 @@ GAMMA        = 0.25   # per-move: Malom winning-move bonus
 DELTA        = 0.15   # per-move: Malom trap reward (opp now loses)
 LAMBDA       = 0.50   # game-level retroactive scale
 DECAY        = 0.98   # retroactive reward decay (later moves get more credit)
+VN_BETA      = 0.10   # per-move: value-net position improvement (same weight as heuristic)
 
 WIN_REWARD   = 1.0
 LOSS_REWARD  = -1.0
@@ -137,6 +140,11 @@ def _compute_per_move_reward(
         # h_scores_abs[i] is h_after for move i; enc_after.h_before is the same thing
         h_delta_actual = enc.h_scores_abs[chosen_idx] - enc.h_before
         r += BETA * math.tanh(h_delta_actual)
+
+    # Value-net component: did VN eval improve?
+    if enc.vn_scores_abs:
+        vn_delta = enc.vn_scores_abs[chosen_idx] - enc.vn_before
+        r += VN_BETA * math.tanh(vn_delta)
 
     # Malom components
     if enc.db_moves:
@@ -211,6 +219,19 @@ def run(args: argparse.Namespace) -> None:
             print(f"[s2] Malom DB failed ({e})")
     if db is None:
         print("[s2] Malom DB unavailable — Malom rewards = 0")
+
+    # ── Value net ──────────────────────────────────────────────────────────────────
+    value_net = None
+    vn_path = args.value_net or str(_ROOT / "data" / "value_net.npz")
+    if vn_path and Path(vn_path).exists():
+        try:
+            from ai.value_net import ValueNet as _ValueNet
+            value_net = _ValueNet.load(vn_path)
+            print(f"[s2] Value net loaded: {vn_path}")
+        except Exception as e:
+            print(f"[s2] Value net load failed ({e}) — VN features will be 0")
+    else:
+        print("[s2] No value net — VN features will be 0")
 
     # ── Model ─────────────────────────────────────────────────────────────────
     out_dir = Path(args.out_dir)
@@ -294,7 +315,7 @@ def run(args: argparse.Namespace) -> None:
 
             if player == learner_color:
                 # ── Learner turn ───────────────────────────────────────────────
-                enc = encode_position(board, player, sentinel_advisor=sentinel, db=db)
+                enc = encode_position(board, player, sentinel_advisor=sentinel, db=db, value_net=value_net)
                 if enc is None or not enc.legal_moves:
                     outcome = LOSS_REWARD
                     done = True
@@ -322,7 +343,7 @@ def run(args: argparse.Namespace) -> None:
                 # Encode next state for value bootstrapping
                 enc_after = encode_position(
                     board_after, opp_color,
-                    sentinel_advisor=sentinel, db=db
+                    sentinel_advisor=sentinel, db=db, value_net=value_net
                 )
 
                 # Per-move reward
@@ -465,6 +486,7 @@ def main() -> None:
         default=str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"),
     )
     p.add_argument("--malom",     default="", type=str)
+    p.add_argument("--value-net", default=str(_ROOT / "data" / "value_net.npz"), type=str)
     p.add_argument("--ppo",       action="store_true")
     p.add_argument("--max-games", type=int,   default=10000)
     p.add_argument("--seed",      type=int,   default=42)

@@ -245,7 +245,8 @@ except Exception as _le:
 _overseer_advisor = None
 try:
     from learned_ai.models.overseer import load_overseer as _load_overseer
-    _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor)
+    _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor,
+                                        value_net=_value_net)
     if _overseer_advisor is not None:
         log.info("Overseer advisor loaded")
     else:

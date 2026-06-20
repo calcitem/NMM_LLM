@@ -53,15 +53,21 @@ from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
 def load_dataset(npz_path: str):
     """Load the .npz produced by gen_imitation_data.py.
 
-    Returns (feat_matrices, value_inputs, chosen_idxs, h_evals) as numpy arrays.
+    Returns (feat_matrices, value_inputs, chosen_idxs, h_evals, vn_evals).
     feat_matrices is a 1-D object array of variable-size (k_i, 62) arrays.
+    vn_evals is all zeros when the dataset was generated without a value net.
     """
     data = np.load(npz_path, allow_pickle=True)
     feat_matrices = data["feat_matrices"]     # (N,) object array of (k, 62)
     value_inputs  = data["value_inputs"]      # (N, 23)
     chosen_idxs   = data["chosen_idxs"]       # (N,) int
     h_evals       = data["h_evals"]           # (N,) float
-    return feat_matrices, value_inputs, chosen_idxs, h_evals
+    # vn_evals present when dataset was generated with --value-net; zeros otherwise
+    if "vn_evals" in data:
+        vn_evals = data["vn_evals"]           # (N,) float
+    else:
+        vn_evals = np.zeros(len(h_evals), dtype=np.float32)
+    return feat_matrices, value_inputs, chosen_idxs, h_evals, vn_evals
 
 
 def train(args: argparse.Namespace) -> None:
@@ -70,9 +76,10 @@ def train(args: argparse.Namespace) -> None:
 
     # ── Load data ──────────────────────────────────────────────────────────────
     print(f"[s1] Loading {args.data} ...")
-    feat_matrices, value_inputs, chosen_idxs, h_evals = load_dataset(args.data)
+    feat_matrices, value_inputs, chosen_idxs, h_evals, vn_evals = load_dataset(args.data)
     N = len(chosen_idxs)
-    print(f"[s1] {N} positions loaded.")
+    has_vn = vn_evals.any()
+    print(f"[s1] {N} positions loaded (value-net targets: {'yes' if has_vn else 'no'})")
 
     # Train/val split
     idxs = list(range(N))
@@ -118,7 +125,8 @@ def train(args: argparse.Namespace) -> None:
                 # Cross-entropy with one-hot target at chosen_idx
                 policy_terms.append(-log_p[ci])
                 vi_list.append(value_inputs[i])
-                hev_list.append(float(h_evals[i]))
+                # Blend heuristic and value-net evals as value head target
+                hev_list.append(0.5 * float(h_evals[i]) + 0.5 * float(vn_evals[i]))
 
             policy_loss = torch.stack(policy_terms).mean()
 
@@ -162,7 +170,7 @@ def train(args: argparse.Namespace) -> None:
                     log_p  = F.log_softmax(logits, dim=-1)
                     p_terms.append(-log_p[ci])
                     vi_list2.append(value_inputs[i])
-                    hev2.append(float(h_evals[i]))
+                    hev2.append(0.5 * float(h_evals[i]) + 0.5 * float(vn_evals[i]))
                 val_pl += float(torch.stack(p_terms).mean().item())
                 vi_t2   = torch.tensor(np.stack(vi_list2), dtype=torch.float32).to(device)
                 vp2     = model.value(vi_t2)

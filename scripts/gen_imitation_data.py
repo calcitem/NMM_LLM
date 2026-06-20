@@ -89,6 +89,19 @@ def run(args: argparse.Namespace) -> None:
     else:
         print("[gen] No Malom DB — DB counterfactual features will be 0")
 
+    # ── load Value Net (optional) ──────────────────────────────────────────────
+    value_net = None
+    vn_path = getattr(args, "value_net", None) or str(_ROOT / "data" / "value_net.npz")
+    if vn_path and Path(vn_path).exists():
+        try:
+            from ai.value_net import ValueNet as _ValueNet
+            value_net = _ValueNet.load(vn_path)
+            print(f"[gen] Value net loaded from {vn_path}")
+        except Exception as e:
+            print(f"[gen] Value net load failed ({e}) — VN features will be 0")
+    else:
+        print("[gen] No value net — VN features will be 0")
+
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -97,6 +110,7 @@ def run(args: argparse.Namespace) -> None:
     all_value_inputs:  list[np.ndarray] = []
     all_chosen_idxs:   list[int]        = []
     all_h_evals:       list[float]      = []
+    all_vn_evals:      list[float]      = []
 
     t_start = time.time()
     wins_w = wins_b = draws = 0
@@ -119,7 +133,7 @@ def run(args: argparse.Namespace) -> None:
 
         board = BoardState.new_game()
         ply   = 0
-        game_positions: list[tuple[np.ndarray, np.ndarray, int, float]] = []
+        game_positions: list[tuple[np.ndarray, np.ndarray, int, float, float]] = []
 
         while ply < args.max_ply:
             terminal, winner = is_terminal(board)
@@ -136,7 +150,7 @@ def run(args: argparse.Namespace) -> None:
             agent  = ai_w if player == "W" else ai_b
 
             # Encode position BEFORE move
-            enc = encode_position(board, player, sentinel_advisor=sentinel, db=db)
+            enc = encode_position(board, player, sentinel_advisor=sentinel, db=db, value_net=value_net)
             if enc is None or not enc.legal_moves:
                 draws += 1
                 break
@@ -159,6 +173,7 @@ def run(args: argparse.Namespace) -> None:
                 enc.value_input,
                 chosen_idx,
                 enc.h_before,
+                enc.vn_before,  # NEW
             ))
 
             board = board.apply_move(chosen_move)
@@ -166,11 +181,12 @@ def run(args: argparse.Namespace) -> None:
         else:
             draws += 1
 
-        for feat_matrix, value_input, cidx, h_eval in game_positions:
+        for feat_matrix, value_input, cidx, h_eval, vn_eval in game_positions:
             all_feat_matrices.append(feat_matrix)
             all_value_inputs.append(value_input)
             all_chosen_idxs.append(cidx)
             all_h_evals.append(h_eval)
+            all_vn_evals.append(vn_eval)  # NEW
 
         if (game_i + 1) % 100 == 0:
             elapsed = time.time() - t_start
@@ -195,6 +211,7 @@ def run(args: argparse.Namespace) -> None:
         value_inputs=np.array(all_value_inputs, dtype=np.float32),
         chosen_idxs=np.array(all_chosen_idxs, dtype=np.int32),
         h_evals=np.array(all_h_evals, dtype=np.float32),
+        vn_evals=np.array(all_vn_evals, dtype=np.float32),
     )
     elapsed = time.time() - t_start
     print(f"\n[gen] Saved {n} positions to {out_path}  ({elapsed:.0f}s total)")
@@ -209,7 +226,8 @@ def main() -> None:
                    default=str(_ROOT / "learned_ai" / "data" / "imitation_scaffolded.npz"))
     p.add_argument("--sentinel", type=str,
                    default=str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"))
-    p.add_argument("--malom",    type=str,  default="")
+    p.add_argument("--malom",     type=str,  default="")
+    p.add_argument("--value-net", type=str,  default=str(_ROOT / "data" / "value_net.npz"))
     p.add_argument("--max-ply",  type=int,  default=300)
     p.add_argument("--seed",     type=int,  default=42)
     args = p.parse_args()

@@ -68,6 +68,7 @@ GAMMA  = 0.25
 DELTA  = 0.15
 LAMBDA = 0.50
 DECAY  = 0.98
+VN_BETA = 0.10
 
 WIN_REWARD  = 1.0
 LOSS_REWARD = -1.0
@@ -116,6 +117,10 @@ def _per_move_reward(enc, chosen_idx: int, db, board_after) -> float:
         r += ALPHA * (enc.sentinel_scores[chosen_idx] - mean_s)
     h_delta = enc.h_scores_abs[chosen_idx] - enc.h_before
     r += BETA * math.tanh(h_delta)
+    # Value-net component
+    if enc.vn_scores_abs:
+        vn_delta = enc.vn_scores_abs[chosen_idx] - enc.vn_before
+        r += VN_BETA * math.tanh(vn_delta)
     if enc.db_moves:
         mv_key = _move_key(enc.legal_moves[chosen_idx])
         entry = next(
@@ -221,6 +226,19 @@ def run(args: argparse.Namespace) -> None:
     if db is None:
         print("[s3] WARNING: Malom DB unavailable — SL signal will be zero (not recommended)")
 
+    # ── Value net ──────────────────────────────────────────────────────────────────
+    value_net = None
+    vn_path = args.value_net or str(_ROOT / "data" / "value_net.npz")
+    if vn_path and Path(vn_path).exists():
+        try:
+            from ai.value_net import ValueNet as _ValueNet
+            value_net = _ValueNet.load(vn_path)
+            print(f"[s3] Value net loaded: {vn_path}")
+        except Exception as e:
+            print(f"[s3] Value net load failed ({e}) — VN features will be 0")
+    else:
+        print("[s3] No value net — VN features will be 0")
+
     # ── Model ─────────────────────────────────────────────────────────────────
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -286,7 +304,7 @@ def run(args: argparse.Namespace) -> None:
             player = board.turn
 
             if player == learner_color:
-                enc = encode_position(board, player, sentinel_advisor=sentinel, db=db)
+                enc = encode_position(board, player, sentinel_advisor=sentinel, db=db, value_net=value_net)
                 if enc is None or not enc.legal_moves:
                     outcome = LOSS_REWARD
                     done = True
@@ -320,7 +338,7 @@ def run(args: argparse.Namespace) -> None:
 
                 enc_after = encode_position(
                     board_after, opp_color,
-                    sentinel_advisor=sentinel, db=db,
+                    sentinel_advisor=sentinel, db=db, value_net=value_net,
                 )
                 if enc_after is not None and enc_after.legal_moves:
                     next_mf = enc_after.feat_matrix
@@ -445,6 +463,7 @@ def main() -> None:
         default=str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"),
     )
     p.add_argument("--malom",     default="", type=str)
+    p.add_argument("--value-net", default=str(_ROOT / "data" / "value_net.npz"), type=str)
     p.add_argument("--ppo",       action="store_true")
     p.add_argument("--max-games", type=int, default=5000)
     p.add_argument("--diff",      type=int, default=3)

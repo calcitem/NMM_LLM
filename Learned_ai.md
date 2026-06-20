@@ -99,9 +99,24 @@ replace it.
 | [20:40) | `feature_builder.move_features()` | From/to/capture indices, mill flags, resulting state |
 | [40:58) | `feature_builder.counterfactual_features()` | Heuristic rank, normalised score, DB win/loss fracs, DTM quality |
 | [58] | `SentinelAdvisor.advise().move_scores[i]` | Sentinel's quality score for this move, [0,1] |
-| [59] | `evaluate(board_after, player, strength_mode=True)` → mapped [0,1] | Absolute heuristic evaluation of the resulting position |
+| [59] | `0.5 * h_abs_norm + 0.5 * vn_abs_norm` | Blended absolute eval of resulting position (heuristic + value-net, each mapped [0,1]) |
 | [60] | `is_top1` | 1.0 if this is the heuristic engine's #1 ranked move |
-| [61] | `tanh(h_after − h_before)` | Heuristic improvement after this move |
+| [61] | `tanh(0.5 * h_delta + 0.5 * vn_delta)` | Blended signed improvement (heuristic + value-net delta, then tanh) |
+
+> **Option B blend** — features 59 and 61 blend the value net (VN_BLEND=0.5) into
+> the existing heuristic slots to preserve the 62-dim checkpoint format.  When
+> `value_net=None`, they fall back to pure heuristic values (backward-compatible
+> with `s1b/best.pt` at inference).
+>
+> **Future — Option A** (implement when next checkpoint is trained from scratch):
+> Extend to 64 floats — add `vn_score_abs` as feature [62] and `vn_delta_tanh` as
+> feature [63], keeping heuristic features [59] and [61] pure.  This gives the model
+> a clean, separable view of both evaluators.  Changes required:
+> - `scaffolded_encoder.py`: `MOVE_FEAT_DIM = 64`; add vn features as independent
+>   entries instead of blending; remove `VN_BLEND`
+> - `scaffolded_net.py`: no change (reads `move_feat_dim` from config)
+> - All training/gen scripts: no change (they already pass `value_net`)
+> - Old 62-dim checkpoints will be incompatible — start a fresh Stage 1 run
 
 ### Value head input (23 floats)
 
@@ -146,6 +161,10 @@ r_sentinel   = 0.15 × (sentinel_score_played − mean_sentinel_score)
 
 r_heuristic  = 0.10 × tanh(h_after − h_before)
                Did the heuristic evaluation improve after our move?
+
+r_value_net  = 0.10 × tanh(vn_after − vn_before)
+               Did the value-net evaluation improve after our move?
+               (fires only when --value-net is provided; zero otherwise)
 
 r_malom_win  = 0.25 × dtm_quality(move)    if Malom says this move wins
                dtm_quality = 1 − dtm/100, so win-in-1 ≈ 0.99, win-in-50 ≈ 0.50
@@ -203,7 +222,8 @@ by checking that policy cross-entropy loss decreases and val accuracy > 20%.
 # Generate dataset (~2h for 2000 games)
 .venv/bin/python scripts/gen_imitation_data.py \
     --games 2000 --diff 3 \
-    --sentinel learned_ai/sentinel/checkpoints/best.pt
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz
 
 # Train imitation model (~10 min)
 .venv/bin/python scripts/train_scaffolded_s1.py \
@@ -243,7 +263,8 @@ preserve Stage 1's position evaluation.  Weighted cross-entropy loss, LR=3e-5, 5
 **Commands:**
 ```bash
 # Extract human game data (run once, ~45s — re-run after new games are played)
-.venv/bin/python scripts/gen_human_imitation_data.py
+.venv/bin/python scripts/gen_human_imitation_data.py \
+    --value-net data/value_net.npz
 # Output → learned_ai/data/human_imitation.npz
 
 # Fine-tune from Stage 1 checkpoint (~1 min)
@@ -279,6 +300,7 @@ backbone — a fresh model that needs to learn.  1e-4 is appropriate.
 ```bash
 .venv/bin/python scripts/train_scaffolded_s2.py \
     --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz \
     --max-games 10000
 
 # Resumes automatically from s1/best.pt
@@ -318,6 +340,7 @@ It is zero in opening positions where the DB is unavailable.
 .venv/bin/python scripts/train_scaffolded_s3.py \
     --malom /path/to/malom/db \
     --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz \
     --diff 3
 
 # Resumes from s2/best.pt automatically
