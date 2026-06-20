@@ -230,13 +230,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Overseer chip + settings row availability
   fetch("/api/overseer_status").then(r => r.json()).then(s => {
-    const chip   = $("diag-btn-overseer");
-    const status = $("diag-overseer-status");
-    const row    = $("row-overseer");
-    const chk    = $("chk-overseer");
+    const chip      = $("diag-btn-overseer");
+    const status    = $("diag-overseer-status");
+    const row       = $("row-overseer");
+    const chk       = $("chk-overseer");
+    const rowPlayer = $("row-overseer-player");
+    const chkPlayer = $("chk-overseer-player");
     if (s.available) {
       if (row) row.style.display = "flex";
       if (chk) chk.disabled = false;
+      if (rowPlayer) rowPlayer.style.display = "flex";
+      if (chkPlayer) chkPlayer.disabled = false;
     } else {
       if (chip)   { chip.disabled = true; chip.title = "Overseer model not loaded"; }
       if (status) status.style.display = "inline";
@@ -765,6 +769,7 @@ function startNewGame() {
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
+      use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
       ai_weights:   _getWeights(),
       player_name:  playerName,
     }));
@@ -1054,6 +1059,7 @@ function startSetupGame() {
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
+      use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
       ai_weights:   _getWeights(),
       positions:    positions,
       phase:        $("sel-setup-phase").value,
@@ -2502,6 +2508,7 @@ function _handleTournamentNext(msg) {
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
+      use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
     }));
   }
 }

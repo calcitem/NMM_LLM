@@ -669,6 +669,8 @@ class Session:
         self.ponder_manager: Optional[PonderManager] = None
         # Diagnostic overlay: board after move-but-before-capture, used by get_diagnostic
         self._proj_board: Optional[BoardState] = None
+        # Testing: Overseer drives every AI move instead of the engine
+        self.use_overseer_player: bool = False
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -1849,6 +1851,20 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
 
+    # Overseer player mode: replace engine's choice with policy-network argmax.
+    if session.use_overseer_player and _overseer_advisor is not None and _overseer_advisor.is_loaded():
+        try:
+            legal = get_all_legal_moves(board)
+            if legal:
+                ov_cands = [{"from": m.get("from"), "to": m.get("to"), "capture": m.get("capture")} for m in legal]
+                ov_probs = await asyncio.to_thread(_overseer_advisor.score_moves, board, ov_cands, board.turn)
+                if ov_probs:
+                    best = max(range(len(ov_probs)), key=lambda i: ov_probs[i])
+                    move = legal[best]
+                    log.info("Overseer player: %s (prob=%.3f)", move, ov_probs[best])
+        except Exception as _oe:
+            log.debug("Overseer player override failed: %s", _oe)
+
     elapsed = _time.time() - t0
     log.info("AI turn end    move=%s elapsed=%.2fs ponder_hit=%s", move, elapsed, _ponder_hit is not None)
 
@@ -2084,6 +2100,7 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))  # min opportunity gap to intercede
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
+                use_overseer_player = bool(msg.get("use_overseer_player", False))
                 settings  = _load_settings()
 
                 engine   = GameEngine(human_color=hc)
@@ -2181,6 +2198,7 @@ async def ws_endpoint(websocket: WebSocket):
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
                 session.is_tournament_game = is_tournament
+                session.use_overseer_player = use_overseer_player and not vs_human
                 if not vs_human:
                     session.adaptive = adaptive
                     session.hint_cap = _hint_cap_for_elo(player_elo)
@@ -2223,6 +2241,7 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
+                use_overseer_player = bool(msg.get("use_overseer_player", False))
                 setup_fen_str = msg.get("setup_fen", "")
                 if setup_fen_str:
                     setup_board = BoardState.from_fen_string(setup_fen_str)
@@ -2320,6 +2339,7 @@ async def ws_endpoint(websocket: WebSocket):
                         await asyncio.to_thread(coord.on_game_start)
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
+                session.use_overseer_player = use_overseer_player and not vs_human
                 if not vs_human and coord is None and game_ai is not None:
                     _nollm_book = OpeningBook()
                     session.opening_recognizer = OpeningRecognizer(_nollm_book)
