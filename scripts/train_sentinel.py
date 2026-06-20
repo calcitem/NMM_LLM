@@ -127,6 +127,8 @@ def main() -> int:
                    help="Weight for contrastive ranking loss term (default 0.3)")
     p.add_argument("--curriculum", action="store_true",
                    help="Two-phase training: phase 1 freezes trunk (high LR), phase 2 full net (low LR)")
+    p.add_argument("--lr-phase1", type=float, default=None,
+                   help="Learning rate for curriculum phase 1 (default: config.lr = 1e-3)")
     p.add_argument("--lr-phase2", type=float, default=1e-4,
                    help="Learning rate for curriculum phase 2 (default 1e-4)")
     p.add_argument("--epochs-phase1", type=int, default=None,
@@ -297,8 +299,9 @@ def main() -> int:
     if args.curriculum:
         p1_epochs = args.epochs_phase1 if args.epochs_phase1 is not None else max(1, total_epochs // 3)
         p2_epochs = total_epochs - p1_epochs
-        phase_schedule = [(1, p1_epochs, True, config.lr), (2, p2_epochs, False, args.lr_phase2)]
-        print(f"Curriculum: phase 1 = {p1_epochs} epochs (frozen trunk, lr={config.lr})"
+        p1_lr = args.lr_phase1 if args.lr_phase1 is not None else config.lr
+        phase_schedule = [(1, p1_epochs, True, p1_lr), (2, p2_epochs, False, args.lr_phase2)]
+        print(f"Curriculum: phase 1 = {p1_epochs} epochs (frozen trunk, lr={p1_lr})"
               f"  phase 2 = {p2_epochs} epochs (full, lr={args.lr_phase2})")
     else:
         phase_schedule = [(1, total_epochs, False, config.lr)]

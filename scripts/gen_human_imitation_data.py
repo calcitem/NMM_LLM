@@ -4,19 +4,26 @@ Reads all human vs AI game records from data/games/*.jsonl and encodes every
 move made by the human player.  Games where the human won are weighted 1.0;
 draws are weighted 0.3; lost games are skipped.
 
-Positions where the human deviated from the heuristic's top-1 choice in a won
-game are flagged (deviates=True) — these are the highest-signal samples for
-Stage 1.5 fine-tuning.
+Label distribution is a soft probability over legal moves, blending:
+  (1 - HUMAN_ALPHA) * malom_or_sentinel_dist  +  HUMAN_ALPHA * one_hot(human_move)
+
+This means the model learns to prefer Malom-winning moves while also crediting
+the human's actual choice.  If the human played a Malom-winning move both
+signals agree, producing a strongly peaked label on that move.
+
+When no Malom data is available for a position, sentinel scores supply the
+background distribution.
 
 Output .npz arrays
 ------------------
   feat_matrices : (N,) object array of (k, 62) float32
   value_inputs  : (N, 23) float32
-  chosen_idxs   : (N,) int32
-  h_evals       : (N,) float32   — h_before for value-head supervision
-  h_top1_idxs   : (N,) int32     — heuristic's best move index
-  weights       : (N,) float32   — 1.0 (won) or 0.3 (draw)
-  deviates      : (N,) bool      — True if human didn't play heuristic top-1
+  label_dists   : (N,) object array of (k,) float32  — soft supervision target
+  chosen_idxs   : (N,) int32   — human move index (for deviate flag)
+  h_evals       : (N,) float32 — h_before for value-head supervision
+  h_top1_idxs   : (N,) int32  — heuristic's best move index
+  weights       : (N,) float32 — 1.0 (won) or 0.3 (draw)
+  deviates      : (N,) bool    — True if human didn't play heuristic top-1
 
 Usage
 -----
@@ -48,6 +55,15 @@ sys.path.insert(0, str(_ROOT))
 from game.board import BoardState
 from learned_ai.models.scaffolded_encoder import encode_position, MOVE_FEAT_DIM, VALUE_INPUT_DIM
 from learned_ai.sentinel.infer import load_advisor
+from learned_ai.sentinel.labels import dtm_quality
+
+# ── Soft-label hyperparameters ─────────────────────────────────────────────────
+# Malom: per-category multiplier applied before dtm_quality
+_WDL_SCALE = {"win": 1.0, "draw": 0.4, "loss": 0.1}
+# Sentinel fallback: softmax temperature (lower = sharper distribution)
+_SENTINEL_TEMP = 0.5
+# Human move bonus: fraction of final distribution pinned to human move
+_HUMAN_ALPHA = 0.4
 
 
 def _load_settings() -> dict:
@@ -59,7 +75,6 @@ def _load_settings() -> dict:
 
 
 def _load_game_file(path: Path) -> list[dict]:
-    """Load one .jsonl file as a list of game dicts (handles single-JSON and JSONL)."""
     content = path.read_text().strip()
     if not content:
         return []
@@ -71,6 +86,54 @@ def _load_game_file(path: Path) -> list[dict]:
 
 def _move_key(mv: dict) -> tuple:
     return (mv.get("from"), mv.get("to"), mv.get("capture"))
+
+
+def _compute_soft_label(
+    db_moves: list,
+    legal_moves: list,
+    sentinel_scores: list,
+) -> np.ndarray:
+    """Compute (k,) soft probability distribution from Malom DB or sentinel scores."""
+    k = len(legal_moves)
+
+    if db_moves:
+        db_lookup = {_move_key(e.get("move", {})): e for e in db_moves}
+        weights = np.zeros(k, dtype=np.float64)
+        has_db = False
+        for i, mv in enumerate(legal_moves):
+            entry = db_lookup.get(_move_key(mv))
+            if entry is not None:
+                wdl = entry.get("wdl", "unknown")
+                dtm = entry.get("dtm")
+                if wdl in _WDL_SCALE:
+                    weights[i] = _WDL_SCALE[wdl] * dtm_quality(wdl, dtm)
+                    has_db = True
+                else:
+                    weights[i] = max(float(sentinel_scores[i]), 1e-6) if sentinel_scores else 0.5
+            else:
+                weights[i] = max(float(sentinel_scores[i]), 1e-6) if sentinel_scores else 0.5
+
+        if has_db and weights.sum() > 0:
+            return (weights / weights.sum()).astype(np.float32)
+
+    # Sentinel fallback: temperature softmax
+    s = np.array(sentinel_scores if sentinel_scores else [1.0 / k] * k, dtype=np.float64)
+    s = np.exp((s - s.max()) / _SENTINEL_TEMP)
+    return (s / s.sum()).astype(np.float32)
+
+
+def _compute_human_soft_label(
+    db_moves: list,
+    legal_moves: list,
+    sentinel_scores: list,
+    human_idx: int,
+) -> np.ndarray:
+    """Blend Malom/sentinel soft label with a bonus on the human's move."""
+    soft = _compute_soft_label(db_moves, legal_moves, sentinel_scores)
+    one_hot = np.zeros(len(legal_moves), dtype=np.float32)
+    one_hot[human_idx] = 1.0
+    # (1-alpha)*soft + alpha*one_hot sums to 1 since both components do
+    return (1.0 - _HUMAN_ALPHA) * soft + _HUMAN_ALPHA * one_hot
 
 
 def run(args: argparse.Namespace) -> None:
@@ -100,9 +163,9 @@ def run(args: argparse.Namespace) -> None:
             else:
                 db = None
         except Exception as e:
-            print(f"[hgen] Malom DB load failed ({e}) — skipping")
+            print(f"[hgen] Malom DB load failed ({e}) — sentinel fallback labels")
     else:
-        print("[hgen] No Malom DB — DB features will be 0")
+        print("[hgen] No Malom DB — sentinel fallback labels")
 
     # ── load Value Net (optional) ──────────────────────────────────────────────
     value_net = None
@@ -124,6 +187,7 @@ def run(args: argparse.Namespace) -> None:
 
     all_feat_matrices: list[np.ndarray] = []
     all_value_inputs:  list[np.ndarray] = []
+    all_label_dists:   list[np.ndarray] = []
     all_chosen_idxs:   list[int]        = []
     all_h_evals:       list[float]      = []
     all_vn_evals:      list[float]      = []
@@ -134,6 +198,7 @@ def run(args: argparse.Namespace) -> None:
     n_won = n_draw = n_lost = n_selfplay = 0
     n_pos_won = n_pos_draw = 0
     n_deviates = 0
+    n_db_labels = n_sentinel_labels = 0
     n_errors = 0
     n_files = len(game_files)
 
@@ -151,7 +216,6 @@ def run(args: argparse.Namespace) -> None:
             human_color = game.get("human_color")
             winner = game.get("winner")
 
-            # Skip self-play or AI-vs-AI
             if game.get("self_play") or human_color in (None, "self_play"):
                 n_selfplay += 1
                 continue
@@ -164,12 +228,12 @@ def run(args: argparse.Namespace) -> None:
                 n_draw += 1
             else:
                 n_lost += 1
-                continue   # skip lost games
+                continue
 
             moves = game.get("moves", [])
             for mv in moves:
                 if mv.get("color") != human_color:
-                    continue   # only encode human moves
+                    continue
 
                 fen = mv.get("board_fen_before")
                 if not fen:
@@ -195,12 +259,23 @@ def run(args: argparse.Namespace) -> None:
                     n_errors += 1
                     continue
 
+                # Soft label: Malom/sentinel background + human move bonus
+                label_dist = _compute_human_soft_label(
+                    enc.db_moves, enc.legal_moves, enc.sentinel_scores, chosen_idx
+                )
+
+                if enc.db_moves and any(e.get("wdl") in _WDL_SCALE for e in enc.db_moves):
+                    n_db_labels += 1
+                else:
+                    n_sentinel_labels += 1
+
                 deviates = (chosen_idx != enc.h_top1_idx)
                 if deviates:
                     n_deviates += 1
 
                 all_feat_matrices.append(enc.feat_matrix)
                 all_value_inputs.append(enc.value_input)
+                all_label_dists.append(label_dist)
                 all_chosen_idxs.append(chosen_idx)
                 all_h_evals.append(enc.h_before)
                 all_vn_evals.append(enc.vn_before)
@@ -219,9 +294,11 @@ def run(args: argparse.Namespace) -> None:
         print("[hgen] No positions extracted — check games directory.")
         return
 
-    feat_arr = np.empty(n, dtype=object)
-    for i, fm in enumerate(all_feat_matrices):
-        feat_arr[i] = fm
+    feat_arr  = np.empty(n, dtype=object)
+    label_arr = np.empty(n, dtype=object)
+    for i, (fm, ld) in enumerate(zip(all_feat_matrices, all_label_dists)):
+        feat_arr[i]  = fm
+        label_arr[i] = ld
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,19 +306,21 @@ def run(args: argparse.Namespace) -> None:
     np.savez(
         out_path,
         feat_matrices=feat_arr,
-        value_inputs=np.array(all_value_inputs,  dtype=np.float32),
-        chosen_idxs= np.array(all_chosen_idxs,   dtype=np.int32),
-        h_evals=     np.array(all_h_evals,        dtype=np.float32),
-        vn_evals=    np.array(all_vn_evals,        dtype=np.float32),
-        h_top1_idxs= np.array(all_h_top1_idxs,   dtype=np.int32),
-        weights=     np.array(all_weights,         dtype=np.float32),
-        deviates=    np.array(all_deviates,        dtype=bool),
+        value_inputs= np.array(all_value_inputs,  dtype=np.float32),
+        label_dists=  label_arr,
+        chosen_idxs=  np.array(all_chosen_idxs,   dtype=np.int32),
+        h_evals=      np.array(all_h_evals,        dtype=np.float32),
+        vn_evals=     np.array(all_vn_evals,        dtype=np.float32),
+        h_top1_idxs=  np.array(all_h_top1_idxs,   dtype=np.int32),
+        weights=      np.array(all_weights,         dtype=np.float32),
+        deviates=     np.array(all_deviates,        dtype=bool),
     )
 
     elapsed = time.time() - t_start
     print(f"\n[hgen] Saved {n} positions to {out_path}  ({elapsed:.0f}s)")
     print(f"[hgen] Games:  won={n_won}  draw={n_draw}  lost={n_lost}  skipped(self-play)={n_selfplay}")
     print(f"[hgen] Positions: from-won={n_pos_won}  from-draw={n_pos_draw}")
+    print(f"[hgen] Labels: {n_db_labels} Malom-DB  {n_sentinel_labels} sentinel-fallback")
     print(f"[hgen] Human deviated from heuristic top-1: {n_deviates}/{n_pos_won} won-game moves")
     if n_errors:
         print(f"[hgen] Encoding errors skipped: {n_errors}")

@@ -279,10 +279,12 @@ def encode_position(
             db_moves = []
 
     # ── Build feature matrix ───────────────────────────────────────────────────
+    # DB data is kept in EncodedPosition.db_moves for reward computation but
+    # must NOT flow into feature slots — inference has no DB access.
     rows: List[np.ndarray] = []
     for i, mv in enumerate(legal_moves):
         ctx = {
-            "all_moves": db_moves,
+            "all_moves": [],
             "heuristic_rank": h_ranks[i],
             "n_legal": k,
             "heuristic_score_norm": h_norms[i],

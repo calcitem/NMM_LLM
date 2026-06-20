@@ -6,7 +6,11 @@ frozen so value estimates from Stage 1 are preserved.
 
 Loss
 ----
-  Weighted cross-entropy: -weight * log P(chosen_idx)
+  Weighted soft cross-entropy: -weight * sum(label_dist * log P)
+  label_dist is (1-HUMAN_ALPHA)*malom_or_sentinel + HUMAN_ALPHA*one_hot(human_move)
+  so the human's move always gets HUMAN_ALPHA probability mass, and Malom-
+  winning moves get proportionally more of the remaining mass.
+
   Positions from won games:  weight=1.0  (default)
   Positions from draw games: weight=0.3  (default)
   Positions where the human deviated from heuristic top-1 receive a
@@ -53,11 +57,12 @@ def load_dataset(npz_path: str):
     data = np.load(npz_path, allow_pickle=True)
     feat_matrices = data["feat_matrices"]    # (N,) object array of (k,62)
     value_inputs  = data["value_inputs"]     # (N, 23)  — not used for training here
-    chosen_idxs   = data["chosen_idxs"]     # (N,) int
-    h_evals       = data["h_evals"]         # (N,) float — unused (value head frozen)
-    weights       = data["weights"]         # (N,) float
-    deviates      = data["deviates"]        # (N,) bool
-    return feat_matrices, value_inputs, chosen_idxs, h_evals, weights, deviates
+    label_dists   = data["label_dists"]      # (N,) object array of (k,) soft labels
+    chosen_idxs   = data["chosen_idxs"]      # (N,) int — human move (for deviate flag)
+    h_evals       = data["h_evals"]          # (N,) float — unused (value head frozen)
+    weights       = data["weights"]          # (N,) float
+    deviates      = data["deviates"]         # (N,) bool
+    return feat_matrices, value_inputs, label_dists, chosen_idxs, h_evals, weights, deviates
 
 
 def load_base_model(ckpt_path: str, device: torch.device) -> ScaffoldedPolicyNet:
@@ -90,19 +95,17 @@ def train(args: argparse.Namespace) -> None:
 
     # ── Load data ──────────────────────────────────────────────────────────────
     print(f"[s1b] Loading {args.data} ...")
-    feat_matrices, value_inputs, chosen_idxs, h_evals, weights, deviates = load_dataset(args.data)
+    feat_matrices, value_inputs, label_dists, chosen_idxs, h_evals, weights, deviates = load_dataset(args.data)
     N = len(chosen_idxs)
 
     # Apply deviate bonus to won-game deviated positions
     effective_weights = weights.copy()
     if args.deviate_bonus != 1.0:
-        # Bonus applies only where weight==1.0 (won game) AND deviates==True
         bonus_mask = (weights >= 1.0) & deviates
         effective_weights[bonus_mask] *= args.deviate_bonus
         n_bonus = int(bonus_mask.sum())
         print(f"[s1b] Deviate bonus {args.deviate_bonus}x applied to {n_bonus} positions")
 
-    # Stats
     n_won_pos  = int((weights >= 1.0).sum())
     n_draw_pos = int((weights < 1.0).sum())
     n_dev      = int(deviates.sum())
@@ -141,13 +144,15 @@ def train(args: argparse.Namespace) -> None:
             bweights: list[float]     = []
 
             for i in batch:
-                fm  = feat_matrices[i]            # (k, 62)
-                ci  = int(chosen_idxs[i])
-                w   = float(effective_weights[i])
-                feat = torch.tensor(fm, dtype=torch.float32).to(device)
+                fm         = feat_matrices[i]          # (k, 62)
+                label_dist = label_dists[i]            # (k,) soft target
+                w          = float(effective_weights[i])
+                feat   = torch.tensor(fm, dtype=torch.float32).to(device)
+                target = torch.tensor(label_dist, dtype=torch.float32).to(device)
                 logits = model.policy_logits(feat)
                 log_p  = F.log_softmax(logits, dim=-1)
-                terms.append(-log_p[ci])
+                # Weighted soft cross-entropy: -sum(label * log_p)
+                terms.append(-(target * log_p).sum())
                 bweights.append(w)
 
             w_t    = torch.tensor(bweights, dtype=torch.float32).to(device)
@@ -177,13 +182,14 @@ def train(args: argparse.Namespace) -> None:
                 terms2: list[torch.Tensor] = []
                 bw2:    list[float]        = []
                 for i in batch:
-                    fm  = feat_matrices[i]
-                    ci  = int(chosen_idxs[i])
-                    w   = float(weights[i])   # use raw weight for val (no bonus)
-                    feat = torch.tensor(fm, dtype=torch.float32).to(device)
+                    fm         = feat_matrices[i]
+                    label_dist = label_dists[i]
+                    w          = float(weights[i])   # raw weight (no deviate bonus)
+                    feat   = torch.tensor(fm, dtype=torch.float32).to(device)
+                    target = torch.tensor(label_dist, dtype=torch.float32).to(device)
                     logits = model.policy_logits(feat)
                     log_p  = F.log_softmax(logits, dim=-1)
-                    terms2.append(-log_p[ci])
+                    terms2.append(-(target * log_p).sum())
                     bw2.append(w)
                 w_t2  = torch.tensor(bw2, dtype=torch.float32).to(device)
                 loss2 = (w_t2 * torch.stack(terms2)).sum() / w_t2.sum().clamp(min=1e-9)
