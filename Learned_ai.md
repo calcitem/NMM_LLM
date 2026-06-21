@@ -367,6 +367,29 @@ policy sharpness, Malom hit rate) and self-adjusting temperature/LR-backoff.
 .venv/bin/python scripts/train_scaffolded_s2_diagnostic.py --ppo --max-games 10000
 ```
 
+**Training performance (Stage 2 — three runs, 128 log entries total):**
+
+Three separate runs are recorded in `s2/train_log.jsonl`:
+
+| Run | Games | Difficulty | Peak win-200 | Outcome |
+|-----|-------|------------|-------------|---------|
+| Run 1 | 50–300 | 2 | 0.22 | Abandoned early |
+| Run 2 | 50–5800 | 2 | 0.37 (~game 2500) | Stagnated; never advanced |
+| Run 3 | 2850–3100 | 2 → **3** | 0.455 → advanced | Beat diff 3 at 91% |
+
+Key observations:
+- **Run 2 stagnation:** Win rate peaked at ~0.37 around game 2500 then declined as
+  temperature annealed past 0.90 toward 1.0, making play increasingly stochastic.  By
+  game 5800 the win rate had dropped to ~0.14.  The 60% advance threshold was never
+  crossed; this run was abandoned.
+- **Run 3 breakthrough:** Resuming from the best checkpoint, the model reached 0.455 at
+  game 3000 — crossing the internal threshold — and advanced to difficulty 3 at game 3050.
+  The first difficulty-3 reading showed 100% (window artefact: only a handful of games
+  played), settling at 91% by game 3100.
+- **Difficulty 3 already mastered:** 91% win rate immediately on arrival at diff 3
+  confirms the model had already internalised difficulty-3 strategy during diff-2 training.
+  This is why Stage 2b starts directly at difficulty 4.
+
 ---
 
 ### Stage 2b — Self-play with branched mid-game rollouts
@@ -399,7 +422,12 @@ causes the same board positions to receive contradictory gradient signals (credi
 path A in one update, penalised from path B in another).  It also trains a skill (undoing
 moves) that doesn't exist at inference.  Independent branches avoid both problems.
 
-**Curriculum:** Same as Stage 2 (diff 2 → 3 at 60% win rate).
+**Curriculum (five-level):**
+- Start at difficulty 4 (`DIFF_START=4`; the model already beats diff 3 at 100%).
+- Advance: diff 4 → 5 at ≥ 70% rolling-200 win rate; 5 → 6 at ≥ 65%; 6 → 7 at ≥ 60%.
+- Exit: ≥ 70% win rate vs difficulty 7 (`EXIT_THRESHOLD=0.70`, `DIFF_MAX=7`).
+- When a difficulty threshold is crossed, `win_history` is cleared so progress against the
+  new opponent is measured fresh.
 
 **Commands:**
 ```bash
@@ -531,7 +559,7 @@ Stage 2 converges.
 | Stage 1.5 | Human-deviated positions weighted; policy loss lower than s1 | Human intuition added on top of heuristic baseline |
 | Stage 2 | Rolling-200 win rate ≥ 60% vs difficulty 2 in < 3,000 games | Per-move rewards should produce visible improvement within 500 games |
 | Stage 2 → diff 3 | Rolling-200 win rate ≥ 60% | |
-| Stage 2b | Win rate equal or better than Stage 2; `bucket_*` all non-zero in logs | Self-play + branching not hurting; game-stage coverage confirmed |
+| Stage 2b | ≥70% win rate vs diff 7; `bucket_*` all non-zero in logs | Five-level curriculum: 70%→65%→60%→70% exit at diff 7 |
 | Stage 3 | Rolling-200 win rate ≥ 40% vs difficulty 4 | Fine-tuning on top of a working Stage 2/2b model |
 
 Early warning (check after 500 games of Stage 2): if win rate is still below 5% and
