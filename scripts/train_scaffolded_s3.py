@@ -243,8 +243,10 @@ def run(args: argparse.Namespace) -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    resume_path = args.resume or str(
-        _ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s2" / "best.pt"
+    _s2b_best = _ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s2b" / "best.pt"
+    _s2_best  = _ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s2"  / "best.pt"
+    resume_path = args.resume or (
+        str(_s2b_best) if _s2b_best.exists() else str(_s2_best)
     )
     if Path(resume_path).exists():
         print(f"[s3] Resuming from {resume_path}")

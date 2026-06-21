@@ -331,7 +331,7 @@ Stage 2 should resume from `s1b/best.pt` instead of `s1/best.pt`.
 
 **Opponent:** Heuristic engine, difficulty 2 → 3.
 **Algorithm:** A2C (or `--ppo` for PPO).
-**Temperature:** 0.5 annealed to 1.2 (model starts near imitation prior; explore more as training progresses).
+**Temperature:** 0.5 annealed to 0.9 (model starts near imitation prior; explore more as training progresses).
 **LR:** 1e-4 (model is new, not fine-tuning a pre-trained checkpoint — we can use a higher rate).
 
 **Malom separation:** `encode_position(db=None)` is called on every position — **Malom
@@ -349,22 +349,89 @@ in its inputs.
 checkpoint.  ScaffoldedNet starts from Stage 1 imitation, not a pre-trained NMMNet
 backbone — a fresh model that needs to learn.  1e-4 is appropriate.
 
+**Current script:** `train_scaffolded_s2_diagnostic.py` — same algorithm as `train_scaffolded_s2.py`
+but with richer JSONL logging (per-component reward breakdown, chosen-move probability,
+policy sharpness, Malom hit rate) and self-adjusting temperature/LR-backoff.
+
 **Commands:**
 ```bash
-.venv/bin/python scripts/train_scaffolded_s2.py \
-    --sentinel learned_ai/sentinel/checkpoints/best.pt \
-    --value-net data/value_net.npz \
-    --max-games 10000
+# Standard run
+.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py --max-games 10000
 
 # Resumes automatically from s1b/best.pt (falls back to s1/best.pt if absent)
 # Checkpoint → learned_ai/checkpoints/scaffolded/s2/best.pt
-# Log → learned_ai/checkpoints/scaffolded/s2/train_log.jsonl
+# Logs → learned_ai/checkpoints/scaffolded/s2/train_log.jsonl
+#         learned_ai/checkpoints/scaffolded/s2/update_log.jsonl
+
+# PPO variant
+.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py --ppo --max-games 10000
 ```
 
-To use PPO instead:
+---
+
+### Stage 2b — Self-play with branched mid-game rollouts
+
+**Goal:** Broaden trajectory diversity without the training/inference gap of an undo
+mechanism.  Two additions on top of Stage 2:
+
+**Self-play (50% of main games):** The live model (temperature-sampled) plays against a
+periodically frozen copy of itself (refreshed every 50 games, `argmax` mode).  The other
+50% use the heuristic opponent from Stage 2.  Mixing prevents the model from only learning
+to beat itself.
+
+**Branched rollouts:** Every 10 learner turns, the current board state is snapshotted.
+After the main game ends, up to 2 of those snapshots are used as starting points for
+fresh independent rollouts (model vs frozen copy).  Each branch is stored as a completely
+separate trajectory — it never shares a gradient-update batch with the game it was spawned
+from, so there is **no gradient contamination for shared positions**.
+
+**Game-stage diversity — phase buckets:** Branch points are classified as:
+- `opening` — placement phase, < 10 pieces placed total
+- `midgame` — late placement or early movement (10+ placed, ≥ 12 on board)
+- `endgame` — movement phase with < 12 pieces on board
+
+A rolling counter (300-game window) caps how many branches can come from any single bucket
+(`MAX_PER_BUCKET = 80`).  Once a bucket saturates, new branches from that phase are
+skipped.  This ensures the training set always spans beginning, middle, and end-game play.
+
+**Why not the "rewind" approach:** Rewinding and replaying within the same trajectory
+causes the same board positions to receive contradictory gradient signals (credited from
+path A in one update, penalised from path B in another).  It also trains a skill (undoing
+moves) that doesn't exist at inference.  Independent branches avoid both problems.
+
+**Curriculum:** Same as Stage 2 (diff 2 → 3 at 60% win rate).
+
+**Commands:**
 ```bash
-.venv/bin/python scripts/train_scaffolded_s2.py --ppo --max-games 10000
+# From s1b (default — no s2 checkpoint yet)
+.venv/bin/python scripts/train_scaffolded_s2b.py --max-games 5000
+
+# From s2/best.pt
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-s2 --max-games 5000
+
+# Resume a previous s2b run
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-games 5000
+
+# PPO variant
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --ppo --max-games 5000
+
+# Disable branching — pure self-play only (to isolate effects)
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-branches-per-game 0
+
+# More aggressive branching (3 per game, every 8 moves)
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-branches-per-game 3 --branch-every 8
+
+# Checkpoint → learned_ai/checkpoints/scaffolded/s2b/best.pt
+# Logs → learned_ai/checkpoints/scaffolded/s2b/train_log.jsonl
+#         learned_ai/checkpoints/scaffolded/s2b/update_log.jsonl
 ```
+
+**What to watch in the logs (`train_log.jsonl`):**
+- `bucket_opening / bucket_midgame / bucket_endgame` — all should be non-zero; if one
+  saturates, branches from that phase auto-suppress
+- `game_type: "branch"` entries with varying `phase_bucket` — confirms game-stage coverage
+- Win rate trend vs Stage 2 — should be equal or better; if notably worse, reduce
+  `--max-branches-per-game` to 1
 
 ---
 
@@ -395,10 +462,15 @@ It is zero in opening positions where the DB is unavailable.
 
 **Commands:**
 ```bash
+# Standard run — auto-resumes from s2b/best.pt (falls back to s2/best.pt if absent)
 .venv/bin/python scripts/train_scaffolded_s3.py \
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 
-# Resumes from s2/best.pt automatically
+# Explicit checkpoint
+.venv/bin/python scripts/train_scaffolded_s3.py \
+    --resume learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+
 # Checkpoint → learned_ai/checkpoints/scaffolded/s3/best.pt
 ```
 
@@ -415,7 +487,7 @@ Runs alongside the heuristic engine on every AI turn.  Each legal move in the di
 panel gets an "O:XX%" label showing the policy network's probability for that move.
 Helps evaluate whether the trained policy agrees with the heuristic's pick.
 
-Checkpoint search order (most-trained first): `s1b/best.pt → s1/best.pt`
+Checkpoint search order (most-trained first): `s3/best.pt → s2b/best.pt → s2/best.pt → s1b/best.pt → s1/best.pt`
 
 ### Overseer player mode (selectable in UI)
 
@@ -456,9 +528,11 @@ Stage 2 converges.
 | Stage | Target | Why |
 |-------|--------|-----|
 | Stage 1 | Val policy loss decreasing; model plays legal moves better than random | Confirms imitation is working |
+| Stage 1.5 | Human-deviated positions weighted; policy loss lower than s1 | Human intuition added on top of heuristic baseline |
 | Stage 2 | Rolling-200 win rate ≥ 60% vs difficulty 2 in < 3,000 games | Per-move rewards should produce visible improvement within 500 games |
 | Stage 2 → diff 3 | Rolling-200 win rate ≥ 60% | |
-| Stage 3 | Rolling-200 win rate ≥ 40% vs difficulty 4 | Fine-tuning on top of a working Stage 2 model |
+| Stage 2b | Win rate equal or better than Stage 2; `bucket_*` all non-zero in logs | Self-play + branching not hurting; game-stage coverage confirmed |
+| Stage 3 | Rolling-200 win rate ≥ 40% vs difficulty 4 | Fine-tuning on top of a working Stage 2/2b model |
 
 Early warning (check after 500 games of Stage 2): if win rate is still below 5% and
 not trending up, the per-move reward signal is not working.  Check:
@@ -483,16 +557,30 @@ not trending up, the per-move reward signal is not working.  Check:
 
 ## Benchmarking
 
+The agent is given **sentinel + value net by default** — use `--no-agent-sentinel` to
+disable sentinel for ablation.
+
 ```bash
 # Quick smoke test after Stage 1 (5 games vs diff 2)
 .venv/bin/python scripts/bench_scaffolded.py \
     --checkpoint learned_ai/checkpoints/scaffolded/s1/best.pt \
     --games 5 --difficulties 2 --opponents raw
 
-# Full benchmark after Stage 2
+# Full benchmark after Stage 2b
 .venv/bin/python scripts/bench_scaffolded.py \
-    --checkpoint learned_ai/checkpoints/scaffolded/s2/best.pt \
+    --checkpoint learned_ai/checkpoints/scaffolded/s2b/best.pt \
     --games 40 --difficulties 2,3,4
+
+# Compare s2 vs s2b at diff 3
+.venv/bin/python scripts/bench_scaffolded.py \
+    --checkpoint learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --compare   learned_ai/checkpoints/scaffolded/s2/best.pt \
+    --games 40 --difficulties 3
+
+# Agent without sentinel (ablation)
+.venv/bin/python scripts/bench_scaffolded.py \
+    --checkpoint learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --games 40 --difficulties 3 --no-agent-sentinel
 ```
 
 ---
@@ -510,7 +598,8 @@ not trending up, the per-move reward signal is not working.  Check:
 | `scripts/train_scaffolded_s1.py` | Stage 1: imitation training with Malom soft labels (cross-entropy) |
 | `scripts/gen_human_imitation_data.py` | Extract human-game dataset from `data/games/*.jsonl` |
 | `scripts/train_scaffolded_s1b.py` | Stage 1.5: human-game fine-tune (policy head only) |
-| `scripts/train_scaffolded_s2.py` | Stage 2: A2C/PPO with full scaffolded rewards |
-| `scripts/train_scaffolded_s3.py` | Stage 3: Malom supervised fine-tuning |
-| `scripts/bench_scaffolded.py` | Headless benchmark: ScaffoldedAgent vs heuristic at specified difficulties |
+| `scripts/train_scaffolded_s2_diagnostic.py` | Stage 2: A2C/PPO with rich per-component reward diagnostics and self-adjusting LR/temperature |
+| `scripts/train_scaffolded_s2b.py` | Stage 2b: self-play (model vs frozen copy) + branched mid-game rollouts with phase-bucket saturation cap |
+| `scripts/train_scaffolded_s3.py` | Stage 3: Malom supervised fine-tuning; resumes from s2b/best.pt (falls back to s2/best.pt) |
+| `scripts/bench_scaffolded.py` | Headless benchmark: ScaffoldedAgent (sentinel + value net on by default) vs heuristic configs |
 | `tests/test_scaffolded_policy.py` | 25 unit tests (encoder shapes, net forward, A2C update, agent legality) |
