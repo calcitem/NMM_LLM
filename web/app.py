@@ -3061,7 +3061,6 @@ async def ws_endpoint(websocket: WebSocket):
             elif kind == "replay_opening":
                 opening_id   = msg.get("opening_id", "")
                 speed_ms     = int(msg.get("speed_ms", 800))
-                continue_mode = msg.get("continue_mode", "practice")
 
                 book    = OpeningBook()
                 opening = book._index.get(opening_id)
@@ -3079,7 +3078,7 @@ async def ws_endpoint(websocket: WebSocket):
                     game_ai=None,
                     coordinator=None,
                     human_color="B",
-                    vs_human=(continue_mode == "practice"),
+                    vs_human=True,  # human can move freely until they choose a mode
                 )
                 # B: mark opening replay active so override_ai requests are ignored
                 new_session.opening_active = True
@@ -3137,39 +3136,59 @@ async def ws_endpoint(websocket: WebSocket):
                 # B: opening replay complete — clear flag
                 session.opening_active = False
 
-                # Post-replay: set up continuation
-                if continue_mode == "practice":
+                # Signal client to show mode-selection buttons
+                await _send(websocket, {"type": "opening_replayed"})
+                await _send(websocket, {
+                    "type":    "commentary",
+                    "speaker": "Game",
+                    "text":    f"Opening '{opening.name}' complete — choose how to continue.",
+                    "section": "ai",
+                })
+
+            # ── continue_opening ─────────────────────────────────────────────
+            elif kind == "continue_opening" and session:
+                mode = msg.get("mode", "auto")
+                _ava_diff = 3
+                _ava_hw = HeuristicWeights()
+
+                if mode in ("human_as_white", "human_as_black"):
+                    ai_color  = "B" if mode == "human_as_white" else "W"
+                    hc        = "W" if mode == "human_as_white" else "B"
+                    _gai = GameAI(
+                        color=ai_color, difficulty=_ava_diff, weights=_ava_hw,
+                        fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db,
+                        malom_db=_malom_db, value_net=_value_net,
+                    )
+                    session.game_ai    = _gai
+                    session.human_color = hc
+                    session.vs_human   = False
+                    session.ai_vs_ai   = False
                     await _send(websocket, {
-                        "type":    "commentary",
-                        "speaker": "Game",
-                        "text":    "Opening complete — your turn to continue from this position.",
+                        "type": "commentary", "speaker": "Game",
+                        "text": f"You play {'White' if hc == 'W' else 'Black'} — AI plays {'Black' if hc == 'W' else 'White'}.",
                         "section": "ai",
                     })
+                    await _send(websocket, _state(session))
+                    if _is_ai_turn(session):
+                        await _ai_turn(websocket, session)
+
                 else:
-                    # D/C: Watch mode — start AI vs AI from the current position.
-                    # Build a simple GameAI for each side (no coordinator needed);
-                    # _run_ai_vs_ai_loop safely handles None coordinators.
-                    _ava_diff = 3
-                    _ava_hw = HeuristicWeights()
+                    # "auto" — AI vs AI watch mode
                     _ai_w = GameAI(color="W", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
                     _ai_b = GameAI(color="B", difficulty=_ava_diff, weights=_ava_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
-                    session.ai_vs_ai = True
-                    session.vs_human = False
-                    session.game_ai_white = _ai_w
-                    session.game_ai_black = _ai_b
-                    session.game_ai = _ai_w if session.engine.board.turn == "W" else _ai_b
-                    session.coordinator_white = None   # C: safe — loop checks before deliberate
+                    session.ai_vs_ai        = True
+                    session.vs_human        = False
+                    session.game_ai_white   = _ai_w
+                    session.game_ai_black   = _ai_b
+                    session.game_ai         = _ai_w if session.engine.board.turn == "W" else _ai_b
+                    session.coordinator_white = None
                     session.coordinator_black = None
-                    log.info(
-                        "Watch mode: starting AI-vs-AI from opening '%s'", opening_id
-                    )
+                    log.info("continue_opening auto: AI-vs-AI from opening '%s'", session.engine.game_record.get("recognised_opening_id", "?"))
                     await _send(websocket, {
-                        "type":    "commentary",
-                        "speaker": "Game",
-                        "text":    "Opening complete — now playing AI vs AI.",
+                        "type": "commentary", "speaker": "Game",
+                        "text": "Now playing AI vs AI from this position.",
                         "section": "ai",
                     })
-                    # Cancel any stale AI-vs-AI task before starting a fresh one
                     if session._ava_task and not session._ava_task.done():
                         session._ava_task.cancel()
                     session._ava_task = asyncio.create_task(

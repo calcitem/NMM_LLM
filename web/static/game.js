@@ -1338,6 +1338,7 @@ function handleMessage(msg) {
       canOverride = false;
       $("btn-override").hidden = true;
       inGuidanceMode = false;
+      _hideOpeningContinueButtons();
   resignationPending = false;
   $("resignation-offer").hidden = true;
       // Show Good Game after a draw in AI vs human (reinforces strong AI play)
@@ -1434,6 +1435,10 @@ function handleMessage(msg) {
       addCommentary("Game",
         `Library updated: ${msg.game_count} games, ${msg.traj_entries} trajectory entries, ` +
         `${msg.endgame_positions} endgame positions.`, "ai");
+      break;
+
+    case "opening_replayed":
+      _showOpeningContinueButtons();
       break;
 
     case "openings_updated":
@@ -2303,15 +2308,34 @@ function startReplayOpening() {
   const id      = $("sel-opening").value;
   if (!id) return;
   const speedMs = parseInt($("rng-replay-speed").value);
-  const mode    = $("sel-continue-mode").value;
+  _hideOpeningContinueButtons();
   ws.send(JSON.stringify({
-    type:          "replay_opening",
-    opening_id:    id,
-    speed_ms:      speedMs,
-    continue_mode: mode,
+    type:       "replay_opening",
+    opening_id: id,
+    speed_ms:   speedMs,
   }));
   setStatus("Replaying opening…");
 }
+
+function _showOpeningContinueButtons() {
+  const wrap = $("opening-continue-btns");
+  if (wrap) { wrap.hidden = false; wrap.style.display = "flex"; }
+}
+
+function _hideOpeningContinueButtons() {
+  const wrap = $("opening-continue-btns");
+  if (wrap) { wrap.hidden = true; wrap.style.display = "none"; }
+}
+
+function _continueOpening(mode) {
+  if (!ws) return;
+  _hideOpeningContinueButtons();
+  ws.send(JSON.stringify({ type: "continue_opening", mode }));
+}
+
+$("btn-opening-continue-w").addEventListener("click",   () => _continueOpening("human_as_white"));
+$("btn-opening-continue-b").addEventListener("click",   () => _continueOpening("human_as_black"));
+$("btn-opening-continue-ava").addEventListener("click", () => _continueOpening("auto"));
 
 // E: Save an inline rename for the currently selected opening
 function _saveOpeningRename() {

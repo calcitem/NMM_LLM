@@ -201,14 +201,12 @@
           <input type="range" id="rng-replay-speed" min="300" max="3000" step="100" value="800" style="flex:1">
           <span id="lbl-replay-speed" style="min-width:38px;text-align:right;font-size:.8rem">0.8s</span>
         </div>
-        <div class="form-row">
-          <label for="sel-continue-mode">After opening</label>
-          <select id="sel-continue-mode">
-            <option value="practice">Practice — I play on</option>
-            <option value="auto">Watch — AI continues</option>
-          </select>
-        </div>
         <button id="btn-replay-opening">&#x25B6; Replay Opening</button>
+        <div id="opening-continue-btns" hidden style="display:none;gap:6px;margin-top:6px">
+          <button id="btn-opening-continue-w"   title="Continue as White — AI plays Black">Play White</button>
+          <button id="btn-opening-continue-b"   title="Continue as Black — AI plays White">Play Black</button>
+          <button id="btn-opening-continue-ava" title="Watch AI vs AI from this position">&#x1F916; AI vs AI</button>
+        </div>
       </div>
 
       <div class="panel-box">
