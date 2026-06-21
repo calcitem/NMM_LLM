@@ -100,10 +100,12 @@ TEMP_MAX      = 0.90
 ENTROPY_COEF  = 0.01
 UPDATE_EVERY  = 16
 ROLLING_WIN   = 200
-WIN_TARGET_1  = 0.60
-WIN_TARGET_2  = 0.60
-DIFF_START    = 2
-DIFF_TARGET   = 3
+DIFF_START = 3    # already beating diff 3; begin here
+DIFF_MAX   = 7
+# Rolling win rate needed at each difficulty to advance to the next.
+# Lower thresholds at higher difficulties — beating diff 6 at 40% is strong.
+ADVANCE_THRESHOLDS = {3: 0.65, 4: 0.60, 5: 0.55, 6: 0.50}
+EXIT_THRESHOLD = 0.40   # win rate vs diff 7 considered done
 MAX_PLY       = 400
 MAX_PLY_BRANCH = 250   # branch games start mid-game; cap shorter
 TIME_BUDGET   = 0.05
@@ -907,13 +909,15 @@ def run(args: argparse.Namespace) -> None:
         # ── Difficulty advancement ─────────────────────────────────────────────
         if len(win_history) >= args.rolling_win:
             win_rate = sum(win_history) / len(win_history)
-            if difficulty == DIFF_START and win_rate >= args.win_target_1:
-                difficulty = DIFF_TARGET
+            advance_thr = ADVANCE_THRESHOLDS.get(difficulty, args.advance_threshold)
+            if difficulty >= args.diff_max:
+                if win_rate >= args.exit_threshold:
+                    print(f"[s2b] *** {win_rate:.3f} win rate vs difficulty {difficulty} — done! ***")
+                    break
+            elif win_rate >= advance_thr:
+                difficulty += 1
                 win_history.clear()
-                print(f"[s2b] *** Advanced to difficulty {difficulty} ***")
-            elif difficulty == DIFF_TARGET and win_rate >= args.win_target_2:
-                print(f"[s2b] *** Target win rate {args.win_target_2} reached at diff {DIFF_TARGET}! ***")
-                break
+                print(f"[s2b] *** Advanced to difficulty {difficulty} (win rate was {win_rate:.3f}) ***")
 
     # ── Final flush ───────────────────────────────────────────────────────────
     if ep_steps:
@@ -960,8 +964,12 @@ def main() -> None:
     p.add_argument("--entropy-coef",        type=float, default=ENTROPY_COEF)
     p.add_argument("--update-every",        type=int,   default=UPDATE_EVERY)
     p.add_argument("--rolling-win",         type=int,   default=ROLLING_WIN)
-    p.add_argument("--win-target-1",        type=float, default=WIN_TARGET_1)
-    p.add_argument("--win-target-2",        type=float, default=WIN_TARGET_2)
+    p.add_argument("--diff-max",            type=int,   default=DIFF_MAX,
+                   help="Highest difficulty to train against (default 7)")
+    p.add_argument("--advance-threshold",   type=float, default=0.50,
+                   help="Fallback win rate to advance difficulty (per-level defaults in ADVANCE_THRESHOLDS)")
+    p.add_argument("--exit-threshold",      type=float, default=EXIT_THRESHOLD,
+                   help="Win rate vs diff-max considered done (default 0.30)")
     p.add_argument("--temp-start",          type=float, default=TEMP_START)
     p.add_argument("--log-every",           type=int,   default=LOG_EVERY)
     p.add_argument("--max-ply",             type=int,   default=MAX_PLY)
