@@ -79,6 +79,7 @@ class Opening:
     tags: list[str]
     source_reference: str = ""
     needs_llm_name: bool = False        # True when auto-named without LLM; candidate for naming
+    favored_side: str = "unknown"       # "W" | "B" | "equal" | "unknown" — set by audit_openings.py
 
     def opening_score(self, ai_color: str = "W", penalty: float = 0.0) -> float:
         """
@@ -139,6 +140,7 @@ def _dict_to_opening(d: dict) -> Opening:
         tags=d.get("tags", []),
         source_reference=d.get("source_reference", ""),
         needs_llm_name=d.get("needs_llm_name", False),
+        favored_side=d.get("favored_side", "unknown"),
     )
 
 
