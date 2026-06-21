@@ -357,7 +357,35 @@ python tools/import_book_games.py
 
 # Name all un-named openings via LLM
 python tools/name_openings.py
+
+# Audit openings for color advantage — adds favored_side tag to all JSON files
+.venv/bin/python scripts/audit_openings.py --games 10 --diff 3
 ```
+
+**Opening color-advantage audit (`scripts/audit_openings.py`)**
+
+Plays out every opening line in `book_openings.json` and `learned_openings.json`, evaluates the resulting board position with the heuristic evaluator (from White's perspective), and writes a `favored_side` field — `"W"`, `"B"`, or `"equal"` — to each entry in all three JSON files. This tag is preserved through normal `OpeningBook` save/load cycles and is intended for use in side-aware opening selection (integration pending).
+
+```bash
+# Fast pass — static heuristic eval only (instant, no games played)
+.venv/bin/python scripts/audit_openings.py --dry-run          # preview without writing
+
+.venv/bin/python scripts/audit_openings.py                    # write tags, eval only
+
+# Full audit — 10 simulation games per opening (~1–2 h at diff 3, 120 openings)
+# Simulation win rates override static eval for finer discrimination
+.venv/bin/python scripts/audit_openings.py --games 10 --diff 3
+
+# Options
+#   --games N       Simulate N games per opening from the end position (default 0)
+#   --diff D        Heuristic difficulty for simulation (default 3)
+#   --threshold T   Eval margin for W/B vs equal (default 0.06)
+#   --sim-margin M  Win-rate gap required to classify W/B (default 0.08)
+#   --dry-run       Print report without writing files
+```
+
+**Current results (120 openings, eval-only pass):** W-favored 84 (70%), B-favored 21 (18%), equal 15 (12%).  
+Notable: 3 of the 11 canonical book openings are labelled `side="W"` but structurally favour Black — `inverted-mill-rush-perpendicular` (−0.658), `z-mill-closed` (−0.604), `corner-gambit` (−0.530). Re-run with `--games 10` for empirical confirmation.
 
 ## Training Tools
 
@@ -1086,6 +1114,9 @@ NMM_ollama/
 │   ├── human_games/             # Human vs human game records (JSONL, gitignored)
 │   ├── endgame/                 # Retrograde WDL tables (built locally, gitignored)
 │   └── chroma/                  # ChromaDB vector store (LLM memory, gitignored)
+├── scripts/
+│   ├── audit_openings.py        # Audit opening book for color advantage; writes favored_side tag
+│   └── ...                      # Neural AI training scripts (see Learned Neural AI section)
 ├── tests/                       # unittest test suite (350+ tests)
 ├── main.py                      # CLI harness for quick engine testing
 ├── install.sh                   # One-time installer (Linux/macOS)
