@@ -202,8 +202,8 @@ def main() -> int:
                    help="Which opponent configs: raw,sentinel,vn,full (comma-separated)")
     p.add_argument("--sentinel-path", default=_SENTINEL_CKPT,
                    help="Sentinel checkpoint for OPPONENT (and --agent-sentinel if requested)")
-    p.add_argument("--agent-sentinel", action="store_true",
-                   help="Also give the scaffolded agent a sentinel (recommended)")
+    p.add_argument("--no-agent-sentinel", action="store_true",
+                   help="Disable sentinel for the scaffolded agent (not recommended)")
     p.add_argument("--time-budget", type=float, default=0.25,
                    help="Seconds per opponent move (default 0.25)")
     p.add_argument("--max-plies", type=int, default=400)
@@ -235,11 +235,12 @@ def main() -> int:
         checkpoints.append((args.compare, "compare"))
 
     def _make_agent(ckpt_path: str) -> ScaffoldedAgent:
-        agent_sentinel = sentinel if args.agent_sentinel else None
+        agent_sentinel = None if args.no_agent_sentinel else sentinel
         return ScaffoldedAgent(
             color="W",
             checkpoint_path=ckpt_path,
             sentinel_advisor=agent_sentinel,
+            value_net=value_net,
             mode="argmax",
         )
 
@@ -247,8 +248,11 @@ def main() -> int:
 
     for ckpt_path, ckpt_label in checkpoints:
         ckpt_name = Path(ckpt_path).parent.name + "/" + Path(ckpt_path).name
+        has_sentinel = not args.no_agent_sentinel and sentinel is not None
+        has_vn       = value_net is not None
+        agent_cfg    = "+".join(filter(None, ["sentinel" if has_sentinel else None, "vn" if has_vn else None])) or "heuristic only"
         print(f"\n{'='*60}")
-        print(f"  Agent: {ckpt_name}  ({'with sentinel' if args.agent_sentinel else 'no sentinel'})")
+        print(f"  Agent: {ckpt_name}  ({agent_cfg})")
         print(f"{'='*60}")
 
         # Build the agent once per checkpoint
@@ -285,7 +289,8 @@ def main() -> int:
                 elapsed = time.time() - t0
                 result["checkpoint"] = ckpt_path
                 result["ckpt_label"] = ckpt_label
-                result["agent_sentinel"] = args.agent_sentinel
+                result["agent_sentinel"] = has_sentinel
+                result["agent_value_net"] = has_vn
                 result["elapsed_s"] = round(elapsed, 1)
                 all_results.append(result)
 

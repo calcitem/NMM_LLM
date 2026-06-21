@@ -56,6 +56,7 @@ class ScaffoldedAgent:
         checkpoint_path: Optional[str] = None,
         sentinel_advisor=None,
         db=None,
+        value_net=None,
         device: str = "auto",
         mode: str = "sample",
         temperature: float = 1.0,
@@ -64,6 +65,7 @@ class ScaffoldedAgent:
         self.color = color
         self.sentinel_advisor = sentinel_advisor
         self.db = db
+        self.value_net = value_net
         self.mode = mode
         self.temperature = max(float(temperature), 1e-6)
         self.last_was_blunder = False
@@ -119,6 +121,7 @@ class ScaffoldedAgent:
             player,
             sentinel_advisor=self.sentinel_advisor,
             db=self.db,
+            value_net=self.value_net,
         )
         if enc is None or len(enc.legal_moves) == 0:
             return {}
