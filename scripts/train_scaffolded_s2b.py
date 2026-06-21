@@ -104,7 +104,7 @@ DIFF_START = 3    # already beating diff 3; begin here
 DIFF_MAX   = 7
 # Rolling win rate needed at each difficulty to advance to the next.
 # Lower thresholds at higher difficulties — beating diff 6 at 40% is strong.
-ADVANCE_THRESHOLDS = {3: 0.65, 4: 0.60, 5: 0.55, 6: 0.50}
+ADVANCE_THRESHOLDS = {3: 0.75, 4: 0.70, 5: 0.65, 6: 0.60}
 EXIT_THRESHOLD = 0.40   # win rate vs diff 7 considered done
 MAX_PLY       = 400
 MAX_PLY_BRANCH = 250   # branch games start mid-game; cap shorter
