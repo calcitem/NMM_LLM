@@ -97,7 +97,7 @@ replace it.
 |-------|--------|---------|
 | [0:20) | `feature_builder.board_context_features()` | Phase, piece counts, mobility, mills — same for all moves in this position |
 | [20:40) | `feature_builder.move_features()` | From/to/capture indices, mill flags, resulting state |
-| [40:58) | `feature_builder.counterfactual_features()` | Heuristic rank, normalised score, DB win/loss fracs, DTM quality |
+| [40:58) | `feature_builder.counterfactual_features()` | Heuristic rank, normalised score, **DB win/loss fracs, DTM quality** — the DB slots are **zero at inference and in Stages 1 & 2**; first populated in Stage 3 when `encode_position(db=db)` is called |
 | [58] | `SentinelAdvisor.advise().move_scores[i]` | Sentinel's quality score for this move, [0,1] |
 | [59] | `0.5 * h_abs_norm + 0.5 * vn_abs_norm` | Blended absolute eval of resulting position (heuristic + value-net, each mapped [0,1]) |
 | [60] | `is_top1` | 1.0 if this is the heuristic engine's #1 ranked move |
@@ -148,6 +148,29 @@ Files:
 - `learned_ai/models/scaffolded_net.py` — `ScaffoldedPolicyNet`
 - `learned_ai/agents/scaffolded_agent.py` — `ScaffoldedAgent` (inference)
 - `learned_ai/training/scaffolded_a2c.py` — `ScaffoldedStep` + `scaffolded_a2c_update()` + PPO variant
+
+---
+
+## Malom: Training Signal vs Feature Visibility
+
+Malom (the ultra-strong external solver) plays two separate roles in the pipeline:
+
+| Role | Stage 1 | Stage 2 | Stage 3 | Inference |
+|------|---------|---------|---------|-----------|
+| **Soft label targets** (KL loss) | ✓ queried separately | — | — | — |
+| **Per-move reward shaping** | — | ✓ queried separately | ✓ queried separately | — |
+| **Malom slots in feature vector [40:58)** | **zero** | **zero** | **non-zero** | **zero** |
+
+The invariant is: **the model never sees Malom WDL/DTM in its input features at inference**.
+Stages 1 and 2 call `encode_position(db=None)`, which zeros the DB slots in [40:58).
+Malom data is queried independently by the training scripts and used only to:
+- Shape the soft label distribution (Stage 1)
+- Compute `r_malom_win` and `r_malom_trap` rewards (Stages 2 & 3)
+
+Stage 3 is the only exception: it calls `encode_position(db=db)`, so the model begins
+to see Malom WDL/DTM as live input features — simultaneously with the supervised KL loss.
+At inference, `db=None` is always passed (Malom unavailable), so the model generalises
+using what it learned from heuristics, value net, sentinel, and board structure.
 
 ---
 
@@ -207,23 +230,46 @@ signals from drowning out the ultimate game result.
 **Goal:** Give the model a solid starting policy before RL begins.  Without this, the
 model is near-random and the per-move rewards are noisy.
 
-**Method:** Play heuristic (diff 3) vs heuristic self-play.  At each position, record the
-heuristic's actual move as the supervised target.  Train with cross-entropy (policy) +
-MSE (value against heuristic evaluation).
+**Method:** Play heuristic (diff 3) vs heuristic self-play with book-guided White
+openings and `top_n=2` move diversity.  At each position, `encode_position(db=None)` is
+called — **Malom slots [40:58) are zero in the feature matrix**.  The Malom DB is then
+queried *separately* to compute a **soft label distribution** over all legal moves
+(DTM-graded per move):
 
-**Why this works:** The heuristic already plays well.  Imitating it gives the model a
-baseline that generates non-trivial per-move reward from the first game of Stage 2.
+```
+weight[move] = _WDL_SCALE[wdl] × dtm_quality(wdl, dtm)
+    where _WDL_SCALE = {"win": 1.0, "draw": 0.4, "loss": 0.1}
+    and   dtm_quality = 1 − dtm/100   (win-in-1 ≈ 0.99, win-in-50 ≈ 0.50)
+```
 
-**Expected outcome:** Model learns to play at roughly heuristic quality.  Confirmed
-by checking that policy cross-entropy loss decreases and val accuracy > 20%.
+When the Malom DB has no entry for a move, the sentinel score is used instead.
+The resulting (k,) distribution is normalised to sum to 1.
+
+Training loss: **cross-entropy with soft labels** (equivalent to KL divergence) for
+policy, **MSE against heuristic h_eval** for value.  This teaches the model to prefer
+Malom-winning moves proportional to how quickly they win — but from features that match
+inference time (no Malom in the vector).
+
+**Balance fix (2026-06-21):** Without intervention, heuristic self-play with a tight
+time budget produced heavily Black-biased outcomes (0/76/24 W/B/D over 100 test games).
+Root cause: B-47 intentional asymmetry in `tactical_move_bonus` rates Black's early
+placements higher, compounded by NMM second-player advantage at shallow search depth.
+Fixes applied in `gen_imitation_data.py`:
+- White's 1st and 2nd placements are forced to a randomly selected book opening line
+  (`data/openings/book_openings.json`), giving White sound structural starts.
+- `top_n=2` for all non-book moves — picks randomly from the top-2 scored moves,
+  breaking deterministic Black-wins-every-game spirals.
+
+**Expected outcome:** Model learns to prefer Malom-winning moves from day one.  Confirmed
+by checking that policy loss (cross-entropy with soft label) decreases each epoch.
 
 **Commands:**
 ```bash
-# Generate dataset (~2h for 2000 games)
+# Generate dataset (~10h for 2000 games at diff 3)
 .venv/bin/python scripts/gen_imitation_data.py \
     --games 2000 --diff 3 \
     --sentinel learned_ai/sentinel/checkpoints/best.pt \
-    --value-net data/value_net.npz
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 
 # Train imitation model (~10 min)
 .venv/bin/python scripts/train_scaffolded_s1.py \
@@ -258,19 +304,20 @@ is recorded as the target.
 - Human deviated from heuristic top-1 in 3,658 / 4,219 won-game positions (87%)
 
 **Method:** Fine-tune policy head only from `s1/best.pt`.  Value head is frozen to
-preserve Stage 1's position evaluation.  Weighted cross-entropy loss, LR=3e-5, 5 epochs.
+preserve Stage 1's position evaluation.  Weighted cross-entropy loss, LR=0.009, 10 epochs.
 
 **Commands:**
 ```bash
 # Extract human game data (run once, ~45s — re-run after new games are played)
+# Can run in parallel with gen_imitation_data.py once that has started
 .venv/bin/python scripts/gen_human_imitation_data.py \
-    --value-net data/value_net.npz
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 # Output → learned_ai/data/human_imitation.npz
 
 # Fine-tune from Stage 1 checkpoint (~1 min)
 .venv/bin/python scripts/train_scaffolded_s1b.py \
     --base-ckpt learned_ai/checkpoints/scaffolded/s1/best.pt \
-    --epochs 5
+    --epochs 10 --lr 0.009
 # Checkpoint → learned_ai/checkpoints/scaffolded/s1b/best.pt
 ```
 
@@ -286,6 +333,12 @@ Stage 2 should resume from `s1b/best.pt` instead of `s1/best.pt`.
 **Algorithm:** A2C (or `--ppo` for PPO).
 **Temperature:** 0.5 annealed to 1.2 (model starts near imitation prior; explore more as training progresses).
 **LR:** 1e-4 (model is new, not fine-tuning a pre-trained checkpoint — we can use a higher rate).
+
+**Malom separation:** `encode_position(db=None)` is called on every position — **Malom
+slots [40:58) remain zero**, matching inference time.  Malom is queried separately:
+`db.query_all_moves()` drives `r_malom_win`; `db.query_state()` drives `r_malom_trap`.
+The model learns what winning moves look like from rewards, not from seeing Malom answers
+in its inputs.
 
 **Curriculum:**
 - Start vs diff 2.
@@ -303,7 +356,7 @@ backbone — a fresh model that needs to learn.  1e-4 is appropriate.
     --value-net data/value_net.npz \
     --max-games 10000
 
-# Resumes automatically from s1/best.pt
+# Resumes automatically from s1b/best.pt (falls back to s1/best.pt if absent)
 # Checkpoint → learned_ai/checkpoints/scaffolded/s2/best.pt
 # Log → learned_ai/checkpoints/scaffolded/s2/train_log.jsonl
 ```
@@ -319,6 +372,11 @@ To use PPO instead:
 
 **Goal:** Sharpen strategy with explicit DB supervision.  When Malom knows the WDL for
 all legal moves, push the policy toward the winning move(s), weighted by DTM quality.
+
+**This is the first and only stage where the model sees Malom WDL/DTM in its input
+features.**  `encode_position(db=db)` is called, populating the DB slots in [40:58).
+The model can now condition its policy directly on Malom information, and the SL loss
+explicitly pushes weights toward Malom-preferred move distributions.
 
 **Loss:** `total = 0.6 × A2C_loss + 0.4 × KL(policy → malom_target)`
 
@@ -338,20 +396,41 @@ It is zero in opening positions where the DB is unavailable.
 **Commands:**
 ```bash
 .venv/bin/python scripts/train_scaffolded_s3.py \
-    --malom /path/to/malom/db \
-    --sentinel learned_ai/sentinel/checkpoints/best.pt \
-    --value-net data/value_net.npz \
-    --diff 3
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 
 # Resumes from s2/best.pt automatically
 # Checkpoint → learned_ai/checkpoints/scaffolded/s3/best.pt
 ```
 
-If Malom DB is not yet built:
-```bash
-# Stage 3 still runs — SL signal will be zero, it falls back to pure A2C
-.venv/bin/python scripts/train_scaffolded_s3.py --diff 3
-```
+---
+
+## Overseer — Live Overlay & Player Mode
+
+`OverseerAdvisor` in `learned_ai/models/overseer.py` wraps the `ScaffoldedPolicyNet`
+checkpoint and exposes per-move pick probabilities for two purposes:
+
+### Advisory overlay (always active when checkpoint found)
+
+Runs alongside the heuristic engine on every AI turn.  Each legal move in the diagnostic
+panel gets an "O:XX%" label showing the policy network's probability for that move.
+Helps evaluate whether the trained policy agrees with the heuristic's pick.
+
+Checkpoint search order (most-trained first): `s1b/best.pt → s1/best.pt`
+
+### Overseer player mode (selectable in UI)
+
+When enabled (`use_overseer_player=True`), replaces the heuristic engine's choice with
+the policy network's **argmax** move.  Used to evaluate the ScaffoldedPolicyNet in live
+play without writing a full game loop.  Activated via `"use_overseer_player": true` in
+the WebSocket game-start message; exposed as a toggle in the game UI.
+
+Both modes call `encode_position()` → `ScaffoldedPolicyNet.policy_probs()`.  The sentinel,
+Malom DB, and value net are wired in from the server's global advisors so the policy sees
+the same features it was trained on.
+
+**Bug fixed (b9cb779):** Overseer was leaking Malom DB features from the encoding context
+into positions where the DB had no entry — a silent feature-value shift that degraded
+overlay accuracy.  Fixed by resetting the DB query context correctly per call.
 
 ---
 
@@ -366,8 +445,9 @@ and `LearnedAgent`.  At deployment it calls:
 
 Total added latency: negligible.  The sentinel was already the bottleneck.
 
-To wire into the game, add `ScaffoldedAgent` as an option in `ai/coordinator.py`
-alongside the existing learned agent path.
+Overseer player mode (see above) is the current live-test path while Stage 2 A2C is
+being re-run.  Full `ScaffoldedAgent` integration into `ai/coordinator.py` follows once
+Stage 2 converges.
 
 ---
 
@@ -401,19 +481,36 @@ not trending up, the per-move reward signal is not working.  Check:
 
 ---
 
+## Benchmarking
+
+```bash
+# Quick smoke test after Stage 1 (5 games vs diff 2)
+.venv/bin/python scripts/bench_scaffolded.py \
+    --checkpoint learned_ai/checkpoints/scaffolded/s1/best.pt \
+    --games 5 --difficulties 2 --opponents raw
+
+# Full benchmark after Stage 2
+.venv/bin/python scripts/bench_scaffolded.py \
+    --checkpoint learned_ai/checkpoints/scaffolded/s2/best.pt \
+    --games 40 --difficulties 2,3,4
+```
+
+---
+
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `learned_ai/models/scaffolded_encoder.py` | `encode_position()` — builds (k,62) feat matrix + (23,) value input |
 | `learned_ai/models/scaffolded_net.py` | `ScaffoldedPolicyNet` — per-move MLP policy + value head |
+| `learned_ai/models/overseer.py` | `OverseerAdvisor` — advisory overlay + Overseer player mode |
 | `learned_ai/training/scaffolded_a2c.py` | `ScaffoldedStep`, `scaffolded_a2c_update()`, `scaffolded_ppo_update()` |
 | `learned_ai/agents/scaffolded_agent.py` | `ScaffoldedAgent` — inference wrapper for gameplay |
-| `scripts/gen_imitation_data.py` | Generate supervised dataset from heuristic self-play |
-| `scripts/train_scaffolded_s1.py` | Stage 1: imitation training (heuristic self-play) |
+| `scripts/gen_imitation_data.py` | Generate supervised dataset from heuristic self-play (book-guided White, `top_n=2`) |
+| `scripts/train_scaffolded_s1.py` | Stage 1: imitation training with Malom soft labels (cross-entropy) |
 | `scripts/gen_human_imitation_data.py` | Extract human-game dataset from `data/games/*.jsonl` |
-| `scripts/train_scaffolded_s1b.py` | Stage 1.5: human-game fine-tune (policy head only, LR=3e-5) |
+| `scripts/train_scaffolded_s1b.py` | Stage 1.5: human-game fine-tune (policy head only) |
 | `scripts/train_scaffolded_s2.py` | Stage 2: A2C/PPO with full scaffolded rewards |
 | `scripts/train_scaffolded_s3.py` | Stage 3: Malom supervised fine-tuning |
-| `scripts/bench_scaffolded.py` | Headless benchmark: ScaffoldedAgent vs heuristic configs |
+| `scripts/bench_scaffolded.py` | Headless benchmark: ScaffoldedAgent vs heuristic at specified difficulties |
 | `tests/test_scaffolded_policy.py` | 25 unit tests (encoder shapes, net forward, A2C update, agent legality) |

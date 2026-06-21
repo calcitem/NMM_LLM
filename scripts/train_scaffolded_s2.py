@@ -122,10 +122,14 @@ def _compute_per_move_reward(
     enc,
     chosen_idx: int,
     enc_after,
-    db,
-    db_moves_after=None,
+    db_moves=None,
 ) -> float:
-    """Compute the shaped per-move reward."""
+    """Compute the shaped per-move reward.
+
+    db_moves: Malom per-move data queried independently (not from enc.db_moves,
+    which is empty because encode_position is called with db=None to keep
+    Malom WDL/DTM out of the feature vector).
+    """
     r = 0.0
 
     # Sentinel component: above-mean quality?
@@ -136,8 +140,6 @@ def _compute_per_move_reward(
 
     # Heuristic component: position improved?
     if enc_after is not None:
-        h_delta = enc_after.h_before - enc.h_scores_abs[chosen_idx]
-        # h_scores_abs[i] is h_after for move i; enc_after.h_before is the same thing
         h_delta_actual = enc.h_scores_abs[chosen_idx] - enc.h_before
         r += BETA * math.tanh(h_delta_actual)
 
@@ -146,11 +148,11 @@ def _compute_per_move_reward(
         vn_delta = enc.vn_scores_abs[chosen_idx] - enc.vn_before
         r += VN_BETA * math.tanh(vn_delta)
 
-    # Malom components
-    if enc.db_moves:
+    # Malom win reward (queried separately, not from enc.db_moves)
+    if db_moves:
         mv_key = _move_key(enc.legal_moves[chosen_idx])
         db_entry = next(
-            (m for m in enc.db_moves if _move_key(m.get("move", {})) == mv_key),
+            (m for m in db_moves if _move_key(m.get("move", {})) == mv_key),
             None,
         )
         if db_entry:
@@ -158,13 +160,6 @@ def _compute_per_move_reward(
             dtm = db_entry.get("dtm")
             if wdl == "win":
                 r += GAMMA * float(dtm_quality("win", dtm))
-
-    # Trap reward: is the resulting position a Malom loss for the opponent?
-    if db_moves_after is not None:
-        # After our move, the board is enc_after; query the opponent's WDL
-        # db_moves_after is already from the opponent's perspective
-        # query_state returns "W"|"L"|"D" for the side to move in that pos
-        pass  # populated by caller when available
 
     return float(r)
 
@@ -315,7 +310,9 @@ def run(args: argparse.Namespace) -> None:
 
             if player == learner_color:
                 # ── Learner turn ───────────────────────────────────────────────
-                enc = encode_position(board, player, sentinel_advisor=sentinel, db=db, value_net=value_net)
+                # db=None keeps Malom WDL/DTM out of the feature vector;
+                # Malom is queried separately below for reward signals only.
+                enc = encode_position(board, player, sentinel_advisor=sentinel, db=None, value_net=value_net)
                 if enc is None or not enc.legal_moves:
                     outcome = LOSS_REWARD
                     done = True
@@ -340,14 +337,22 @@ def run(args: argparse.Namespace) -> None:
                 move = enc.legal_moves[chosen_idx]
                 board_after = board.apply_move(move)
 
-                # Encode next state for value bootstrapping
+                # Encode next state for value bootstrapping (also Malom-free)
                 enc_after = encode_position(
                     board_after, opp_color,
-                    sentinel_advisor=sentinel, db=db, value_net=value_net
+                    sentinel_advisor=sentinel, db=None, value_net=value_net
                 )
 
+                # Query Malom separately for reward signals (not features)
+                db_moves = []
+                if db is not None:
+                    try:
+                        db_moves = db.query_all_moves(board, player) or []
+                    except Exception:
+                        pass
+
                 # Per-move reward
-                reward = _compute_per_move_reward(enc, chosen_idx, enc_after, db)
+                reward = _compute_per_move_reward(enc, chosen_idx, enc_after, db_moves=db_moves)
 
                 # Malom trap: opponent is now in a losing position?
                 if db is not None:

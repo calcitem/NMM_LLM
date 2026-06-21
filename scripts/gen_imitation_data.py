@@ -104,8 +104,31 @@ def _load_settings() -> dict:
     return {}
 
 
+def _load_white_openings(root: Path) -> list:
+    """Return list of opening dicts with side 'W' or 'both' from book_openings.json."""
+    for fname in ("book_openings.json", "openings.json"):
+        path = root / "data" / "openings" / fname
+        if path.exists():
+            try:
+                with open(path) as f:
+                    raw = json.load(f)
+                result = [o for o in raw if o.get("side") in ("W", "both") and o.get("line_moves")]
+                if result:
+                    return result
+            except Exception:
+                pass
+    return []
+
+
 def run(args: argparse.Namespace) -> None:
     rng = random.Random(args.seed)
+
+    # ── load opening book for White balance ────────────────────────────────────
+    white_openings = _load_white_openings(_ROOT)
+    if white_openings:
+        print(f"[gen] Loaded {len(white_openings)} White openings for placement guidance")
+    else:
+        print("[gen] No opening book found — White plays unguided")
 
     # ── load sentinel (optional) ───────────────────────────────────────────────
     sentinel = None
@@ -180,6 +203,7 @@ def run(args: argparse.Namespace) -> None:
         board = BoardState.new_game()
         ply   = 0
         game_positions: list[tuple[np.ndarray, np.ndarray, np.ndarray, float, float]] = []
+        selected_opening = rng.choice(white_openings) if white_openings else None
 
         while ply < args.max_ply:
             terminal, winner = is_terminal(board)
@@ -195,19 +219,41 @@ def run(args: argparse.Namespace) -> None:
             player = board.turn
             agent  = ai_w if player == "W" else ai_b
 
-            enc = encode_position(board, player, sentinel_advisor=sentinel, db=db, value_net=value_net)
+            enc = encode_position(board, player, sentinel_advisor=sentinel, db=None, value_net=value_net)
             if enc is None or not enc.legal_moves:
                 draws += 1
                 break
 
+            # Query Malom separately for labels — db=None keeps features Malom-free
+            db_moves_for_label: list = []
+            if db is not None:
+                try:
+                    db_moves_for_label = db.query_all_moves(board, player) or []
+                except Exception:
+                    pass
+
             # Soft label: Malom DB (DTM-graded) or sentinel fallback
-            label_dist = _compute_soft_label(enc.db_moves, enc.legal_moves, enc.sentinel_scores)
-            if enc.db_moves and any(e.get("wdl") in _WDL_SCALE for e in enc.db_moves):
+            label_dist = _compute_soft_label(db_moves_for_label, enc.legal_moves, enc.sentinel_scores)
+            if db_moves_for_label and any(e.get("wdl") in _WDL_SCALE for e in db_moves_for_label):
                 n_db_labels += 1
             else:
                 n_sentinel_labels += 1
 
-            chosen_move = agent.choose_move(board)
+            # White's first 2 placements: follow a randomly selected book opening
+            # to counteract White's structural first-mover disadvantage at shallow
+            # search depth (Black's reactive B-47 bonuses would otherwise dominate).
+            chosen_move = None
+            if (player == "W"
+                    and selected_opening is not None
+                    and board.pieces_placed.get("W", 0) < 2):
+                _w_ply = board.pieces_placed["W"]          # 0 or 1
+                _line  = selected_opening.get("line_moves", [])
+                _book_sq = _line[_w_ply * 2] if _w_ply * 2 < len(_line) else None
+                if _book_sq:
+                    _legal = get_all_legal_moves(board)
+                    chosen_move = next((m for m in _legal if m.get("to") == _book_sq), None)
+            if chosen_move is None:
+                chosen_move = agent.choose_move(board, top_n=2)
             if not chosen_move:
                 draws += 1
                 break
