@@ -565,6 +565,8 @@ class OpeningBook:
         )
         log_n = math.log(max(1, global_games) + 1)
 
+        opp_color = "B" if ai_color == "W" else "W"
+
         def _ucb(op: "Opening") -> float:
             penalty = self._penalties.get(op.opening_id, {}).get("penalty", 0.0)
             base = op.opening_score(ai_color, penalty=penalty)
@@ -573,7 +575,15 @@ class OpeningBook:
                 + op.outcome_stats.get("B", 0)
                 + op.outcome_stats.get("D", 0)
             )
-            return base + exploration_rate * math.sqrt(log_n / (local + 1))
+            score = base + exploration_rate * math.sqrt(log_n / (local + 1))
+            # Prefer openings whose end-position structure suits our colour.
+            # favored_side is set by scripts/audit_openings.py; "unknown" → neutral.
+            favored = op.favored_side
+            if favored == ai_color:
+                score += 0.15
+            elif favored == opp_color:
+                score -= 0.10
+            return score
 
         scores = [_ucb(op) for op in openings]
         max_score = max(scores)
