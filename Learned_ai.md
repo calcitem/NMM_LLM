@@ -265,16 +265,16 @@ by checking that policy loss (cross-entropy with soft label) decreases each epoc
 
 **Commands:**
 ```bash
-# Generate dataset (~10h for 2000 games at diff 3)
+# Stage 1 data — pass --malom so you get DTM-graded labels (not just sentinel fallback)
 .venv/bin/python scripts/gen_imitation_data.py \
     --games 2000 --diff 3 \
     --sentinel learned_ai/sentinel/checkpoints/best.pt \
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 
-# Train imitation model (~10 min)
+# Stage 1 train (soft cross-entropy against Malom distributions)
 .venv/bin/python scripts/train_scaffolded_s1.py \
     --data learned_ai/data/imitation_scaffolded.npz \
-    --epochs 20
+    --epochs 10
 
 # Checkpoint → learned_ai/checkpoints/scaffolded/s1/best.pt
 ```
@@ -308,13 +308,12 @@ preserve Stage 1's position evaluation.  Weighted cross-entropy loss, LR=0.009, 
 
 **Commands:**
 ```bash
-# Extract human game data (run once, ~45s — re-run after new games are played)
-# Can run in parallel with gen_imitation_data.py once that has started
+# Stage 1.5 data — also pass --malom (re-run after new games are played)
 .venv/bin/python scripts/gen_human_imitation_data.py \
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 # Output → learned_ai/data/human_imitation.npz
 
-# Fine-tune from Stage 1 checkpoint (~1 min)
+# Stage 1.5 train (after Stage 1)
 .venv/bin/python scripts/train_scaffolded_s1b.py \
     --base-ckpt learned_ai/checkpoints/scaffolded/s1/best.pt \
     --epochs 10 --lr 0.009
@@ -355,16 +354,30 @@ policy sharpness, Malom hit rate) and self-adjusting temperature/LR-backoff.
 
 **Commands:**
 ```bash
-# Standard run
-.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py --max-games 10000
+# Start from best checkpoint from current Stage 2 run if present, else s1b/s1
+.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py \
+    --auto-resume-best \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz \
+    --max-games 10000
 
-# Resumes automatically from s1b/best.pt (falls back to s1/best.pt if absent)
+# Explicitly resume from a known checkpoint
+.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py \
+    --resume learned_ai/checkpoints/scaffolded/s2/best.pt \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz \
+    --max-games 10000
+
+# Start fresh from s1b if you do not want to resume Stage 2
+.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py \
+    --resume learned_ai/checkpoints/scaffolded/s1b/best.pt \
+    --sentinel learned_ai/sentinel/checkpoints/best.pt \
+    --value-net data/value_net.npz \
+    --max-games 10000
+
 # Checkpoint → learned_ai/checkpoints/scaffolded/s2/best.pt
 # Logs → learned_ai/checkpoints/scaffolded/s2/train_log.jsonl
 #         learned_ai/checkpoints/scaffolded/s2/update_log.jsonl
-
-# PPO variant
-.venv/bin/python scripts/train_scaffolded_s2_diagnostic.py --ppo --max-games 10000
 ```
 
 **Training performance (Stage 2 — three runs, 128 log entries total):**
@@ -431,23 +444,27 @@ moves) that doesn't exist at inference.  Independent branches avoid both problem
 
 **Commands:**
 ```bash
-# From s1b (default — no s2 checkpoint yet)
-.venv/bin/python scripts/train_scaffolded_s2b.py --max-games 5000
-
-# From s2/best.pt
-.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-s2 --max-games 5000
-
-# Resume a previous s2b run
+# Resume a previous s2b run (recommended — starts where you left off)
 .venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-games 5000
 
-# PPO variant
-.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --ppo --max-games 5000
+# Explicit checkpoint (e.g. start from a known stage)
+.venv/bin/python scripts/train_scaffolded_s2b.py \
+    --resume learned_ai/checkpoints/scaffolded/s2/best.pt --max-games 5000
 
-# Disable branching — pure self-play only (to isolate effects)
-.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-branches-per-game 0
+# Disable self-play — pure heuristic opponent with branches only
+.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --self-play-ratio 0.0
 
-# More aggressive branching (3 per game, every 8 moves)
-.venv/bin/python scripts/train_scaffolded_s2b.py --auto-resume-best --max-branches-per-game 3 --branch-every 8
+# More aggressive branching (3 per game, snapshot every 8 moves)
+.venv/bin/python scripts/train_scaffolded_s2b.py \
+    --auto-resume-best --max-branches-per-game 3 --branch-every 8
+
+# Lower advance thresholds to move faster through difficulty levels
+.venv/bin/python scripts/train_scaffolded_s2b.py \
+    --auto-resume-best --advance-threshold 0.50 --exit-threshold 0.60
+
+# Quick smoke test (3 games, 1 branch max, log immediately)
+.venv/bin/python scripts/train_scaffolded_s2b.py \
+    --max-games 3 --max-branches-per-game 1 --log-every 3
 
 # Checkpoint → learned_ai/checkpoints/scaffolded/s2b/best.pt
 # Logs → learned_ai/checkpoints/scaffolded/s2b/train_log.jsonl
@@ -490,13 +507,22 @@ It is zero in opening positions where the DB is unavailable.
 
 **Commands:**
 ```bash
-# Standard run — auto-resumes from s2b/best.pt (falls back to s2/best.pt if absent)
-.venv/bin/python scripts/train_scaffolded_s3.py \
-    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
-
-# Explicit checkpoint
+# From s2b/best.pt (recommended if you ran s2b)
 .venv/bin/python scripts/train_scaffolded_s3.py \
     --resume learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --max-games 5000 \
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+
+# Higher difficulty (Malom fine-tuning works best at diff 3-4)
+.venv/bin/python scripts/train_scaffolded_s3.py \
+    --resume learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --diff 4 --max-games 5000 \
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
+
+# With PPO
+.venv/bin/python scripts/train_scaffolded_s3.py \
+    --resume learned_ai/checkpoints/scaffolded/s2b/best.pt \
+    --ppo --max-games 5000 \
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 
 # Checkpoint → learned_ai/checkpoints/scaffolded/s3/best.pt
@@ -589,21 +615,20 @@ The agent is given **sentinel + value net by default** — use `--no-agent-senti
 disable sentinel for ablation.
 
 ```bash
-# Quick smoke test after Stage 1 (5 games vs diff 2)
+# Quick smoke test with Stage 1 checkpoint, 5 games, easy only
 .venv/bin/python scripts/bench_scaffolded.py \
     --checkpoint learned_ai/checkpoints/scaffolded/s1/best.pt \
     --games 5 --difficulties 2 --opponents raw
 
-# Full benchmark after Stage 2b
+# Bench test s1b
 .venv/bin/python scripts/bench_scaffolded.py \
-    --checkpoint learned_ai/checkpoints/scaffolded/s2b/best.pt \
-    --games 40 --difficulties 2,3,4
+    --checkpoint learned_ai/checkpoints/scaffolded/s1b/best.pt \
+    --games 20 --difficulties 2,3,4
 
-# Compare s2 vs s2b at diff 3
+# Full benchmark after Stage 2 / 2b
 .venv/bin/python scripts/bench_scaffolded.py \
-    --checkpoint learned_ai/checkpoints/scaffolded/s2b/best.pt \
-    --compare   learned_ai/checkpoints/scaffolded/s2/best.pt \
-    --games 40 --difficulties 3
+    --checkpoint learned_ai/checkpoints/scaffolded/s2/best.pt \
+    --games 40 --difficulties 2,3,4
 
 # Agent without sentinel (ablation)
 .venv/bin/python scripts/bench_scaffolded.py \
