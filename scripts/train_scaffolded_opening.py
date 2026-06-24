@@ -42,7 +42,12 @@ from game.rules import is_terminal
 from learned_ai.agents.heuristic_agent import HeuristicAgent
 from learned_ai.agents.heuristic_agent import GameAI as _GA
 from learned_ai.models.lookahead_advisor import LookaheadAdvisor
-from learned_ai.models.scaffolded_encoder import encode_position_with_lookahead, MOVE_FEAT_DIM_WITH_LOOKAHEAD
+from learned_ai.models.scaffolded_encoder import (
+    encode_position,
+    encode_position_with_lookahead,
+    MOVE_FEAT_DIM,
+    MOVE_FEAT_DIM_WITH_LOOKAHEAD,
+)
 from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
 from learned_ai.sentinel.infer import load_advisor
 from learned_ai.sentinel.labels import dtm_quality
@@ -143,7 +148,15 @@ MAX_PER_BUCKET        = 80
 # Opening extension: reward fires for OPENING_EXTENSION_PLY plies past placement end
 OPENING_EXTENSION_PLY = 6
 
+# Model architecture — match the old successful regime (62-float, dropout=0.1)
+DROPOUT = 0.1
+
 PHASE_BUCKETS = ("opening", "midgame", "endgame")
+
+
+def _encode_base(board, player, sentinel_advisor=None, db=None, value_net=None, lookahead_advisor=None):
+    """encode_position wrapper with uniform signature (ignores lookahead_advisor)."""
+    return encode_position(board, player, sentinel_advisor=sentinel_advisor, db=db, value_net=value_net)
 
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
@@ -300,11 +313,12 @@ def _run_s1b_refresher(
     print(f"[s_open] s1b refresher: loser={len(loser_idxs)} winner={len(winner_idxs)} positions  lr={lr:.2e}")
 
     def _pad_feat(fm: np.ndarray) -> np.ndarray:
-        """Pad (k, d) feat matrix to (k, MOVE_FEAT_DIM_WITH_LOOKAHEAD) with zeros."""
+        """Pad or truncate (k, d) feat matrix to match the model's move_feat_dim."""
         k, d = fm.shape
-        if d >= MOVE_FEAT_DIM_WITH_LOOKAHEAD:
-            return fm[:, :MOVE_FEAT_DIM_WITH_LOOKAHEAD]
-        pad = np.zeros((k, MOVE_FEAT_DIM_WITH_LOOKAHEAD - d), dtype=np.float32)
+        target = model.move_feat_dim
+        if d >= target:
+            return fm[:, :target]
+        pad = np.zeros((k, target - d), dtype=np.float32)
         return np.concatenate([fm, pad], axis=1)
 
     def _run_phase(phase_idxs: list[int], phase_label: str, use_heuristic_target: bool) -> None:
@@ -380,9 +394,14 @@ def _choose_resume_path(args: argparse.Namespace) -> tuple[Optional[Path], str]:
     return None, "scratch"
 
 
-def _load_model(device: torch.device, resume_path: Optional[Path]) -> tuple[ScaffoldedPolicyNet, int, float, int, str]:
+def _load_model(
+    device: torch.device,
+    resume_path: Optional[Path],
+    feat_dim: int = MOVE_FEAT_DIM,
+    dropout: float = DROPOUT,
+) -> tuple[ScaffoldedPolicyNet, int, float, int, str]:
     if resume_path is None:
-        return ScaffoldedPolicyNet(move_feat_dim=MOVE_FEAT_DIM_WITH_LOOKAHEAD).to(device), 0, 0.0, DIFF_START, "scratch"
+        return ScaffoldedPolicyNet(move_feat_dim=feat_dim, dropout=dropout).to(device), 0, 0.0, DIFF_START, "scratch"
     ckpt   = torch.load(resume_path, map_location=device, weights_only=False)
     cfg    = ckpt.get("model_config", {})
     model  = ScaffoldedPolicyNet.from_config(cfg).to(device)
@@ -483,12 +502,13 @@ def _check_advance(win_history_heuristic: deque, rolling_win: int) -> bool:
 class FrozenModelOpponent:
     """Plays argmax from a deep-copied, frozen snapshot of the live model."""
 
-    def __init__(self, model: ScaffoldedPolicyNet, device: torch.device, sentinel=None, value_net=None):
+    def __init__(self, model: ScaffoldedPolicyNet, device: torch.device, sentinel=None, value_net=None, encoder_fn=None):
         self._model     = copy.deepcopy(model).to(device)
         self._model.eval()
         self._device    = device
         self._sentinel  = sentinel
         self._value_net = value_net
+        self._encoder   = encoder_fn or encode_position_with_lookahead
         self.last_was_blunder = False
         self.last_thinking    = "frozen"
 
@@ -498,11 +518,10 @@ class FrozenModelOpponent:
 
     def choose_move(self, board: BoardState) -> dict:
         player = board.turn
-        enc = encode_position_with_lookahead(board, player,
-                                             sentinel_advisor=self._sentinel,
-                                             db=None,
-                                             value_net=self._value_net,
-                                             lookahead_advisor=None)
+        enc = self._encoder(board, player,
+                            sentinel_advisor=self._sentinel,
+                            db=None,
+                            value_net=self._value_net)
         if enc is None or not enc.legal_moves:
             return {}
         feat_t = torch.tensor(enc.feat_matrix, dtype=torch.float32).to(self._device)
@@ -545,7 +564,9 @@ def _rollout(
     forced_placements: Optional[list[str]] = None,
     lookahead_advisor=None,
     handoff_difficulty: Optional[int] = None,
+    encoder_fn=None,
 ) -> RolloutResult:
+    _encode = encoder_fn or encode_position_with_lookahead
     board                   = start_board
     ply                     = 0
     move_phase_start_ply:   Optional[int] = None
@@ -613,7 +634,7 @@ def _rollout(
 
         if player == learner_color:
             # Opening specialist: no db features
-            enc = encode_position_with_lookahead(board, player, sentinel_advisor=sentinel, db=None, value_net=value_net, lookahead_advisor=lookahead_advisor)
+            enc = _encode(board, player, sentinel_advisor=sentinel, db=None, value_net=value_net, lookahead_advisor=lookahead_advisor)
             if enc is None or not enc.legal_moves:
                 outcome = LOSS_REWARD
                 done    = True
@@ -653,7 +674,7 @@ def _rollout(
             if board.phase == "place":
                 learner_placement_count += 1
             board_after = board.apply_move(move)
-            enc_after   = encode_position_with_lookahead(board_after, opp_color, sentinel_advisor=sentinel, db=None, value_net=value_net, lookahead_advisor=None)
+            enc_after   = _encode(board_after, opp_color, sentinel_advisor=sentinel, db=None, value_net=value_net)
 
             reward, rb, extra = _compute_per_move_reward(
                 enc, chosen_idx, enc_after,
@@ -867,9 +888,12 @@ def run(args: argparse.Namespace) -> None:
     else:
         print("[s_open] No value net — VN features will be 0")
 
-    # ── LookaheadAdvisor ───────────────────────────────────────────────────────
+    # ── Encoder / LookaheadAdvisor ────────────────────────────────────────────
+    # Default: 62-float base features only (old successful regime).
+    # Pass --enable-lookahead to switch to 77-float with 5-ply lookahead.
+    use_lookahead = getattr(args, "enable_lookahead", False)
     lookahead_advisor: Optional[LookaheadAdvisor] = None
-    if not getattr(args, "no_lookahead", False):
+    if use_lookahead:
         from learned_ai.agents.heuristic_agent import get_heuristic_evaluate as _get_eval
         _evaluate_fn = _get_eval()
         lookahead_advisor = LookaheadAdvisor(
@@ -878,14 +902,18 @@ def run(args: argparse.Namespace) -> None:
             evaluate_fn=_evaluate_fn,
             use_sentinel=True,
         )
-        print("[s_open] LookaheadAdvisor enabled (5-ply heuristic+sentinel+VN)")
+        encoder_fn = encode_position_with_lookahead
+        feat_dim   = MOVE_FEAT_DIM_WITH_LOOKAHEAD
+        print("[s_open] LookaheadAdvisor enabled (5-ply heuristic+sentinel+VN, 77-float features)")
     else:
-        print("[s_open] LookaheadAdvisor disabled (--no-lookahead)")
+        encoder_fn = _encode_base
+        feat_dim   = MOVE_FEAT_DIM
+        print("[s_open] 62-float mode (no lookahead) — matching old successful regime")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
     model, start_game, best_win_rate, difficulty, source_checkpoint = _load_model(
-        device, resume_path
+        device, resume_path, feat_dim=feat_dim, dropout=DROPOUT
     )
     difficulty = _apply_diff_start_override(difficulty, args)
     if resume_path is None:
@@ -895,7 +923,7 @@ def run(args: argparse.Namespace) -> None:
     print(f"[s_open] Starting at game {start_game}, difficulty {difficulty}")
 
     # ── Frozen opponent ────────────────────────────────────────────────────────
-    frozen_opp = FrozenModelOpponent(model, device, sentinel=sentinel, value_net=value_net)
+    frozen_opp = FrozenModelOpponent(model, device, sentinel=sentinel, value_net=value_net, encoder_fn=encoder_fn)
     games_since_target_update = 0
 
     out_dir   = Path(args.out_dir)
@@ -983,6 +1011,7 @@ def run(args: argparse.Namespace) -> None:
             forced_placements=game_forced_placements,
             lookahead_advisor=lookahead_advisor,
             handoff_difficulty=game_difficulty,
+            encoder_fn=encoder_fn,
         )
 
         if result.trajectory:
@@ -1011,6 +1040,7 @@ def run(args: argparse.Namespace) -> None:
                 retry_ply=0,
                 lookahead_advisor=lookahead_advisor,
                 handoff_difficulty=game_difficulty,
+                encoder_fn=encoder_fn,
             )
             if confirm_result.trajectory:
                 _retroactive_rescore(confirm_result.trajectory, confirm_result.step_diags,
@@ -1085,6 +1115,7 @@ def run(args: argparse.Namespace) -> None:
                 retry_ply=0,
                 lookahead_advisor=lookahead_advisor,
                 handoff_difficulty=game_difficulty,
+                encoder_fn=encoder_fn,
             )
             if retry_result.trajectory:
                 _retroactive_rescore(retry_result.trajectory, retry_result.step_diags, retry_result.outcome)
@@ -1139,6 +1170,7 @@ def run(args: argparse.Namespace) -> None:
                 retry_ply=0,
                 lookahead_advisor=lookahead_advisor,
                 handoff_difficulty=game_difficulty,
+                encoder_fn=encoder_fn,
             )
 
             if branch_result.trajectory:
@@ -1337,8 +1369,8 @@ def main() -> None:
     p.add_argument("--malom",    default="", type=str)
     p.add_argument("--value-net",default=str(_ROOT / "data" / "value_net.npz"), type=str)
     p.add_argument("--ppo",      action="store_true")
-    p.add_argument("--no-lookahead", action="store_true",
-                   help="Disable 5-ply LookaheadAdvisor (faster, no lookahead features)")
+    p.add_argument("--enable-lookahead", action="store_true",
+                   help="Enable 5-ply LookaheadAdvisor (77-float features); default is 62-float, no lookahead")
     p.add_argument("--max-games",           type=int,   default=5000)
     p.add_argument("--seed",                type=int,   default=42)
     p.add_argument("--lr",                  type=float, default=LR)
