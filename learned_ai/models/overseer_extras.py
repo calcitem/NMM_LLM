@@ -67,7 +67,10 @@ def build_overseer_extras(
         if spec is not None:
             try:
                 with torch.no_grad():
-                    probs = torch.softmax(spec.policy_logits(feat_t), dim=-1)
+                    # Support specialists trained with fewer features (e.g. 62 vs 77)
+                    spec_dim = getattr(spec, "move_feat_dim", feat_t.shape[1])
+                    spec_input = feat_t[:, :spec_dim]
+                    probs = torch.softmax(spec.policy_logits(spec_input), dim=-1)
                 ext[:, col] = probs.cpu().numpy()
             except Exception:
                 pass   # keep uniform default
