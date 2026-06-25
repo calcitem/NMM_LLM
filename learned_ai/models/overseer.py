@@ -115,8 +115,8 @@ def load_overseer(
 ) -> Optional[OverseerAdvisor]:
     """Load OverseerAdvisor from checkpoint.  Returns None on any failure.
 
-    If ckpt_path is None, searches: s2/best.pt → s1b/best.pt → s1/best.pt under
-    learned_ai/checkpoints/scaffolded/.
+    If ckpt_path is None, searches: s_over/best.pt → s2/best.pt → s1b/best.pt → s1/best.pt
+    under learned_ai/checkpoints/scaffolded/.
     """
     try:
         from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
@@ -132,9 +132,10 @@ def load_overseer(
     else:
         ckpt_dir = _root / "learned_ai" / "checkpoints" / "scaffolded"
         search_paths = [
-            ckpt_dir / "s2"  / "best.pt",
-            ckpt_dir / "s1b" / "best.pt",
-            ckpt_dir / "s1"  / "best.pt",
+            ckpt_dir / "s_over" / "best.pt",
+            ckpt_dir / "s2"     / "best.pt",
+            ckpt_dir / "s1b"    / "best.pt",
+            ckpt_dir / "s1"     / "best.pt",
         ]
 
     chosen = None
