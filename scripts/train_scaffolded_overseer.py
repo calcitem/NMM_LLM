@@ -172,9 +172,11 @@ DIFF_MAX      = 7
 ADVANCE_THRESHOLDS = {1: 0.60, 2: 0.60, 3: 0.60, 4: 0.60, 5: 0.60, 6: 0.60}
 EXIT_THRESHOLD = 0.60
 
-S1B_REFRESHER_EPOCHS = 3
-S1B_REFRESHER_LR     = 3e-4
-S1B_REFRESHER_BATCH  = 32
+S1B_REFRESHER_EPOCHS        = 3      # loser (heuristic imitation) phase epochs
+S1B_REFRESHER_LR            = 3e-4
+S1B_REFRESHER_BATCH         = 32
+S1B_WINNER_REFRESHER_EPOCHS = 10     # winner phase epochs (more thorough)
+S1B_WINNER_REFRESHER_LR_MUL = 2.0   # winner LR = base LR × this multiplier
 MAX_PLY       = 140
 MAX_PLY_BRANCH = 100
 TIME_BUDGET   = 0.05
@@ -358,6 +360,8 @@ def _run_s1b_refresher(
     lr: float = S1B_REFRESHER_LR,
     batch: int = S1B_REFRESHER_BATCH,
     deviate_bonus: float = 1.5,
+    winner_epochs: int = S1B_WINNER_REFRESHER_EPOCHS,
+    winner_lr_mul: float = S1B_WINNER_REFRESHER_LR_MUL,
 ) -> None:
     """Inline s1b human-imitation refresher. Modifies model in-place.
 
@@ -408,10 +412,12 @@ def _run_s1b_refresher(
         pad = np.zeros((k, OVERSEER_FEAT_DIM - d), dtype=np.float32)
         return np.concatenate([fm, pad], axis=1)
 
-    def _run_phase(phase_idxs: list[int], phase_label: str, use_heuristic_target: bool) -> None:
+    def _run_phase(phase_idxs: list[int], phase_label: str, use_heuristic_target: bool,
+                   override_epochs: int = 0) -> None:
         if not phase_idxs:
             return
-        for epoch in range(1, epochs + 1):
+        n_epochs = override_epochs if override_epochs > 0 else epochs
+        for epoch in range(1, n_epochs + 1):
             random.shuffle(phase_idxs)
             ep_loss  = 0.0
             ep_w_sum = 0.0
@@ -446,10 +452,16 @@ def _run_s1b_refresher(
                 opt_s1b.step()
                 ep_loss  += float(loss.item()) * float(w_t.sum())
                 ep_w_sum += float(w_t.sum())
-            print(f"[s_over]   refresher [{phase_label}] epoch {epoch}/{epochs}  loss={ep_loss / max(ep_w_sum, 1e-9):.4f}")
+            print(f"[s_over]   refresher [{phase_label}] epoch {epoch}/{n_epochs}  loss={ep_loss / max(ep_w_sum, 1e-9):.4f}")
 
     _run_phase(loser_idxs, "loser→heuristic", use_heuristic_target=True)
-    _run_phase(winner_idxs, "winner", use_heuristic_target=False)
+
+    # Winner phase uses more epochs and a higher LR to embed human winning patterns strongly.
+    winner_lr = lr * winner_lr_mul
+    for param_group in opt_s1b.param_groups:
+        param_group["lr"] = winner_lr
+    print(f"[s_over]   refresher [winner] using {winner_epochs} epochs at lr={winner_lr:.2e}")
+    _run_phase(winner_idxs, "winner", use_heuristic_target=False, override_epochs=winner_epochs)
 
     # Unfreeze value head
     for param in model.value_mlp.parameters():
@@ -1473,13 +1485,6 @@ def run(args: argparse.Namespace) -> None:
                 best_win_rate_at_diff = 0.0
                 opt = torch.optim.Adam(model.parameters(), lr=args.lr)
                 frozen_opp.refresh(model)
-
-                # s1b refresher before new difficulty
-                if not args.no_s1b_refresher:
-                    print(f"[s_over] Running s1b refresher before diff {difficulty} training")
-                    _run_s1b_refresher(model, device, args.s1b_data,
-                                       epochs=args.s1b_refresher_epochs,
-                                       lr=args.s1b_refresher_lr)
 
     # ── Final flush ───────────────────────────────────────────────────────────
     if ep_steps:
