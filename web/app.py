@@ -246,7 +246,8 @@ _overseer_advisor = None
 try:
     from learned_ai.models.overseer import load_overseer as _load_overseer
     _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor,
-                                        value_net=_value_net)
+                                        value_net=_value_net,
+                                        human_db=_human_db)
     if _overseer_advisor is not None:
         log.info("Overseer advisor loaded")
     else:

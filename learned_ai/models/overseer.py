@@ -1,9 +1,19 @@
 """learned_ai/models/overseer.py — OverseerAdvisor inference wrapper.
 
 Loads a ScaffoldedPolicyNet checkpoint and exposes per-move pick probabilities
-for the diagnostic overlay ("O:XX%" labels).  Advisory only — does not alter AI play.
+for the diagnostic overlay ("O:XX%" labels) and Overseer player mode.
 
-Checkpoint search order: s1b/best.pt → s1/best.pt (takes the most-trained available).
+Feature pipeline mirrors training exactly (train_scaffolded_overseer.py):
+  1. encode_position_with_lookahead → (k, 77) base features
+     - sentinel_advisor: fills base feature slots [58:62)
+     - LookaheadAdvisor: fills lookahead block [62:77) using 5-ply heuristic+VN+sentinel
+     - db=None (Malom DB was not in the base during Overseer training)
+  2. build_overseer_extras → (k, 85) full feature matrix
+     - [77:80) specialist policy probs (opening, midgame, endgame)
+     - [80:82) GameAI alpha-beta features
+     - [82:85) HumanDB features
+
+Checkpoint search order: s_over → s2 → s1b → s1.
 """
 
 from __future__ import annotations
@@ -12,7 +22,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import torch
 
 log = logging.getLogger("nmm.overseer")
@@ -22,24 +31,59 @@ def _move_key(mv: dict) -> tuple:
     return (mv.get("from"), mv.get("to"), mv.get("capture"))
 
 
-# Stages whose checkpoints were trained with Malom DB features populated in [40:58).
-# Stages 1, 1b, 2, 2b train with db=None (DB slots stay zero); Stage 3+ uses db.
-_DB_FEATURE_STAGES = {"s3"}
+def _load_spec_model(path: Path):
+    """Load a ScaffoldedPolicyNet from a checkpoint. Returns None on failure."""
+    if not path.exists():
+        return None
+    try:
+        from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
+        ckpt  = torch.load(str(path), map_location="cpu", weights_only=False)
+        cfg   = ckpt.get("model_config", {})
+        model = ScaffoldedPolicyNet.from_config(cfg)
+        state = ckpt.get("model") or ckpt
+        model.load_state_dict(state)
+        model.eval()
+        log.info("  specialist loaded: %s (feat_dim=%s)", path, cfg.get("move_feat_dim", "?"))
+        return model
+    except Exception as e:
+        log.warning("  specialist load failed %s: %s", path, e)
+        return None
 
 
 class OverseerAdvisor:
-    """Wraps ScaffoldedPolicyNet for per-move probability scoring."""
+    """Wraps ScaffoldedPolicyNet for per-move probability scoring.
 
-    def __init__(self, model, ckpt_path: str, sentinel_advisor=None, db=None,
-                 value_net=None, stage: str = "unknown") -> None:
-        self._model = model
+    Replicates the full 85-float training feature pipeline at inference so the
+    model sees the same inputs it was trained on.
+    """
+
+    def __init__(
+        self,
+        model,
+        ckpt_path: str,
+        sentinel_advisor=None,
+        db=None,
+        value_net=None,
+        stage: str = "unknown",
+        spec_open=None,
+        spec_mid=None,
+        spec_end=None,
+        human_db=None,
+        gameai=None,
+        lookahead_advisor=None,
+    ) -> None:
+        self._model    = model
         self._ckpt_path = ckpt_path
-        self._sentinel = sentinel_advisor
-        self._db = db
+        self._sentinel  = sentinel_advisor
+        self._db        = db          # Malom DB (used by set_db for legacy callers)
         self._value_net = value_net
-        # Only pass DB features to encode_position for stages trained with them.
-        self._use_db_features = stage in _DB_FEATURE_STAGES
-        self._stage = stage
+        self._stage     = stage
+        self._spec_open = spec_open
+        self._spec_mid  = spec_mid
+        self._spec_end  = spec_end
+        self._human_db  = human_db
+        self._gameai    = gameai
+        self._lookahead = lookahead_advisor
         model.eval()
 
     def is_loaded(self) -> bool:
@@ -54,49 +98,61 @@ class OverseerAdvisor:
     def set_value_net(self, value_net) -> None:
         self._value_net = value_net
 
+    def set_human_db(self, human_db) -> None:
+        self._human_db = human_db
+
+    def set_gameai(self, gameai) -> None:
+        self._gameai = gameai
+
     def score_moves(self, board, candidates: list[dict], color: str) -> Optional[list[float]]:
         """Return per-candidate pick probabilities (sum to 1.0).
 
         Candidates must be a list of move dicts with 'from', 'to', 'capture' keys.
-        Returns None on any failure.  If k==1, still returns [1.0] — callers
-        may choose to suppress display in that case.
+        Returns None on any failure.
         """
         if not self._model or not candidates:
             return None
-        # Capture-phase candidates use {from, to, capture} keys from the engine's pending mill
-        # move. encode_position() returns its own legal_move list; if keys don't align,
-        # unmapped entries get prob=0 and are suppressed by overseerLabel (pct<1 → None).
-        # This is an acceptable silent degradation for v1.
         try:
-            from learned_ai.models.scaffolded_encoder import encode_position
-            # DB features [40:58) must match training: zero for Stages 1/2, populated for Stage 3+.
-            db_arg = self._db if self._use_db_features else None
-            enc = encode_position(board, color,
-                                  sentinel_advisor=self._sentinel,
-                                  db=db_arg,
-                                  value_net=self._value_net)
+            from learned_ai.models.scaffolded_encoder import encode_position_with_lookahead
+            from learned_ai.models.overseer_extras import build_overseer_extras
+
+            # Step 1: 77-float base (sentinel in base slots + LookaheadAdvisor for [62:77)).
+            # db=None matches training (Malom DB was not in the base during Overseer training).
+            enc = encode_position_with_lookahead(
+                board, color,
+                sentinel_advisor=self._sentinel,
+                db=None,
+                value_net=self._value_net,
+                lookahead_advisor=self._lookahead,
+            )
             if enc is None or not enc.legal_moves:
                 return None
 
-            # Build key → (index, prob) lookup on encoded legal moves
-            enc_key_to_idx = {_move_key(m): i for i, m in enumerate(enc.legal_moves)}
+            # Step 2: extend to 85 floats with specialist probs, GameAI, and HumanDB.
+            feat_85 = build_overseer_extras(
+                enc.feat_matrix,   # (k, 77)
+                board, enc, color,
+                spec_open=self._spec_open,
+                spec_mid=self._spec_mid,
+                spec_end=self._spec_end,
+                gameai=self._gameai,
+                human_db=self._human_db,
+                gameai_depth=5,    # gameplay: deeper than training (3) for better signals
+            )
 
-            feat = torch.from_numpy(enc.feat_matrix)   # (k, 62)
+            feat = torch.from_numpy(feat_85)   # (k, 85)
             with torch.no_grad():
-                probs = self._model.policy_probs(feat)   # (k,) tensor
+                probs = self._model.policy_probs(feat)   # (k,)
 
             probs_np = probs.cpu().numpy()
 
-            # Align to input candidate order; unmapped candidates get 0
+            # Align to input candidate order; unmapped candidates get 0.
+            enc_key_to_idx = {_move_key(m): i for i, m in enumerate(enc.legal_moves)}
             result = []
             for cand in candidates:
                 idx = enc_key_to_idx.get(_move_key(cand))
-                if idx is not None and idx < len(probs_np):
-                    result.append(float(probs_np[idx]))
-                else:
-                    result.append(0.0)
+                result.append(float(probs_np[idx]) if idx is not None and idx < len(probs_np) else 0.0)
 
-            # Re-normalise in case any candidates were unmapped
             total = sum(result)
             if total > 1e-9:
                 result = [v / total for v in result]
@@ -112,11 +168,16 @@ def load_overseer(
     sentinel_advisor=None,
     db=None,
     value_net=None,
+    human_db=None,
+    gameai=None,
 ) -> Optional[OverseerAdvisor]:
     """Load OverseerAdvisor from checkpoint.  Returns None on any failure.
 
-    If ckpt_path is None, searches: s_over/best.pt → s2/best.pt → s1b/best.pt → s1/best.pt
-    under learned_ai/checkpoints/scaffolded/.
+    If ckpt_path is None, searches: s_over → s2 → s1b → s1 under
+    learned_ai/checkpoints/scaffolded/.
+
+    Automatically loads specialist models (s_open-retired, s_mid, s_end) and
+    builds a LookaheadAdvisor matching the training configuration.
     """
     try:
         from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
@@ -124,13 +185,13 @@ def load_overseer(
         log.warning("OverseerAdvisor: cannot import ScaffoldedPolicyNet: %s", e)
         return None
 
-    _root = Path(__file__).parent.parent.parent
+    _root    = Path(__file__).parent.parent.parent
+    ckpt_dir = _root / "learned_ai" / "checkpoints" / "scaffolded"
 
-    search_paths = []
+    # ── Find overseer checkpoint ──────────────────────────────────────────────
     if ckpt_path:
-        search_paths.append(Path(ckpt_path))
+        search_paths = [Path(ckpt_path)]
     else:
-        ckpt_dir = _root / "learned_ai" / "checkpoints" / "scaffolded"
         search_paths = [
             ckpt_dir / "s_over" / "best.pt",
             ckpt_dir / "s2"     / "best.pt",
@@ -138,30 +199,73 @@ def load_overseer(
             ckpt_dir / "s1"     / "best.pt",
         ]
 
-    chosen = None
-    for p in search_paths:
-        if p.exists():
-            chosen = p
-            break
-
+    chosen = next((p for p in search_paths if p.exists()), None)
     if chosen is None:
         log.info("OverseerAdvisor: no checkpoint found (searched %s)", search_paths)
         return None
 
     try:
-        ckpt = torch.load(str(chosen), map_location="cpu", weights_only=False)
-        cfg = ckpt.get("model_config", {})
+        ckpt  = torch.load(str(chosen), map_location="cpu", weights_only=False)
+        cfg   = ckpt.get("model_config", {})
         model = ScaffoldedPolicyNet.from_config(cfg)
         state = ckpt.get("model") or ckpt
         model.load_state_dict(state)
         model.eval()
         stage = ckpt.get("stage", "unknown")
-        use_db = stage in _DB_FEATURE_STAGES
-        log.info("OverseerAdvisor: loaded %s (stage=%s, db_features=%s, sentinel=%s, value_net=%s)",
-                 chosen, stage, use_db, sentinel_advisor is not None, value_net is not None)
-        return OverseerAdvisor(model, str(chosen),
-                               sentinel_advisor=sentinel_advisor, db=db,
-                               value_net=value_net, stage=stage)
     except Exception as e:
         log.warning("OverseerAdvisor: failed to load %s: %s", chosen, e)
         return None
+
+    move_feat_dim = cfg.get("move_feat_dim", 0)
+    log.info("OverseerAdvisor: loaded %s (stage=%s, move_feat_dim=%d)", chosen, stage, move_feat_dim)
+
+    # ── Specialist models ─────────────────────────────────────────────────────
+    # Only load specialists when the checkpoint expects 85-dim input (s_over).
+    spec_open = spec_mid = spec_end = None
+    if move_feat_dim == 85:
+        log.info("OverseerAdvisor: loading specialist models…")
+        spec_open = _load_spec_model(ckpt_dir / "s_open-retired" / "best.pt")
+        spec_mid  = _load_spec_model(ckpt_dir / "s_mid"          / "best.pt")
+        spec_end  = _load_spec_model(ckpt_dir / "s_end"          / "best.pt")
+
+    # ── LookaheadAdvisor ─────────────────────────────────────────────────────
+    # Replicates the training setup: 5-ply heuristic + value net + sentinel.
+    lookahead = None
+    if move_feat_dim >= 77:
+        try:
+            from learned_ai.models.lookahead_advisor import LookaheadAdvisor
+            from learned_ai.agents.heuristic_agent import get_heuristic_evaluate
+            evaluate_fn = get_heuristic_evaluate()
+            lookahead = LookaheadAdvisor(
+                sentinel=sentinel_advisor,
+                value_net=value_net,
+                evaluate_fn=evaluate_fn,
+                use_sentinel=True,
+            )
+            log.info("OverseerAdvisor: LookaheadAdvisor ready (use_sentinel=True)")
+        except Exception as e:
+            log.warning("OverseerAdvisor: LookaheadAdvisor failed — lookahead block will be zero: %s", e)
+
+    # ── GameAI singleton for alpha-beta features ──────────────────────────────
+    _gameai = gameai
+    if _gameai is None and move_feat_dim == 85:
+        try:
+            from ai.game_ai import GameAI
+            _gameai = GameAI(color="W", difficulty=3)
+            log.info("OverseerAdvisor: GameAI singleton created (depth=3)")
+        except Exception as e:
+            log.warning("OverseerAdvisor: GameAI unavailable — alpha-beta features will be neutral: %s", e)
+
+    return OverseerAdvisor(
+        model, str(chosen),
+        sentinel_advisor=sentinel_advisor,
+        db=db,
+        value_net=value_net,
+        stage=stage,
+        spec_open=spec_open,
+        spec_mid=spec_mid,
+        spec_end=spec_end,
+        human_db=human_db,
+        gameai=_gameai,
+        lookahead_advisor=lookahead,
+    )
