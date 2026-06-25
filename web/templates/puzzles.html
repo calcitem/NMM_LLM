@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NMM Endgame Puzzles</title>
+<style>
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 20px; }
+  h1 { color: #a8d8ff; margin-bottom: 4px; }
+  .subtitle { color: #888; margin-bottom: 20px; font-size: 0.9em; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  select, button { padding: 6px 12px; border-radius: 4px; border: 1px solid #444;
+                   background: #2a2a4e; color: #e0e0e0; font-family: monospace;
+                   font-size: 0.95em; cursor: pointer; }
+  button { background: #3a5a8e; border-color: #5a8abe; }
+  button:hover { background: #4a6aae; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btn-gen    { background: #3a4a2e; border-color: #5a7a4e; }
+  .btn-gen:hover { background: #4a5a3e; }
+  .btn-enter  { background: #4a3a6e; border-color: #7a5aae; }
+  .btn-enter:hover { background: #5a4a7e; }
+  .btn-active { background: #6a4a9e !important; border-color: #9a7ace !important; }
+  .btn-small  { background: #2a2a4e; border-color: #444; font-size: 0.85em; padding: 4px 10px; }
+  .btn-small:hover { background: #3a3a5e; }
+
+  /* ── Setup panel ── */
+  #setup-panel {
+    background: #1e1a32; border: 1px solid #5a3a9e; border-radius: 6px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  #setup-panel h3 { margin: 0 0 10px; color: #c8a8ff; font-size: 1em; }
+  .setup-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .setup-label { color: #aaa; font-size: 0.85em; min-width: 80px; }
+  .palette { display: flex; gap: 6px; }
+  .swatch { width: 36px; height: 36px; border-radius: 4px; border: 2px solid #555;
+            background: #2a2a4e; cursor: pointer; font-size: 1.1em; display: flex;
+            align-items: center; justify-content: center; transition: border-color 0.15s; }
+  .swatch:hover  { border-color: #9a7ace; }
+  .swatch.active { border-color: #c8a8ff; background: #3a2a5e; }
+  .swatch-w      { color: #f2ede0; }
+  .swatch-b      { color: #8080cc; }
+  .swatch-erase  { color: #e05050; }
+  .side-btn  { padding: 4px 14px; border-radius: 4px; border: 2px solid #555;
+               background: #2a2a4e; cursor: pointer; font-family: monospace; }
+  .side-btn.active { border-color: #ffe080; background: #3a3a1e; color: #ffe080; }
+  #setup-solution { width: 100%; box-sizing: border-box; background: #12111e;
+                    border: 1px solid #555; color: #e0e0e0; font-family: monospace;
+                    font-size: 0.9em; padding: 6px 8px; border-radius: 4px; }
+  #setup-solution:focus { outline: none; border-color: #9a7ace; }
+  #setup-error { color: #f44336; font-size: 0.82em; min-height: 1.1em; }
+  #setup-counts { color: #aaa; font-size: 0.85em; }
+  .setup-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .btn-save { background: #3a5a2e; border-color: #5a9a4e; }
+  .btn-save:hover { background: #4a6a3e; }
+
+  /* ── Play area ── */
+  .goal { font-size: 1.3em; color: #ffe080; margin: 16px 0 8px; font-weight: bold; }
+  .board-area { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .board-wrap {
+    width: 480px; height: 480px; background: #2a1f14;
+    border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,.6);
+    padding: 8px; box-sizing: border-box; flex-shrink: 0;
+  }
+  #board-svg { width: 100%; height: 100%; display: block; }
+  .info-panel { flex: 1; min-width: 260px; }
+  .meta { color: #aaa; font-size: 0.85em; margin-bottom: 12px; }
+  .meta span { color: #ccc; }
+  .puzzle-num { color: #888; font-size: 0.8em; margin-bottom: 4px; }
+  .alt-note { color: #888; font-size: 0.78em; margin-top: 10px; font-style: italic; }
+  .status { padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 1em; }
+  .status.ok   { background: #1a4a2e; border-left: 3px solid #4caf50; }
+  .status.fail { background: #4a1a1e; border-left: 3px solid #f44336; }
+  .status.info { background: #1a2a4e; border-left: 3px solid #5a8abe; }
+  .status.warn { background: #3a3a1e; border-left: 3px solid #ffd080; }
+  .move-log { margin: 8px 0; font-size: 0.9em; color: #bbb; min-height: 24px; }
+  .move-log .ws  { color: #80c0ff; }
+  .move-log .opp { color: #ff9080; }
+  .extra-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .hint-btn   { background: #4a3a2e; border-color: #8a6a4e; }
+  .reveal-btn { background: #3a2a4e; border-color: #6a5a8e; }
+  .tags { margin-top: 12px; }
+  .tag { display: inline-block; background: #2a3a4e; border: 1px solid #3a5a7e;
+         padding: 2px 8px; border-radius: 12px; font-size: 0.75em; color: #88aacc; margin: 2px; }
+  .score { color: #ffd080; }
+  a.back { color: #5a8abe; text-decoration: none; display: inline-block; margin-bottom: 16px; }
+  a.back:hover { color: #8ab8ee; }
+  .capture-prompt { color: #ffd080; font-size: 0.9em; margin-top: 4px; }
+</style>
+</head>
+<body>
+<a class="back" href="/">← Back to game</a>
+<h1 id="page-title">NMM Puzzles</h1>
+<p class="subtitle" id="page-subtitle">Find the forced win.</p>
+
+<div class="controls" style="margin-bottom:8px">
+  <button id="mode-endgame" class="btn-active" onclick="window._setMode('endgame')">Endgame</button>
+  <button id="mode-midgame" onclick="window._setMode('midgame')">Midgame</button>
+  <button id="mode-placement" onclick="window._setMode('placement')">Placement</button>
+</div>
+
+<div class="controls" id="endgame-controls">
+  <select id="sel-side">
+    <option value="random">Side: random</option>
+    <option value="W">White to move</option>
+    <option value="B">Black to move</option>
+  </select>
+  <select id="sel-depth">
+    <option value="0">Depth: random</option>
+    <option value="3">Win in 3</option>
+    <option value="4">Win in 4</option>
+    <option value="5">Win in 5</option>
+    <option value="6">Win in 6</option>
+    <option value="7">Win in 7</option>
+  </select>
+  <button id="btn-new" onclick="window._loadPuzzle(false)">New puzzle</button>
+  <button id="btn-gen" class="btn-gen" onclick="window._loadPuzzle(true)"
+          title="Generate a new puzzle from the tablebase (~10–90s)">Generate new</button>
+  <button id="btn-enter" class="btn-enter btn-enter-toggle" onclick="window._toggleSetup()">Enter puzzle</button>
+</div>
+
+<div class="controls" id="midgame-controls" style="display:none">
+  <select id="sel-side-mlm">
+    <option value="random">Side: random</option>
+    <option value="W">White to move</option>
+    <option value="B">Black to move</option>
+  </select>
+  <select id="sel-depth-mlm">
+    <option value="0">Depth: any (4–7)</option>
+    <option value="4">Win in 4</option>
+    <option value="5">Win in 5</option>
+    <option value="6">Win in 6</option>
+    <option value="7">Win in 7</option>
+  </select>
+  <button id="btn-new-mlm" onclick="window._loadMalomPuzzle()">New puzzle</button>
+  <button class="btn-enter btn-enter-toggle" onclick="window._toggleSetup()">Enter puzzle</button>
+</div>
+
+<div class="controls" id="placement-controls" style="display:none">
+  <select id="sel-side-plc">
+    <option value="random">Side: random</option>
+    <option value="W">White to move</option>
+    <option value="B">Black to move</option>
+  </select>
+  <select id="sel-depth-plc">
+    <option value="0">Depth: any (4–7)</option>
+    <option value="4">Win in 4</option>
+    <option value="5">Win in 5</option>
+    <option value="6">Win in 6</option>
+    <option value="7">Win in 7</option>
+  </select>
+  <button id="btn-new-plc" onclick="window._loadPlacementPuzzle()">New puzzle</button>
+  <button class="btn-enter btn-enter-toggle" onclick="window._toggleSetup()">Enter puzzle</button>
+</div>
+
+<!-- Setup panel (hidden by default) -->
+<div id="setup-panel" style="display:none">
+  <h3>Enter a Puzzle</h3>
+
+  <div class="setup-row">
+    <span class="setup-label">Palette</span>
+    <div class="palette">
+      <button class="swatch swatch-erase active" id="sw-erase" onclick="window._setBrush('')" title="Erase">✕</button>
+      <button class="swatch swatch-w" id="sw-w" onclick="window._setBrush('W')" title="White piece">⬜</button>
+      <button class="swatch swatch-b" id="sw-b" onclick="window._setBrush('B')" title="Black piece">⬛</button>
+    </div>
+    <span id="setup-counts" class="setup-counts">W: 0 | B: 0</span>
+  </div>
+
+  <div class="setup-row">
+    <span class="setup-label">Winning side</span>
+    <button class="side-btn active" id="ws-btn-W" onclick="window._setWinningSide('W')">White</button>
+    <button class="side-btn"        id="ws-btn-B" onclick="window._setWinningSide('B')">Black</button>
+    <span style="color:#888;font-size:0.82em;margin-left:4px">(Turn is set to match winning side)</span>
+  </div>
+
+  <div class="setup-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+    <span class="setup-label">Solution moves</span>
+    <input id="setup-solution" type="text"
+           placeholder="e.g.  g4-c4  g7-a4  b4-c5xa1  d5-c3  (winning moves alternating with opponent replies)"
+           oninput="window._onSolutionInput()">
+    <span style="color:#666;font-size:0.8em">Space-separated: WS move, opponent reply, WS move, … Win-depth = number of WS moves.</span>
+  </div>
+
+  <div id="setup-error"></div>
+
+  <div class="setup-actions">
+    <button class="btn-save" id="btn-save-puzzle" onclick="window._savePuzzle()" disabled>Save puzzle</button>
+    <button class="btn-small" onclick="window._clearSetupBoard()">Clear board</button>
+    <button class="btn-small" onclick="window._toggleSetup()">Cancel</button>
+  </div>
+</div>
+
+<div id="goal-label" class="goal" style="display:none"></div>
+<div class="board-area">
+  <div class="board-wrap">
+    <svg id="board-svg"></svg>
+  </div>
+  <div class="info-panel">
+    <div id="puzzle-num" class="puzzle-num"></div>
+    <div id="meta" class="meta"></div>
+    <div id="status" class="status info">Load a puzzle to begin.</div>
+    <div id="capture-prompt" class="capture-prompt" style="display:none">
+      Click an opponent piece to capture it.
+    </div>
+    <div id="move-log" class="move-log"></div>
+    <div id="btn-area" class="extra-btns" style="display:none">
+      <button class="hint-btn" onclick="window._showHint()">💡 Hint</button>
+      <button class="reveal-btn" onclick="window._revealSolution()">🔍 Show solution</button>
+      <button class="btn-small" onclick="window._resetPuzzle()">↺ Try again</button>
+      <button class="btn-small" onclick="window._openExplorer()">🔭 Explorer</button>
+    </div>
+    <div id="tags" class="tags"></div>
+    <p id="alt-note" class="alt-note" style="display:none">
+      Note: some positions may have more than one winning line. The solution shown is one valid path.
+    </p>
+  </div>
+</div>
+
+<script type="module">
+import { Board } from '/static/board.js?v={{ v }}';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const POSITIONS = [
+  'a7','d7','g7','g4','g1','d1','a1','a4',
+  'b6','d6','f6','f4','f2','d2','b2','b4',
+  'c5','d5','e5','e4','e3','d3','c3','c4',
+];
+
+const MILLS = [
+  ['a7','d7','g7'],['g7','g4','g1'],['g1','d1','a1'],['a1','a4','a7'],
+  ['b6','d6','f6'],['f6','f4','f2'],['f2','d2','b2'],['b2','b4','b6'],
+  ['c5','d5','e5'],['e5','e4','e3'],['e3','d3','c3'],['c3','c4','c5'],
+  ['d7','d6','d5'],['g4','f4','e4'],['d1','d2','d3'],['a4','b4','c4'],
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function parseFen(fen) {
+  const posStr = fen.split('|')[0];
+  const map = {};
+  for (let i = 0; i < 24; i++) {
+    const ch = posStr[i];
+    map[POSITIONS[i]] = (ch === 'W' || ch === 'B') ? ch : null;
+  }
+  return map;
+}
+
+function buildFen(grid, turn) {
+  return POSITIONS.map(p => grid[p] || '.').join('') + `|${turn}|9|9`;
+}
+
+function checksMill(map, pos, color) {
+  for (const mill of MILLS) {
+    if (mill.includes(pos) && mill.every(p => map[p] === color)) return true;
+  }
+  return false;
+}
+
+function applyLocal(map, from, to) {
+  const m = { ...map };
+  m[to] = m[from];
+  m[from] = null;
+  return m;
+}
+
+// ── Board ─────────────────────────────────────────────────────────────────────
+const svgEl = document.getElementById('board-svg');
+const board  = new Board(svgEl, onNodeClick);
+
+// ── Setup mode ────────────────────────────────────────────────────────────────
+let setupMode     = false;
+let setupGrid     = {};
+let setupBrush    = '';          // '' = erase, 'W', 'B'
+let setupWinningSide = 'W';
+
+function enterSetupMode() {
+  setupMode = true;
+  // Seed from current puzzle position if one is loaded
+  setupGrid = puzzle ? { ...posMap } : {};
+  setupBrush = 'W';
+  _setSwatch('w');
+  document.getElementById('setup-panel').style.display = '';
+  document.querySelectorAll('.btn-enter-toggle').forEach(b => b.classList.add('btn-active'));
+  // Let clicks fall through pieces to node circles
+  board._pieceGroup.setAttribute('pointer-events', 'none');
+  _renderSetupBoard();
+  _updateSetupUI();
+  setStatus('Setup mode — click board nodes to place pieces.', 'info');
+}
+
+function exitSetupMode() {
+  setupMode = false;
+  board._pieceGroup.setAttribute('pointer-events', '');
+  document.getElementById('setup-panel').style.display = 'none';
+  document.querySelectorAll('.btn-enter-toggle').forEach(b => b.classList.remove('btn-active'));
+  if (puzzle && currentFen) {
+    setupUserTurn(null);
+    setStatus(`${puzzle.goal}. Click one of your pieces to continue.`, 'info');
+  }
+}
+
+function _renderSetupBoard() {
+  const grid = {};
+  for (const pos of POSITIONS) grid[pos] = setupGrid[pos] || null;
+  board.grid        = grid;
+  board.legalDests  = new Set();
+  board.legalSrcs   = new Set();
+  board.selected    = null;
+  board._millNodes  = new Set();
+  board._hintGroup.innerHTML   = '';
+  board._hintOverlay.innerHTML = '';
+  board._drawPieces();
+  board._pieceGroup.setAttribute('pointer-events', 'none');
+}
+
+function _setupCounts() {
+  const w = POSITIONS.filter(p => setupGrid[p] === 'W').length;
+  const b = POSITIONS.filter(p => setupGrid[p] === 'B').length;
+  return { w, b };
+}
+
+function _updateSetupUI() {
+  const { w, b } = _setupCounts();
+  document.getElementById('setup-counts').textContent = `W: ${w}  |  B: ${b}`;
+  const errors = [];
+  if (w < 3) errors.push(`White needs ≥ 3 pieces (has ${w}).`);
+  if (b < 3) errors.push(`Black needs ≥ 3 pieces (has ${b}).`);
+  if (w > 9) errors.push('White cannot have more than 9 pieces.');
+  if (b > 9) errors.push('Black cannot have more than 9 pieces.');
+  const solution = (document.getElementById('setup-solution').value || '').trim();
+  if (errors.length === 0 && !solution) errors.push('Enter solution moves above.');
+  document.getElementById('setup-error').textContent = errors[0] || '';
+  document.getElementById('btn-save-puzzle').disabled = errors.length > 0;
+}
+
+function _setSwatch(id) {
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+  document.getElementById('sw-' + id).classList.add('active');
+}
+
+window._setBrush = function(b) {
+  setupBrush = b;
+  _setSwatch(b === '' ? 'erase' : b.toLowerCase());
+};
+
+window._setWinningSide = function(side) {
+  setupWinningSide = side;
+  document.getElementById('ws-btn-W').classList.toggle('active', side === 'W');
+  document.getElementById('ws-btn-B').classList.toggle('active', side === 'B');
+};
+
+window._clearSetupBoard = function() {
+  setupGrid = {};
+  _renderSetupBoard();
+  _updateSetupUI();
+};
+
+window._onSolutionInput = function() {
+  _updateSetupUI();
+};
+
+window._toggleSetup = function() {
+  if (setupMode) exitSetupMode(); else enterSetupMode();
+};
+
+window._savePuzzle = async function() {
+  const { w, b } = _setupCounts();
+  if (w < 3 || b < 3) return;
+
+  const solRaw   = (document.getElementById('setup-solution').value || '').trim();
+  const solution = solRaw.split(/\s+/).filter(Boolean);
+  if (!solution.length) {
+    document.getElementById('setup-error').textContent = 'Enter solution moves first.';
+    return;
+  }
+
+  const fen = buildFen(setupGrid, setupWinningSide);
+  document.getElementById('btn-save-puzzle').disabled    = true;
+  document.getElementById('btn-save-puzzle').textContent = 'Saving…';
+  setStatus('Validating moves against the game engine…', 'info');
+
+  try {
+    const r    = await fetch('/api/puzzles/submit', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ fen, winning_side: setupWinningSide, solution_line: solution }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      document.getElementById('setup-error').textContent = data.detail || 'Error saving puzzle.';
+      setStatus('Save failed — ' + (data.detail || 'see error above'), 'fail');
+      return;
+    }
+    // Load the saved puzzle for immediate play
+    puzzle      = data;
+    currentFen  = data.board_fen;
+    posMap      = parseFen(currentFen);
+    movesDone   = [];
+    solved      = false;
+    failed      = false;
+    pendingMove = null;
+    document.getElementById('goal-label').style.display = '';
+    document.getElementById('goal-label').textContent   = puzzle.goal;
+    document.getElementById('btn-area').style.display   = '';
+    const snumEl = document.getElementById('puzzle-num');
+    if (puzzle.puzzle_number) {
+      const snum  = String(puzzle.puzzle_number).padStart(4, '0');
+      const stotal = puzzle.total_puzzles ? ` / ${puzzle.total_puzzles}` : '';
+      snumEl.textContent = `Puzzle #${snum}${stotal}`;
+    } else { snumEl.textContent = ''; }
+    document.getElementById('meta').innerHTML =
+      `Source: <span>${puzzle.source_db}</span> &nbsp;|&nbsp; ` +
+      `<span>${puzzle.tags.includes('db-verified') ? '✓ DB-verified' : 'user-submitted'}</span>`;
+    document.getElementById('tags').innerHTML =
+      (puzzle.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+    document.getElementById('alt-note').style.display = '';
+    document.getElementById('capture-prompt').style.display = 'none';
+    document.getElementById('setup-solution').value = '';
+    updateMoveLog();
+    exitSetupMode();
+    setupUserTurn(null);
+    setStatus(`Puzzle saved! ${puzzle.goal}. Click one of your pieces to start.`, 'ok');
+  } catch (e) {
+    setStatus('Network error: ' + e.message, 'fail');
+    document.getElementById('setup-error').textContent = e.message;
+  } finally {
+    document.getElementById('btn-save-puzzle').disabled    = false;
+    document.getElementById('btn-save-puzzle').textContent = 'Save puzzle';
+  }
+};
+
+// ── Puzzle state ──────────────────────────────────────────────────────────────
+let puzzle      = null;
+let currentFen  = null;
+let posMap      = {};
+let movesDone   = [];
+let solved      = false;
+let failed      = false;
+let pendingMove = null;
+let puzzleMode  = 'endgame';  // 'endgame' | 'midgame' | 'placement'
+
+function isPlacementPhase(fen) {
+  const parts = fen ? fen.split('|') : [];
+  return parts.length >= 4 && (parseInt(parts[2]) < 9 || parseInt(parts[3]) < 9);
+}
+
+function _validateBaseUrl() {
+  if (puzzleMode === 'midgame' || puzzleMode === 'placement') return '/api/puzzles/malom/validate';
+  return '/api/puzzles/validate';
+}
+
+function setStatus(msg, cls = 'info') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status ' + cls;
+}
+
+// Format an array of move notations with step numbers and W/B color prefixes.
+// winningSide moves on even indices (0, 2, 4…); opponent on odd indices.
+// Output: "1: Wf2-f4 → Bb2-d2 → 2: Wa1-d1 → Bd2-f2 → …"
+function formatSolutionLine(line, winningSide) {
+  const opp = winningSide === 'W' ? 'B' : 'W';
+  const parts = [];
+  let step = 1;
+  for (let i = 0; i < line.length; i++) {
+    const isWinner = (i % 2 === 0);
+    const color = isWinner ? winningSide : opp;
+    parts.push(isWinner ? `${step++}: ${color}${line[i]}` : `${color}${line[i]}`);
+  }
+  return parts.join(' → ');
+}
+
+function updateMoveLog() {
+  const el  = document.getElementById('move-log');
+  const ws  = puzzle ? puzzle.winning_side : 'W';
+  const opp = ws === 'W' ? 'B' : 'W';
+  let step  = 1;
+  const parts = movesDone.map((mv, i) => {
+    const isWinner = (i % 2 === 0);
+    const cls      = isWinner ? 'ws' : 'opp';
+    const color    = isWinner ? ws : opp;
+    const label    = isWinner ? `${step++}: ${color}${mv}` : `${color}${mv}`;
+    return `<span class="${cls}">${label}</span>`;
+  });
+  el.innerHTML = parts.length
+    ? parts.join('<span style="color:#555"> → </span>')
+    : '<em style="color:#555">No moves yet</em>';
+}
+
+function setupUserTurn(pairs) {
+  const ws = puzzle.winning_side;
+  if (currentFen && isPlacementPhase(currentFen)) {
+    const emptySquares = Object.keys(posMap).filter(p => posMap[p] === null);
+    board.render({
+      board: posMap,
+      phase: 'place',
+      is_human_turn: true,
+      legal_sources: [],
+      legal_dests: emptySquares,
+    });
+  } else {
+    const srcs = Object.keys(posMap).filter(p => posMap[p] === ws);
+    board.render({
+      board: posMap,
+      phase: 'move',
+      is_human_turn: true,
+      legal_sources: srcs,
+      legal_dests: [],
+    });
+    if (pairs && pairs.length) board.setMovePairs(pairs);
+  }
+}
+
+function showBoard() {
+  board.render({ board: posMap, phase: 'move', is_human_turn: false,
+                 legal_sources: [], legal_dests: [] });
+}
+
+// ── Click handler ─────────────────────────────────────────────────────────────
+function onNodeClick(pos) {
+  // Setup mode: place / erase pieces
+  if (setupMode) {
+    if (setupBrush === '') {
+      setupGrid[pos] = null;
+    } else {
+      setupGrid[pos] = (setupGrid[pos] === setupBrush) ? null : setupBrush;
+    }
+    _renderSetupBoard();
+    _updateSetupUI();
+    return;
+  }
+
+  if (!puzzle || solved || failed) return;
+  if (movesDone.length % 2 !== 0) return;   // opponent auto-play turn
+
+  const ws  = puzzle.winning_side;
+  const opp = ws === 'W' ? 'B' : 'W';
+
+  if (board.capMode) {
+    if (!board.legalCaps.has(pos)) return;
+    // Phase-driven: placement captures have no "from" square
+    const notation = pendingMove.from === null
+      ? `${pendingMove.to}x${pos}`
+      : `${pendingMove.from}-${pendingMove.to}x${pos}`;
+    pendingMove = null;
+    document.getElementById('capture-prompt').style.display = 'none';
+    submitMove(notation);
+    return;
+  }
+
+  // Placement phase: click any empty square to place a piece
+  if (currentFen && isPlacementPhase(currentFen)) {
+    const owner = posMap[pos];
+    if (owner !== null) return;
+    const hyp = { ...posMap, [pos]: ws };
+    if (checksMill(hyp, pos, ws)) {
+      const targets = Object.keys(posMap).filter(p => posMap[p] === opp);
+      if (targets.length === 0) {
+        submitMove(pos);
+      } else if (targets.length === 1) {
+        submitMove(`${pos}x${targets[0]}`);
+      } else {
+        pendingMove = { from: null, to: pos };
+        posMap = hyp;
+        board.render({ board: posMap, phase: 'place', is_human_turn: true,
+                       legal_sources: [], legal_dests: [] });
+        board.enterCapture(targets);
+        document.getElementById('capture-prompt').style.display = '';
+        setStatus('You formed a mill! Click an opponent piece to capture.', 'warn');
+      }
+      return;
+    }
+    submitMove(pos);
+    return;
+  }
+
+  // Movement phase
+  const owner = posMap[pos];
+
+  if (owner === ws) {
+    board.selectSource(pos);
+    setStatus(`Selected ${pos} — click a destination.`, 'info');
+    return;
+  }
+
+  if (board.selected === null) return;
+
+  if (owner === null) {
+    const from = board.selected;
+    const hyp  = applyLocal(posMap, from, pos);
+    if (checksMill(hyp, pos, ws)) {
+      const targets = Object.keys(posMap).filter(p => posMap[p] === opp);
+      if (targets.length === 0) {
+        submitMove(`${from}-${pos}`);
+      } else if (targets.length === 1) {
+        submitMove(`${from}-${pos}x${targets[0]}`);
+      } else {
+        pendingMove = { from, to: pos };
+        posMap = hyp;
+        board.render({ board: posMap, phase: 'move', is_human_turn: true,
+                       legal_sources: [], legal_dests: [] });
+        board.enterCapture(targets);
+        document.getElementById('capture-prompt').style.display = '';
+        setStatus('You formed a mill! Click an opponent piece to capture.', 'warn');
+      }
+      return;
+    }
+    submitMove(`${from}-${pos}`);
+    return;
+  }
+
+  if (owner === opp) setStatus('Select one of your own pieces first.', 'info');
+}
+
+// ── Server communication ──────────────────────────────────────────────────────
+async function submitMove(notation) {
+  // Strict solution-line matching: only accept the exact answer move.
+  if (puzzle.solution_line && movesDone.length < puzzle.solution_line.length) {
+    if (notation !== puzzle.solution_line[movesDone.length]) {
+      setStatus('This move is not in the answer string. Try again and good luck!', 'fail');
+      setupUserTurn(null);
+      return;
+    }
+  }
+
+  const remaining = puzzle.target_win_in - Math.floor(movesDone.length / 2);
+  const url = `${_validateBaseUrl()}?fen=${encodeURIComponent(currentFen)}`
+            + `&move=${encodeURIComponent(notation)}`
+            + `&winning_side=${puzzle.winning_side}`
+            + `&target_win_in=${remaining}`;
+  try {
+    const r    = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) {
+      setStatus(`❌ ${data.detail || 'Illegal move — try again.'}`, 'fail');
+      setupUserTurn(null);
+      return;
+    }
+    movesDone.push(notation);
+    currentFen = data.child_fen;
+    posMap     = parseFen(currentFen);
+    updateMoveLog();
+
+    const opp      = puzzle.winning_side === 'W' ? 'B' : 'W';
+    const oppCount = Object.values(posMap).filter(v => v === opp).length;
+
+    if (!data.still_winning) {
+      showBoard();
+      setStatus('❌ That move throws away the win! Load a new puzzle to try again.', 'fail');
+      failed = true;
+    } else if (oppCount < 3 || !data.child_wdl) {
+      showBoard();
+      board.flashMills(posMap, puzzle.winning_side);
+      setStatus('🎉 Excellent — forced win found!', 'ok');
+      solved = true;
+    } else {
+      showBoard();
+      setStatus('✓ Correct! Opponent thinking…', 'ok');
+      setTimeout(autoPlayOpponent, 700);
+    }
+  } catch (e) {
+    setStatus('Network error: ' + e.message, 'fail');
+  }
+}
+
+async function autoPlayOpponent() {
+  const soFar = movesDone.length;
+
+  // All modes: replay the pre-computed solution line.
+  if (soFar >= puzzle.solution_line.length) {
+    setStatus('🎉 Puzzle complete!', 'ok');
+    solved = true;
+    return;
+  }
+  const oppMove   = puzzle.solution_line[soFar];
+  const remaining = puzzle.target_win_in - Math.floor(soFar / 2);
+  try {
+    const url = `${_validateBaseUrl()}?fen=${encodeURIComponent(currentFen)}`
+              + `&move=${encodeURIComponent(oppMove)}`
+              + `&winning_side=${puzzle.winning_side}`
+              + `&target_win_in=${remaining}`;
+    const r = await fetch(url);
+    if (r.ok) {
+      const data  = await r.json();
+      movesDone.push(oppMove);
+      currentFen  = data.child_fen;
+      posMap      = parseFen(currentFen);
+      updateMoveLog();
+      const movesLeft = puzzle.target_win_in - Math.ceil(movesDone.length / 2);
+      setupUserTurn(null);
+      setStatus(`Opponent played ${oppMove}. Find the win in ${movesLeft} more move${movesLeft === 1 ? '' : 's'}.`, 'info');
+    }
+  } catch (_) { /* silent */ }
+}
+
+window._showHint = function() {
+  if (!puzzle) return;
+  const idx = movesDone.length;
+  if (idx >= puzzle.solution_line.length) {
+    setStatus("💡 You've completed the puzzle!", 'ok');
+    return;
+  }
+  const note = puzzle.solution_line[idx];
+  const mv = note.match(/^([a-g][1-7])-([a-g][1-7])/);
+  if (mv) {
+    board.showHint(mv[1], mv[2]);  // movement: amber source + blue dest
+  } else {
+    const pm = note.match(/^([a-g][1-7])/);
+    if (pm) board.showHint(null, pm[1]);  // placement: blue dest only
+  }
+  setStatus(`💡 Hint: try ${note}`, 'warn');
+};
+
+window._revealSolution = function() {
+  if (!puzzle) return;
+  setStatus('Solution: ' + formatSolutionLine(puzzle.solution_line, puzzle.winning_side), 'info');
+};
+
+window._openExplorer = function() {
+  if (!currentFen) return;
+  window.open('/explorer?fen=' + encodeURIComponent(currentFen), '_blank');
+};
+
+window._resetPuzzle = function() {
+  if (!puzzle) return;
+  currentFen  = puzzle.board_fen;
+  posMap      = parseFen(currentFen);
+  movesDone   = [];
+  solved      = false;
+  failed      = false;
+  pendingMove = null;
+  document.getElementById('capture-prompt').style.display = 'none';
+  updateMoveLog();
+  if (isPlacementPhase(currentFen)) {
+    setupUserTurn(null);
+    setStatus(`${puzzle.goal}. Click an empty square (highlighted) to place a piece.`, 'info');
+  } else {
+    const pairs = puzzle.legal_moves
+      .map(n => { const m = n.match(/^([a-g][1-7])-([a-g][1-7])/); return m ? [m[1], m[2]] : null; })
+      .filter(Boolean);
+    setupUserTurn(pairs);
+    setStatus(`${puzzle.goal}. Click one of your pieces (highlighted) to start.`, 'info');
+  }
+};
+
+// ── Puzzle loading ────────────────────────────────────────────────────────────
+window._loadPuzzle = async function(generate = false) {
+  if (setupMode) exitSetupMode();
+  const btn    = document.getElementById('btn-new');
+  const btnGen = document.getElementById('btn-gen');
+  btn.disabled = btnGen.disabled = true;
+  btn.textContent = 'Loading…';
+  setStatus(generate ? 'Generating from tablebase… (may take up to 90s)' : 'Fetching from cache…', 'info');
+
+  const side  = document.getElementById('sel-side').value;
+  const depth = document.getElementById('sel-depth').value;
+  const url   = `/api/puzzles/random?side=${side}&depth=${depth}&generate=${generate}`;
+  try {
+    const r    = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) {
+      setStatus('⚠ ' + (data.error || 'No puzzles found. Click "Generate new" or run the CLI.'), 'fail');
+      return;
+    }
+    puzzle      = data;
+    currentFen  = puzzle.board_fen;
+    posMap      = parseFen(currentFen);
+    movesDone   = [];
+    solved      = false;
+    failed      = false;
+    pendingMove = null;
+    document.getElementById('capture-prompt').style.display = 'none';
+    document.getElementById('goal-label').style.display = '';
+    document.getElementById('goal-label').textContent   = puzzle.goal;
+    document.getElementById('btn-area').style.display   = '';
+    const numEl = document.getElementById('puzzle-num');
+    if (puzzle.puzzle_number) {
+      const num   = String(puzzle.puzzle_number).padStart(4, '0');
+      const total = puzzle.total_puzzles ? ` / ${puzzle.total_puzzles}` : '';
+      const date  = puzzle.created_at ? `  ·  ${puzzle.created_at} UTC` : '';
+      numEl.textContent = `Puzzle #${num}${total}${date}`;
+    } else if (puzzle.created_at) {
+      numEl.textContent = `Created ${puzzle.created_at} UTC`;
+    } else {
+      numEl.textContent = '';
+    }
+    document.getElementById('meta').innerHTML =
+      `Source: <span>${puzzle.source_db}</span> &nbsp;|&nbsp; ` +
+      `Hardness: <span class="score">${puzzle.hardness_score}</span> &nbsp;|&nbsp; ` +
+      `Legal: <span>${puzzle.legal_moves.length} moves</span>`;
+    document.getElementById('tags').innerHTML =
+      (puzzle.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+    document.getElementById('alt-note').style.display = '';
+    const pairs = puzzle.legal_moves
+      .map(n => { const m = n.match(/^([a-g][1-7])-([a-g][1-7])/); return m ? [m[1], m[2]] : null; })
+      .filter(Boolean);
+    setupUserTurn(pairs);
+    updateMoveLog();
+    setStatus(`${puzzle.goal}. Click one of your pieces (highlighted) to start.`, 'info');
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'fail');
+  } finally {
+    btn.disabled = btnGen.disabled = false;
+    btn.textContent = 'New puzzle';
+  }
+};
+
+// ── Mode switching ────────────────────────────────────────────────────────────
+window._setMode = function(mode) {
+  puzzleMode = mode;
+  document.getElementById('mode-endgame').classList.toggle('btn-active', mode === 'endgame');
+  document.getElementById('mode-midgame').classList.toggle('btn-active', mode === 'midgame');
+  document.getElementById('mode-placement').classList.toggle('btn-active', mode === 'placement');
+  document.getElementById('endgame-controls').style.display   = mode === 'endgame'   ? '' : 'none';
+  document.getElementById('midgame-controls').style.display   = mode === 'midgame'   ? '' : 'none';
+  document.getElementById('placement-controls').style.display = mode === 'placement' ? '' : 'none';
+  const titles = {
+    endgame:   ['NMM Endgame Puzzles',   'Find the forced win — endgame positions from the retrograde tablebase.'],
+    midgame:   ['NMM Midgame Puzzles',   'Find the forced win — midgame positions from the Malom perfect database.'],
+    placement: ['NMM Placement Puzzles', 'Find the forced win — placement-phase positions from the Malom perfect database.'],
+  };
+  document.getElementById('page-title').textContent    = titles[mode][0];
+  document.getElementById('page-subtitle').textContent = titles[mode][1];
+  puzzle = null;
+  currentFen = null;
+  posMap = {};
+  movesDone = [];
+  solved = failed = false;
+  pendingMove = null;
+  document.getElementById('goal-label').style.display  = 'none';
+  document.getElementById('btn-area').style.display    = 'none';
+  document.getElementById('alt-note').style.display    = 'none';
+  document.getElementById('puzzle-num').textContent    = '';
+  document.getElementById('meta').innerHTML            = '';
+  document.getElementById('tags').innerHTML            = '';
+  const hints = {
+    endgame:   'Click "New puzzle" to load an endgame puzzle.',
+    midgame:   'Click "New puzzle" to load a midgame puzzle from the Malom database.',
+    placement: 'Click "New puzzle" to load a placement-phase puzzle from the Malom database.',
+  };
+  setStatus(hints[mode], 'info');
+  showBoard();
+};
+
+// ── Malom puzzle loading ──────────────────────────────────────────────────────
+window._loadMalomPuzzle = async function() {
+  if (setupMode) exitSetupMode();
+  const btn = document.getElementById('btn-new-mlm');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  setStatus('Fetching midgame puzzle from Malom database…', 'info');
+
+  const side  = document.getElementById('sel-side-mlm').value;
+  const depth = document.getElementById('sel-depth-mlm').value;
+  const url   = `/api/puzzles/malom/random?side=${side}&depth=${depth}`;
+  try {
+    const r    = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) {
+      setStatus('⚠ ' + (data.error || 'No midgame puzzle found. Try again.'), 'fail');
+      return;
+    }
+    puzzle      = data;
+    currentFen  = puzzle.board_fen;
+    posMap      = parseFen(currentFen);
+    movesDone   = [];
+    solved      = false;
+    failed      = false;
+    pendingMove = null;
+    document.getElementById('capture-prompt').style.display = 'none';
+    document.getElementById('goal-label').style.display = '';
+    document.getElementById('goal-label').textContent   = puzzle.goal;
+    document.getElementById('btn-area').style.display   = '';
+    const numEl = document.getElementById('puzzle-num');
+    if (puzzle.puzzle_number) {
+      const num   = String(puzzle.puzzle_number).padStart(4, '0');
+      const total = puzzle.total_puzzles ? ` / ${puzzle.total_puzzles}` : '';
+      const date  = puzzle.created_at ? `  ·  ${puzzle.created_at} UTC` : '';
+      numEl.textContent = `Puzzle #${num}${total}${date}`;
+    } else if (puzzle.created_at) {
+      numEl.textContent = `Created ${puzzle.created_at} UTC`;
+    } else {
+      numEl.textContent = '';
+    }
+    document.getElementById('meta').innerHTML =
+      `Source: <span>${puzzle.source_db}</span> &nbsp;|&nbsp; ` +
+      `Hardness: <span class="score">${puzzle.hardness_score}</span> &nbsp;|&nbsp; ` +
+      `Legal: <span>${puzzle.legal_moves.length} moves</span>`;
+    document.getElementById('tags').innerHTML =
+      (puzzle.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+    document.getElementById('alt-note').style.display = '';
+    const pairs = puzzle.legal_moves
+      .map(n => { const m = n.match(/^([a-g][1-7])-([a-g][1-7])/); return m ? [m[1], m[2]] : null; })
+      .filter(Boolean);
+    setupUserTurn(pairs);
+    updateMoveLog();
+    setStatus(`${puzzle.goal}. Click one of your pieces (highlighted) to start.`, 'info');
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'fail');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'New puzzle';
+  }
+};
+
+// ── Placement puzzle loading ──────────────────────────────────────────────────
+window._loadPlacementPuzzle = async function() {
+  if (setupMode) exitSetupMode();
+  const btn = document.getElementById('btn-new-plc');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  setStatus('Fetching placement puzzle from Malom database…', 'info');
+
+  const side  = document.getElementById('sel-side-plc').value;
+  const depth = document.getElementById('sel-depth-plc').value;
+  const url   = `/api/puzzles/placement/random?side=${side}&depth=${depth}`;
+  try {
+    const r    = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) {
+      setStatus('⚠ ' + (data.error || 'No placement puzzle found. Try again.'), 'fail');
+      return;
+    }
+    puzzle      = data;
+    currentFen  = puzzle.board_fen;
+    posMap      = parseFen(currentFen);
+    movesDone   = [];
+    solved      = false;
+    failed      = false;
+    pendingMove = null;
+    document.getElementById('capture-prompt').style.display = 'none';
+    document.getElementById('goal-label').style.display = '';
+    document.getElementById('goal-label').textContent   = puzzle.goal;
+    document.getElementById('btn-area').style.display   = '';
+    const numEl = document.getElementById('puzzle-num');
+    if (puzzle.puzzle_number) {
+      const num   = String(puzzle.puzzle_number).padStart(4, '0');
+      const total = puzzle.total_puzzles ? ` / ${puzzle.total_puzzles}` : '';
+      const date  = puzzle.created_at ? `  ·  ${puzzle.created_at} UTC` : '';
+      numEl.textContent = `Puzzle #${num}${total}${date}`;
+    } else if (puzzle.created_at) {
+      numEl.textContent = `Created ${puzzle.created_at} UTC`;
+    } else {
+      numEl.textContent = '';
+    }
+    document.getElementById('meta').innerHTML =
+      `Source: <span>${puzzle.source_db}</span> &nbsp;|&nbsp; ` +
+      `Hardness: <span class="score">${puzzle.hardness_score}</span> &nbsp;|&nbsp; ` +
+      `Legal: <span>${puzzle.legal_moves.length} moves</span>`;
+    document.getElementById('tags').innerHTML =
+      (puzzle.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+    document.getElementById('alt-note').style.display = '';
+    updateMoveLog();
+    setupUserTurn(null);
+    setStatus(`${puzzle.goal}. Click an empty square (highlighted) to place a piece.`, 'info');
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'fail');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'New puzzle';
+  }
+};
+</script>
+</body>
+</html>
