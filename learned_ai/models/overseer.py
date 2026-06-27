@@ -13,7 +13,7 @@ Feature pipeline mirrors training exactly (train_scaffolded_overseer.py):
      - [80:82) GameAI alpha-beta features
      - [82:85) HumanDB features
 
-Checkpoint search order: s_over → s2 → s1b → s1.
+Checkpoint search order: s_over/best.pt → s_over/latest.pt → s2 → s1b → s1.
 """
 
 from __future__ import annotations
@@ -173,8 +173,8 @@ def load_overseer(
 ) -> Optional[OverseerAdvisor]:
     """Load OverseerAdvisor from checkpoint.  Returns None on any failure.
 
-    If ckpt_path is None, searches: s_over → s2 → s1b → s1 under
-    learned_ai/checkpoints/scaffolded/.
+    If ckpt_path is None, searches: s_over/best.pt → s_over/latest.pt → s2 → s1b → s1
+    under learned_ai/checkpoints/scaffolded/.
 
     Automatically loads specialist models (s_open-retired, s_mid, s_end) and
     builds a LookaheadAdvisor matching the training configuration.
@@ -194,6 +194,7 @@ def load_overseer(
     else:
         search_paths = [
             ckpt_dir / "s_over" / "best.pt",
+            ckpt_dir / "s_over" / "latest.pt",
             ckpt_dir / "s2"     / "best.pt",
             ckpt_dir / "s1b"    / "best.pt",
             ckpt_dir / "s1"     / "best.pt",

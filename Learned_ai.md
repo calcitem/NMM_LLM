@@ -473,7 +473,7 @@ Positions sampled from real games with < 12 pieces total.
 
 Requires all three specialist checkpoints to be complete first.
 The Overseer uses 85-float features: 77 base+lookahead + 3 specialist probs + 2 GameAI + 3 HumanDB.
-GameAI runs depth=3 during training, depth=5 at gameplay inference.
+GameAI runs depth=7 during training, depth=5 at gameplay inference.
 
 **Reward design (revised 2026-06-25):** Win-first.  Main signal is game outcome.
 Specialist-filtered Malom win bonus: fires only when the active phase specialist's top-1
@@ -482,6 +482,8 @@ Draws score 0 (neutral).  Starts at difficulty 1 and advances at 60% win rate pe
 
 **Early result (2026-06-25, game 10):** diff 1 — hwr=0.333, awr=0.600, malom=74.4%.
 Significantly stronger start than the previous diff-3 run (which showed hwr≈0.08 at game 10).
+
+#### Serial training (single process)
 
 ```bash
 # Fresh start (clears old logs, ignores previous s_over checkpoints)
@@ -493,7 +495,6 @@ Significantly stronger start than the previous diff-3 run (which showed hwr≈0.
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
     --max-games 10000 --max-ply 140
 # Optional: --human-db data/human_db.sqlite (default)
-# Optional: --gameai-depth 3 (training depth, default 3)
 # → learned_ai/checkpoints/scaffolded/s_over/best.pt
 
 # Resume training (auto-resumes from s_over/best.pt)
@@ -505,6 +506,53 @@ Significantly stronger start than the previous diff-3 run (which showed hwr≈0.
     --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
     --max-games 10000 --max-ply 140
 ```
+
+#### Parallel training (multi-process, recommended)
+
+`train_scaffolded_overseer_parallel.py` runs rollouts across N worker processes via
+`ProcessPoolExecutor`, then trains in the main process on the collected trajectories.
+Workers each load all three specialists and run full 85-float overseer games independently;
+the main process batches the results and calls the A2C/PPO update.
+
+GameAI depth defaults to 7 (vs 3 in the serial version) — workers run on CPU so the deeper
+search doesn't block training.
+
+**Key difference from serial:** state dict is serialised as numpy arrays when queued to workers
+(avoids PyTorch's fd-sharing socket race under high worker counts).
+
+```bash
+# Fresh start — parallel, 8 workers
+.venv/bin/python scripts/train_scaffolded_overseer_parallel.py \
+    --scratch \
+    --opening-ckpt  learned_ai/checkpoints/scaffolded/s_open-retired/best.pt \
+    --midgame-ckpt  learned_ai/checkpoints/scaffolded/s_mid/best.pt \
+    --endgame-ckpt  learned_ai/checkpoints/scaffolded/s_end/best.pt \
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+    --max-games 10000 --max-ply 140 \
+    --workers 8
+# → learned_ai/checkpoints/scaffolded/s_over/best.pt  (same output dir as serial)
+
+# Resume training
+.venv/bin/python scripts/train_scaffolded_overseer_parallel.py \
+    --auto-resume-best \
+    --opening-ckpt  learned_ai/checkpoints/scaffolded/s_open-retired/best.pt \
+    --midgame-ckpt  learned_ai/checkpoints/scaffolded/s_mid/best.pt \
+    --endgame-ckpt  learned_ai/checkpoints/scaffolded/s_end/best.pt \
+    --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted \
+    --max-games 10000 --max-ply 140 \
+    --workers 8
+```
+
+**Notable parallel-only flags:**
+
+| Flag | Default | Effect |
+|-|-|-|
+| `--workers N` | 4 | Number of worker processes for parallel rollouts |
+| `--gameai-depth D` | 7 | Alpha-beta depth used inside workers (serial default is 3) |
+| `--s1b-data PATH` | `learned_ai/data/human_imitation.npz` | Data for s1b refresher run before workers spawn |
+| `--s1b-refresher-epochs N` | 3/10 | Epochs for loser/winner refresher passes |
+| `--max-branches-per-game N` | 0 (disabled) | Branch rollouts per game for extra data |
+| `--branch-every N` | — | How often to sample a branch game |
 
 ---
 
@@ -624,7 +672,8 @@ forward pass, extending the 77-float base to 85 floats.
 | `scripts/train_scaffolded_opening.py` | Stage 2: Opening Specialist |
 | `scripts/train_scaffolded_midgame.py` | Stage 3: Midgame Specialist |
 | `scripts/train_scaffolded_endgame.py` | Stage 4: Endgame Specialist |
-| `scripts/train_scaffolded_overseer.py` | Stage 5: Overseer |
+| `scripts/train_scaffolded_overseer.py` | Stage 5: Overseer (serial, single process) |
+| `scripts/train_scaffolded_overseer_parallel.py` | Stage 5: Overseer (parallel, N workers via ProcessPoolExecutor) |
 | `scripts/bench_scaffolded.py` | Headless benchmark vs heuristic configs |
 | `tests/test_scaffolded_policy.py` | 25 unit tests (encoder, net, A2C, agent) |
 
