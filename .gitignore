@@ -74,6 +74,9 @@ learned_ai/logs/*
 learned_ai/self_play_games/*
 !learned_ai/self_play_games/.gitkeep
 
+# Collaboration / draft docs — not for public repo
+Sanmill_Collab.md
+
 # OS
 .DS_Store
 Thumbs.db
