@@ -109,9 +109,11 @@ from .heuristics import evaluate_v2  # noqa: F401  — Stage 1 adds this symbol
 #   - Blocked opponent pieces (movement phase, weight x48)
 #   - Mill count (all phases)
 #   - Mill threats / closeable mills (all phases)
-#   - Cycle-ready mills (movement + fly phases)
-#   - Fork threats (movement + fly phases)
-#   - Near-blocked (squeeze) count (movement phase)
+#   - Blocked-piece count (Sanmill-style) in placement and movement
+#   - Mill-type count (Sanmill-style: pieces in hand / on board / removable proxy)
+#   - Cycle-ready mills (movement + fly phases only; not placement)
+#   - Fork threats (movement + fly phases only; not placement)
+#   - Near-blocked (squeeze) count (movement phase only; not placement)
 #   - Simple positional value by connectivity (placement phase)
 #   - Near-zugzwang inline bonus (movement phase)
 #   - Fly surplus / win config (fly phase)
@@ -119,16 +121,21 @@ from .heuristics import evaluate_v2  # noqa: F401  — Stage 1 adds this symbol
 
 
 def _v2_scan_board(board, color: str) -> tuple:
-    """Single O(24) pass: piece count, mobility, blocked count (opponent blocked).
+    """Single O(24) pass: piece count, mobility, blocked counts, pieces in hand.
 
-    Returns (own_pieces, opp_pieces, own_mob, opp_mob, own_blocked_count)
-    where own_blocked_count = number of *opponent* pieces with zero legal moves.
+    Returns
+        (own_pieces, opp_pieces, own_mob, opp_mob, own_blocked, opp_blocked, own_hand, opp_hand)
 
-    Mobility = sum of free (empty) adjacent squares across all own pieces.
-    This is cheap and correlates strongly with long-term winning position.
+    Sanmill-style board terms retained here:
+      - pieces in hand
+      - pieces on board
+      - blocked pieces
+
+    Mobility = sum of free adjacent squares across all pieces of a side.
+    Blocked = pieces with zero adjacent empty squares.
     """
     opp = "B" if color == "W" else "W"
-    own_p = opp_p = own_mob = opp_mob = opp_blocked = 0
+    own_p = opp_p = own_mob = opp_mob = own_blocked = opp_blocked = 0
     for pos in POSITIONS:
         owner = board.positions[pos]
         if not owner:
@@ -137,21 +144,26 @@ def _v2_scan_board(board, color: str) -> tuple:
         if owner == color:
             own_p += 1
             own_mob += free
+            if free == 0:
+                own_blocked += 1
         else:
             opp_p += 1
             opp_mob += free
             if free == 0:
                 opp_blocked += 1
-    return own_p, opp_p, own_mob, opp_mob, opp_blocked
+    own_hand = max(0, 9 - board.pieces_placed.get(color, 0))
+    opp_hand = max(0, 9 - board.pieces_placed.get(opp, 0))
+    return own_p, opp_p, own_mob, opp_mob, own_blocked, opp_blocked, own_hand, opp_hand
 
 
 def _v2_scan_mills(board, color: str) -> tuple:
-    """Single O(16) pass over MILLS: mill count, threat (closeable) count.
+    """Single O(16) pass over MILLS: mill count, threat count, removable proxy.
 
-    Returns (own_mills, opp_mills, own_thr, opp_thr)
-    where *_thr counts mills where the side has 2 pieces and 1 empty slot.
-    Does NOT count whether an adjacent piece can reach the empty slot --
-    that check is fast and kept in movement-phase cycle/fork functions.
+    Returns (own_mills, opp_mills, own_thr, opp_thr, own_rem_proxy, opp_rem_proxy).
+
+    Sanmill refers to three main scoring components: pieces in hand, pieces on board,
+    and pieces that can be removed.  In NMM_LLM v2 we approximate the third term with
+    closeable mill threats, because each immediate closeable mill is a near-removal.
     """
     opp = "B" if color == "W" else "W"
     own_mills = opp_mills = own_thr = opp_thr = 0
@@ -168,7 +180,9 @@ def _v2_scan_mills(board, color: str) -> tuple:
             own_thr += 1
         elif o == 2 and e == 1:
             opp_thr += 1
-    return own_mills, opp_mills, own_thr, opp_thr
+    own_rem_proxy = own_thr + own_mills
+    opp_rem_proxy = opp_thr + opp_mills
+    return own_mills, opp_mills, own_thr, opp_thr, own_rem_proxy, opp_rem_proxy
 
 
 def _v2_cycle_ready(board, color: str) -> int:
@@ -256,16 +270,19 @@ def _v2_win_config(board, opp: str) -> int:
 # Increase MILL weight or FORK weight to observe directional AI behaviour changes.
 
 # Placement phase
-_V2_PL_PIECE   =  1    # raw material
+_V2_PL_HAND    =  1    # Sanmill-style pieces in hand differential
+_V2_PL_PIECE   =  1    # Sanmill-style pieces on board differential
 _V2_PL_MOB     =  1    # positional mobility signal
+_V2_PL_BLOCKED =  8    # Sanmill-style blocked-piece differential
 _V2_PL_MILL    = 30    # closed mills dominate
 _V2_PL_THREAT  = 15    # 2-config closeable threat
+_V2_PL_REM     = 10    # Sanmill-style removable proxy = mills + closeable mills
 _V2_PL_POS     =  2    # positional connectivity bonus
 
 # Movement phase
 _V2_MV_PIECE   = 12    # material advantage scales
 _V2_MV_MOB     =  1    # directional signal only (was x8, reduced to keep evaluation fast)
-_V2_MV_BLOCKED = 48    # fully blocked opponent piece = near-won
+_V2_MV_BLOCKED = 48    # Sanmill-style fully blocked opponent piece = near-won
 _V2_MV_MILL    = 30
 _V2_MV_THREAT  = 18
 _V2_MV_CYCLE   = 22    # cycle-ready mills
@@ -309,10 +326,10 @@ def evaluate_v2(
     phase = get_game_phase(board, color)
 
     # -- Single-pass board scan (O(24)) ----------------------------------------
-    own_p, opp_p, own_mob, opp_mob, opp_blocked = _v2_scan_board(board, color)
+    own_p, opp_p, own_mob, opp_mob, own_blocked, opp_blocked, own_hand, opp_hand = _v2_scan_board(board, color)
 
     # -- Single-pass mill scan (O(16)) -----------------------------------------
-    own_mills, opp_mills, own_thr, opp_thr = _v2_scan_mills(board, color)
+    own_mills, opp_mills, own_thr, opp_thr, own_rem_proxy, opp_rem_proxy = _v2_scan_mills(board, color)
 
     # -- Stage-gated features --------------------------------------------------
 
@@ -320,11 +337,14 @@ def evaluate_v2(
         own_pos = _v2_position_value(board, color)
         opp_pos = _v2_position_value(board, opp)
         score = (
-            _V2_PL_PIECE  * (own_p    - opp_p)
-            + _V2_PL_MOB    * (own_mob  - opp_mob)
-            + _V2_PL_MILL   * (own_mills - opp_mills)
-            + _V2_PL_THREAT * (own_thr  - opp_thr)
-            + _V2_PL_POS    * (own_pos  - opp_pos)
+            _V2_PL_HAND    * (own_hand - opp_hand)
+            + _V2_PL_PIECE   * (own_p    - opp_p)
+            + _V2_PL_MOB     * (own_mob  - opp_mob)
+            + _V2_PL_BLOCKED * (opp_blocked - own_blocked)
+            + _V2_PL_MILL    * (own_mills - opp_mills)
+            + _V2_PL_THREAT  * (own_thr  - opp_thr)
+            + _V2_PL_REM     * (own_rem_proxy - opp_rem_proxy)
+            + _V2_PL_POS     * (own_pos  - opp_pos)
         )
 
     elif phase == "move":
@@ -956,14 +976,17 @@ from .heuristics import (evaluate_v2, INF, _sealed_two_configs,
 
 | Term | Phase | Weight | Notes |
 |------|-------|--------|-------|
-| `_V2_PL_PIECE` | place | 1 | Raw material |
+| `_V2_PL_HAND` | place | 1 | Sanmill-style pieces in hand differential |
+| `_V2_PL_PIECE` | place | 1 | Sanmill-style pieces on board differential |
 | `_V2_PL_MOB` | place | 1 | Connectivity signal |
+| `_V2_PL_BLOCKED` | place | 8 | Sanmill-style blocked-piece differential |
 | `_V2_PL_MILL` | place | 30 | Closed mills |
 | `_V2_PL_THREAT` | place | 15 | Closeable 2-config |
+| `_V2_PL_REM` | place | 10 | Sanmill-style removable proxy = mills + closeable mills |
 | `_V2_PL_POS` | place | 2 | Cardinal=3, cross=2, corner=1 |
 | `_V2_MV_PIECE` | move | 12 | Material advantage |
 | `_V2_MV_MOB` | move | 1 | Directional only (was x8) |
-| `_V2_MV_BLOCKED` | move | 48 | Fully blocked opp piece |
+| `_V2_MV_BLOCKED` | move | 48 | Sanmill-style fully blocked opp piece |
 | `_V2_MV_MILL` | move | 30 | Closed mills |
 | `_V2_MV_THREAT` | move | 18 | Closeable threats |
 | `_V2_MV_CYCLE` | move | 22 | Cycle-ready mills |
@@ -978,7 +1001,7 @@ from .heuristics import (evaluate_v2, INF, _sealed_two_configs,
 | `_V2_FLY_WIN` | fly | 1190 | Opponent at <=3 pieces |
 | `_V2_FLY_SURP` | fly | 900 | Fly threat surplus |
 
-**Tuning note:** Start by halving/doubling `_V2_MV_CYCLE` and `_V2_MV_FORK` independently and running 50-game self-play batches. These two terms have the most impact on movement-phase play quality. The `_V2_FLY_*` weights are less sensitive because the endgame DB takes over for positions it covers.
+**Tuning note:** Placement now explicitly carries Sanmill-style terms for pieces in hand, pieces on board, blocked pieces, and a removable proxy. Start by tuning `_V2_PL_BLOCKED` and `_V2_PL_REM`, then `_V2_MV_CYCLE` and `_V2_MV_FORK` in 50-game self-play batches. The `_V2_FLY_*` weights are less sensitive because the endgame DB takes over for positions it covers.
 
 ---
 
