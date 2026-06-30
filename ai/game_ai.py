@@ -24,7 +24,7 @@ class _SearchAbort(Exception):
 
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
 from game.rules import get_all_legal_moves, is_terminal
-from .heuristics import INF, evaluate, clear_eval_cache, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert, _closeable_mills
+from .heuristics import INF, evaluate, clear_eval_cache, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert, _closeable_mills, evaluate_v2
 from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
@@ -32,7 +32,8 @@ from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notati
 # A VN score of +1.0 (certain win) maps to ±3000, comparable to a large positional advantage.
 _VN_SCALE = 3000
 # SE-11b/11c: how many opponent plies from root receive trajectory extension and VN ordering.
-_MAX_OPP_PLIES = 2
+_MAX_OPP_PLIES    = 2
+_MAX_OPP_PLIES_V2 = 6   # deeper path-buffer tracking when v2 heuristics are active
 
 
 def _stm_can_close_mill(board: BoardState, color: str) -> bool:
@@ -414,6 +415,7 @@ class GameAI:
         self.blunder_probability = max(0.0, min(1.0, blunder_probability))
         self._weights: HeuristicWeights = weights if weights is not None else DEFAULT_WEIGHTS
         self._beginner_weights: HeuristicWeights | None = None  # lazily built in _is_beginner
+        self.use_v2_heuristics: bool = True   # evaluate_v2() at leaves (v1 kept for MCTS/position_eval)
         self._fullgame_db = fullgame_db
         self._endgame_solved_db = endgame_solved_db
         self._malom_db = malom_db
@@ -437,6 +439,9 @@ class GameAI:
         self._killers: list[list] = [[None, None] for _ in range(32)]
         # SE-3: global history table keyed by (from_sq, to_sq); value = Σ depth².
         self._history: dict = {}
+        self._opp_plies_budget: int = _MAX_OPP_PLIES  # updated per-search; see Stage 8
+        self.max_search_depth: int = 19   # hard cap on iterative-deepening depth; settable per difficulty
+        self.time_budget_override: float | None = None  # depth-derived budget set by _apply_search_depth
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.last_thinking: str = ""          # short plain-English label for the chosen move
@@ -493,6 +498,17 @@ class GameAI:
         self._variety_weights: HeuristicWeights | None = None  # lazily built
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    @property
+    def _db_access_prob(self) -> float:
+        """Probability (0–1) that solved-DB probes fire this move.
+        Level 1 = 0 %, levels 2–7 = linearly interpolated, levels 8–10 = 100 %.
+        """
+        if self.difficulty <= 1:
+            return 0.0
+        if self.difficulty >= 8:
+            return 1.0
+        return (self.difficulty - 1) / 7.0
 
     def set_sentinel(self, sentinel, mode: str = "advisory") -> None:
         """Attach a SentinelAdvisor overlay. ``mode`` is advisory|score_adjust|reconsider.
@@ -769,8 +785,10 @@ class GameAI:
         malom = self._malom_db
         esdb  = self._endgame_solved_db
         fgdb  = self._fullgame_db
-        malom_ok = malom is not None and malom.is_available()
-        if not malom_ok and not esdb and not (fgdb and fgdb.is_available()):
+        _db_gate = getattr(self, "_db_active_this_move", True)
+        malom_ok = malom is not None and malom.is_available() and _db_gate
+        esdb_ok  = esdb is not None and _db_gate
+        if not malom_ok and not esdb_ok and not (fgdb and fgdb.is_available()):
             return move
         try:
             wdl_map = {"W": 2, "D": 1, "L": 0}
@@ -786,7 +804,7 @@ class GameAI:
                 res = None
                 if malom_ok:
                     res = malom.query(after)
-                if res is None and esdb:
+                if res is None and esdb_ok:
                     res = esdb.query(after)
                 if res is None and fgdb and fgdb.is_available():
                     res = fgdb.query(after)
@@ -858,6 +876,8 @@ class GameAI:
         ordered = _order_moves(board, moves, killers, self._history,
                                _is_beginner=self._is_beginner)
 
+        self._opp_plies_budget = _MAX_OPP_PLIES_V2 if self.use_v2_heuristics else _MAX_OPP_PLIES
+
         scored: list = []
         for mv in ordered:
             try:
@@ -865,7 +885,7 @@ class GameAI:
                 self._move_path_buf = [self._move_notation(mv)]
                 raw = -self._negamax(
                     nb, depth - 1, -INF, INF, None,
-                    depth // 2, _MAX_OPP_PLIES, 1,
+                    depth // 2, self._opp_plies_budget, 1,
                 )
             except (_SearchAbort, Exception):
                 raw = 0.0
@@ -923,17 +943,19 @@ class GameAI:
             self.last_was_blunder = False
             return moves[0]
 
+        # Roll once per move so all DB probe sites share the same gate (avoids
+        # mixing INF-scale DB scores with heuristic scores inside alpha-beta).
+        import random as _rng
+        self._db_active_this_move: bool = _rng.random() < self._db_access_prob
+
         # ── Optional retrograde endgame DB consultation ───────────────────
         # Consulted first (before fullgame_db) because WDL is exact.
-        # Guard: both sides must have placed all 9 pieces AND each has ≤3 on board.
+        # EndgameSolvedDB.query() returns None for piece counts with no loaded table,
+        # so no piece-count cap is needed here — the DB handles its own validity.
         _esdb = self._endgame_solved_db
-        if _esdb is not None and _esdb.is_available():
-            _w_on = board.pieces_on_board.get("W", 0)
-            _b_on = board.pieces_on_board.get("B", 0)
+        if _esdb is not None and _esdb.is_available() and self._db_active_this_move:
             if (board.pieces_placed.get("W", 0) >= 9
-                    and board.pieces_placed.get("B", 0) >= 9
-                    and _w_on <= 3 and _b_on <= 3
-                    and _w_on + _b_on <= 6):
+                    and board.pieces_placed.get("B", 0) >= 9):
                 try:
                     _wdl = _esdb.query(board)
                 except Exception:
@@ -1248,13 +1270,18 @@ class GameAI:
             _base_budget = (
                 self._override_time_budget
                 if self._override_time_budget is not None
-                else _TIME_LIMIT[self.difficulty]
+                else (
+                    self.time_budget_override
+                    if self.time_budget_override is not None
+                    else _TIME_LIMIT[self.difficulty]
+                )
             )
             time_budget = 2.0 if fast_early_game else _base_budget
             move = self._iterative_deepen(
                 board, time_budget,
                 recognition=recognition, trajectory_hints=trajectory_hints,
                 top_n=top_n, moves=moves,
+                max_depth=self.max_search_depth,
             )
             move = self._apply_sentinel_intervention(board, move, moves)
             self._populate_thinking(board, move, _forced_block=bool(threats))
@@ -1530,6 +1557,7 @@ class GameAI:
 
         # SE-11b: init path buffer with game history; root moves pushed/popped below.
         self._move_path_buf = list(self._game_notations)
+        self._opp_plies_budget = _MAX_OPP_PLIES_V2 if self.use_v2_heuristics else _MAX_OPP_PLIES
 
         scored_any = False
         for move in moves:
@@ -1537,7 +1565,7 @@ class GameAI:
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, _MAX_OPP_PLIES, 1)
+                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, self._opp_plies_budget, 1)
             except _SearchAbort:
                 self._move_path_buf.pop()
                 if not scored_any:
@@ -1552,7 +1580,9 @@ class GameAI:
             # (score near INF via endgame DB or terminal).  Bonuses would otherwise favour
             # cycling moves over mill-closing captures, preventing actual conversion.
             if abs(score_raw) < INF // 2:
-                score = score_raw + tactical_move_bonus(board, nb, self.color, self._active_weights(), self._opp_last_weak)
+                score = score_raw + tactical_move_bonus(
+                    board, nb, self.color, self._active_weights(), self._opp_last_weak
+                )
             else:
                 score = score_raw
             if top_n > 1:
@@ -1624,10 +1654,13 @@ class GameAI:
         # SE-4: endgame tablebase probe at all depths — ply-based scoring so faster
         # wins score higher than slower ones (INF - ply decreases as ply increases).
         # Moved before SE-8 extension so extensions don't bypass the DB hit.
+        # Probe all available tables — EndgameSolvedDB.query() returns None when the
+        # (nW, nB) combination has no loaded table, so no piece-count cap is needed here.
         if (self._endgame_solved_db is not None
+                and self._endgame_solved_db.is_available()
+                and getattr(self, "_db_active_this_move", True)
                 and board.pieces_placed.get("W", 0) >= 9
-                and board.pieces_placed.get("B", 0) >= 9
-                and board.pieces_on_board.get("W", 0) + board.pieces_on_board.get("B", 0) <= 6):
+                and board.pieces_placed.get("B", 0) >= 9):
             try:
                 _wdl = self._endgame_solved_db.query(board)
             except Exception:
@@ -1658,9 +1691,13 @@ class GameAI:
         if depth == 0:
             _q_moves = get_all_legal_moves(board)
             if any(m.get("capture") for m in _q_moves):
-                heur = self._qsearch(board, self._Q_DEPTH, alpha, beta, endgame_state, _q_moves)
+                _qdepth = 4 if self.use_v2_heuristics else self._Q_DEPTH
+                heur = self._qsearch(board, _qdepth, alpha, beta, endgame_state, _q_moves)
             else:
-                heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
+                if self.use_v2_heuristics:
+                    heur = evaluate_v2(board, board.turn, weights=self._weights, _ply=ply)
+                else:
+                    heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
             # B-73: blend in value network score when loaded and blend > 0
             if self._value_net is not None and self._weights.value_net_blend > 0:
                 vn_raw = self._value_net.predict(board, board.turn)  # (-1, 1)
@@ -1691,10 +1728,61 @@ class GameAI:
         if not moves:
             return -(INF - ply)
 
+        # ── Null-move pruning (V2 mode only) ─────────────────────────────────
+        # Skip during: placement phase, endgame (total pieces <= 7), zugzwang risk
+        # (own mobility < 3).  R = 2 (standard for NMM's branching factor).
+        # _all_placed guard is critical: during placement swap_turn() is invalid.
+        _NULL_R = 2
+        if (self.use_v2_heuristics
+                and depth >= 3
+                and abs(alpha) < INF // 2
+                and abs(beta) < INF // 2):
+            _all_placed = (board.pieces_placed.get("W", 0) >= 9
+                           and board.pieces_placed.get("B", 0) >= 9)
+            if _all_placed:
+                _total_pieces = sum(board.pieces_on_board.values())
+                _in_endgame = _total_pieces <= 7
+                _own_mob = sum(
+                    1 for pos in POSITIONS
+                    if board.positions[pos] == board.turn
+                    for nb in ADJACENCY[pos]
+                    if not board.positions[nb]
+                )
+                if _own_mob >= 3 and not _in_endgame:
+                    null_board = board.swap_turn()
+                    null_score = -self._negamax(
+                        null_board, depth - 1 - _NULL_R,
+                        -beta, -beta + 1,
+                        endgame_state, 0, 0, ply + 1,
+                    )
+                    if null_score >= beta:
+                        return beta
+
         # Sort at upper levels only — biggest benefit to alpha-beta, negligible overhead
         if depth >= 2:
             killers = self._killers[depth] if depth < 32 else None
             moves = _order_moves(board, moves, killers, self._history, _is_beginner=self._is_beginner)
+
+        # IID (V2 mode only): when the TT has no hit at deep nodes, run a shallow
+        # search to produce a TT entry whose best-move improves ordering quality.
+        # The recursive call stores a TT entry; we immediately look it up and treat
+        # the stored best-move as a TT hint so the existing promotion block below
+        # can move it to the front of the list.
+        if (self.use_v2_heuristics
+                and depth >= 5
+                and tt_move_to is None):
+            try:
+                self._negamax(
+                    board, depth - 3, alpha, beta,
+                    endgame_state, 0, 0, ply,
+                )
+                _iid_entry = self._tt.lookup(board.hash_key)
+                if _iid_entry:
+                    _, _, _, _iid_from, _iid_to = _iid_entry
+                    if _iid_to:
+                        tt_move_from, tt_move_to = _iid_from, _iid_to
+            except (_SearchAbort, Exception):
+                pass
 
         # SE-11b/11c: classify node and prepare trajectory/VN extension state.
         is_opp_node = (board.turn != self.color)
@@ -1704,7 +1792,7 @@ class GameAI:
         # SE-11b: query trajectory frequency dict at first opponent ply only (307µs/call — too
         # expensive at ply 2 where ~27k nodes × 307µs ≈ 8 s overhead).
         _opp_freq = None
-        if is_opp_node and opp_plies_left == _MAX_OPP_PLIES and self._trajectory_db is not None:
+        if is_opp_node and opp_plies_left == self._opp_plies_budget and self._trajectory_db is not None:
             _opp_freq = self._trajectory_db.query_all_frequencies(
                 board, min_samples=3
             ) or None
@@ -1731,8 +1819,8 @@ class GameAI:
 
         # SE-11c: at first opponent ply, re-sort the non-priority (p2) tail by VN score
         # so LMR reduces the moves the opponent is least likely to play strongly.
-        # Gated to first opponent ply only (opp_plies_left == _MAX_OPP_PLIES) to contain overhead.
-        if (is_opp_node and opp_plies_left == _MAX_OPP_PLIES
+        # Gated to first opponent ply only (opp_plies_left == self._opp_plies_budget) to contain overhead.
+        if (is_opp_node and opp_plies_left == self._opp_plies_budget
                 and self._value_net is not None and depth >= 3 and len(moves) > 2):
             _vn_n = len(moves)
             _vn_lmr_s = _vn_n - int(_vn_n * 0.6)
@@ -1848,7 +1936,10 @@ class GameAI:
         if terminal:
             return -(INF - q_depth)
 
-        stand_pat = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
+        if self.use_v2_heuristics:
+            stand_pat = evaluate_v2(board, board.turn, weights=self._weights)
+        else:
+            stand_pat = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
         if stand_pat >= beta:
             return stand_pat
         if stand_pat > alpha:
@@ -1880,13 +1971,14 @@ class GameAI:
         self._nodes = 0
         # SE-11b: init path buffer with game history; root moves pushed/popped below.
         self._move_path_buf = list(self._game_notations)
+        self._opp_plies_budget = _MAX_OPP_PLIES_V2 if self.use_v2_heuristics else _MAX_OPP_PLIES
         results = []
         for i, move in enumerate(moves):
             nb = board.apply_move(move)
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, _MAX_OPP_PLIES, 1)
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, self._opp_plies_budget, 1)
                 if abs(score) < INF // 2:
                     score += tactical_move_bonus(board, nb, self.color, self._active_weights(), self._opp_last_weak)
                 self._move_path_buf.pop()

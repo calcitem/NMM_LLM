@@ -329,6 +329,19 @@ class BoardState:
             hash_key=new_hash,
         )
 
+    def swap_turn(self) -> "BoardState":
+        """Return a copy with the side-to-move flipped (for null-move pruning).
+
+        Only valid during movement and fly phases — caller must guard against placement.
+        All piece counts, positions, and the Zobrist hash are preserved; only `turn`
+        changes (hash update mirrors the SIDE_KEY toggle in apply_move).
+        """
+        import copy
+        nb = copy.copy(self)
+        nb.turn = "B" if self.turn == "W" else "W"
+        nb.hash_key = self.hash_key ^ SIDE_KEY
+        return nb
+
     # ── Serialisation ─────────────────────────────────────────────────────────
 
     def to_fen_string(self) -> str:

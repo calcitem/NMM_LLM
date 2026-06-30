@@ -328,6 +328,76 @@ document.addEventListener("DOMContentLoaded", () => {
       : "Pure AI mode OFF — personality sliders active again.", "ai");
   });
 
+  // ── Search depth range sliders ──────────────────────────────────────────────
+  function _depthForLevel(level, minD, maxD) {
+    if (level <= 1) return minD;
+    if (level >= 8) return maxD;
+    return Math.round(minD + (level - 1) / 7 * (maxD - minD));
+  }
+
+  function _updateDepthBar() {
+    const bar  = $("depth-level-bar");
+    const minD = parseInt($("rng-depth-min").value, 10);
+    const maxD = parseInt($("rng-depth-max").value, 10);
+    $("lbl-depth-min").textContent = minD;
+    $("lbl-depth-max").textContent = maxD;
+    if (!bar) return;
+    const maxVal = Math.max(maxD, 8);
+    bar.innerHTML = "";
+    for (let lvl = 1; lvl <= 8; lvl++) {
+      const d    = _depthForLevel(lvl, minD, maxD);
+      const pct  = Math.round(d / maxVal * 100);
+      const col  = `hsl(${210 + (lvl - 1) * 12}, 70%, 55%)`;
+      const seg  = document.createElement("div");
+      seg.title  = `Lv ${lvl}: depth ${d}`;
+      seg.style.cssText = `flex:1; height:${pct}%; background:${col}; border-radius:2px 2px 0 0; position:relative; cursor:default;`;
+      const label = document.createElement("span");
+      label.textContent = d;
+      label.style.cssText = "position:absolute; top:-14px; left:50%; transform:translateX(-50%); font-size:.65rem; color:var(--text); white-space:nowrap;";
+      seg.appendChild(label);
+      bar.appendChild(seg);
+    }
+  }
+
+  const rngDepthMin = $("rng-depth-min");
+  const rngDepthMax = $("rng-depth-max");
+  if (rngDepthMin && rngDepthMax) {
+    rngDepthMin.addEventListener("input", () => {
+      const minV = parseInt(rngDepthMin.value, 10);
+      const maxV = parseInt(rngDepthMax.value, 10);
+      if (minV >= maxV - 1) rngDepthMax.value = minV + 2;
+      _updateDepthBar();
+    });
+    rngDepthMax.addEventListener("input", () => {
+      const minV = parseInt(rngDepthMin.value, 10);
+      const maxV = parseInt(rngDepthMax.value, 10);
+      if (maxV <= minV + 1) rngDepthMin.value = maxV - 2;
+      _updateDepthBar();
+    });
+  }
+
+  const btnSaveDepth = $("btn-save-search-depth");
+  if (btnSaveDepth) {
+    btnSaveDepth.addEventListener("click", () => {
+      const minD = parseInt($("rng-depth-min").value, 10);
+      const maxD = parseInt($("rng-depth-max").value, 10);
+      fetch("/api/search_depth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ min: minD, max: maxD }),
+      }).then(r => r.json()).then(() => {
+        addCommentary("Game", `Search depth: level 1 → ${minD}, level 8 → ${maxD}. Apply from next new game.`, "ai");
+      }).catch(() => addCommentary("Error", "Could not save search depth settings.", "ai"));
+    });
+  }
+
+  // Load saved depth settings on page load
+  fetch("/api/search_depth").then(r => r.json()).then(data => {
+    if ($("rng-depth-min")) $("rng-depth-min").value = data.min;
+    if ($("rng-depth-max")) $("rng-depth-max").value = data.max;
+    _updateDepthBar();
+  }).catch(() => _updateDepthBar());
+
   // Show/hide personality row based on opponent type
   function _updatePersonalityRow() {
     const oppVal  = $("sel-opponent").value;

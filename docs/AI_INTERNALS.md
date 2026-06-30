@@ -10,9 +10,21 @@ Alpha-beta pruning discards branches that cannot affect the final result. When t
 
 ### Depth and time budget
 
-Difficulty 1–4 map to a fixed search depth (2–5 plies). Difficulties 5–10 use **iterative deepening**: the search starts at depth 2, completes, then starts again at depth 3, and so on until the time budget is exhausted (15 s at difficulty 5, up to 90 s at difficulty 10). The best move found at the last fully completed depth is returned.
+All difficulty levels use **iterative deepening**: the search starts at depth 2, completes, then starts again at depth 3, and so on until the time budget is exhausted. Time budgets range from 0.3 s (level 1) to 90 s (level 10). The best move found at the last fully completed depth is returned.
 
-A special early-game fast path applies while fewer than 10 pieces are on the board: regardless of difficulty, the search uses a 4-second iterative-deepening budget. The position tree is tiny at that point, so long searches are wasteful.
+A **max search depth** cap (default 5–16 ply interpolated across levels 1–8) is configurable via the Settings panel depth slider. The time budget is derived automatically from the selected max depth using an exponential formula: `min(120 s, 0.065 × 1.66^depth)`.
+
+A special early-game fast path applies while fewer than 10 pieces are on the board: regardless of difficulty, the search uses a 2-second budget to avoid horizon effects from deep searches on near-empty boards.
+
+### Solved-database access (difficulty-graded)
+
+The AI can consult two exact-solution databases: the retrograde **EndgameSolvedDB** (own WDL tables built by `tools/build_endgame_db.py`) and the external **Malom perfect database** (covers all positions, not just endgame). Access is gated by difficulty:
+
+- **Level 1**: 0 % — never probed.
+- **Levels 2–7**: linearly interpolated (≈ 14 % per step).
+- **Levels 8–10**: 100 % — always probed.
+
+One random roll is made per `choose_move()` call and shared across all probe sites (`choose_move` pre-search, `_negamax` SE-4 probe, `_db_score_adjust` post-search override). This ensures DB scores (`INF ± ply`) and heuristic scores (hundreds/thousands) are never mixed inside the same alpha-beta tree.
 
 ### Move selection
 
@@ -123,48 +135,62 @@ The existing guard in `_save_novel_opening()` — `if len(placement_moves) < 6: 
 
 ## 2. How the Position Strength Meter Works
 
-### Raw evaluation
+### Leaf evaluator — HeuristicsV2 (primary)
 
-The static evaluator (`ai/heuristics.py`, `evaluate()`) scores a position as an integer from the perspective of one colour. Higher is better for that colour. The formula is a weighted sum of several features:
+The active leaf evaluator is `evaluate_v2()` in `ai/heuristics.py`. It performs a single O(24) board pass + O(16) mill scan and branches on game phase. Scores are integers in the same scale as the legacy evaluator, so transposition table entries, alpha-beta windows, and the Sentinel's score comparisons are all compatible.
 
-```
-score = Σ weights × features + mobility_term + threat_term + positional_term + endgame_supplement
-```
+**Placement phase** (`own_hand > 0 or opp_hand > 0`):
 
-### Features and weights
+| Term | Weight | Description |
+|------|--------|-------------|
+| Hand pieces (own − opp) | ×1 | Pieces still to place |
+| Piece count (own − opp) | ×1 | Pieces on board |
+| Mobility (own − opp) | ×1 × `mob_s` | Legal moves available |
+| Blocked opp (opp − own) | ×8 × `blk_s` | Opponent pieces with no legal move |
+| Closed mills (own − opp) | ×30 × `mil_s` | Completed lines of three |
+| Mill threats (own − opp) | ×15 × `mil_s` | Immediately closeable mills |
+| Open-mill removal reach | ×10 × `mil_s` | Own pieces that can reach opponent's open mills |
+| Position value (own − opp) | ×2 | Connectivity bonus (cardinal > cross > corner) |
 
-The weights change by game phase ("place", "move", "fly"):
+**Movement phase** (both hands empty, pieces ≥ 4 each):
 
-| Feature | Place | Move | Fly | Description |
-|---------|-------|------|-----|-------------|
-| Closed mills (own − opp) | 30 | 30 | 32 | Each completed line of three |
-| Blocked opponent pieces | 12 | 48 | 350 | Pieces with no legal move adjacent |
-| Piece count difference | 12 | 12 | 2 | Net piece advantage |
-| Two-configurations (own − opp) | 5 | 5 | 0 | Lines with 2 own pieces and 1 empty slot |
-| Double-mill pivots (own − opp) | 0 | 50 | 90 | Pieces simultaneously in 2+ closed mills |
-| Win configuration | 0 | 0 | 1190 | Opponent reduced to 3 pieces (fly phase) |
+| Term | Weight | Description |
+|------|--------|-------------|
+| Piece count (own − opp) | ×12 | |
+| Mobility (own − opp) | ×1 × `mob_s` | |
+| Blocked opp | ×48 × `blk_s` | Opponent pieces with no legal move |
+| Closed mills (own − opp) | ×30 × `mil_s` | |
+| Mill threats (own − opp) | ×18 × `mil_s` | |
+| Cycling mill readiness (own − opp) | ×22 | Closed mill with a slide-out square |
+| Fork threats (own − opp) | ×14 | 2+ simultaneously closeable mills |
+| Encirclement squeeze (own − opp) | ×30 | Own pieces adjacent to opponent pieces |
+| Zugzwang bonus | ×600 per move short | When opponent mobility < 3 |
 
-Additional terms added on top:
+**Fly phase** (own or opp has exactly 3 pieces):
 
-| Term | Place | Move | Fly | Description |
-|------|-------|------|-----|-------------|
-| Mobility (own − opp) | ×3 | ×8 | ×20 | Available move destinations; fly-phase raw count capped at 5 (B-63) to prevent fly-entry from swinging the differential negative |
-| Mill threats (own − opp) | ×15 | ×18 | ×80 | Immediately closeable mills only (phase-aware reachability: move phase requires an adjacent own piece outside the mill) |
-| Position value (own − opp) | ×4 | ×4 | ×4 | Cardinal (4-conn) nodes = 5; cross (3-conn) = 3; corner (2-conn) = 2 |
-| Herding / encirclement | ×6 | ×18 | 0 | Own pieces adjacent to each opponent piece; rewards surrounding opponent pieces to shrink their escape space |
-| Near-blocked pressure (opp − own) | 0 | ×30 | 0 | Opponent pieces with **exactly 1 legal move** remaining — one step from total blockade |
-| Mill-wrapping pressure (own − opp) | 0 | ×40 | ×60 | Own pieces occupying exit squares of opponent closed mills; surrounded mills cannot easily cycle. Returns 0 when the opponent is in fly phase (adjacency confinement irrelevant). |
-| Cycling mill setup (own − opp) | ×8 | ×22 | ×80 | Two 2-configs whose closing squares are adjacent; the pivot piece can oscillate to force repeated captures |
-| Fork threats (own − opp) | ×6 | ×14 | ×55 | Positions with 2+ simultaneously closeable mills (opponent can block at most one) |
-| Fly asymmetry | 0 | ×80 | 0 | Penalty when own piece count is 4 and capturing would grant the opponent fly-phase freedom |
-| Open-mill domination (own − opp) | 0 | ×150 | ×80 | Own 2-configs exceeding opponent's defensive capacity; in a 6v4 scenario with 3 open mills, one mills closes regardless of opponent play |
-| Sealed 2-configs (own − opp) | 0 | ×20 | 0 | Own 2-configs the opponent cannot contest in one move AND the opponent has no immediate mill of their own (B-59); ~4× the regular two_cfg weight |
+| Term | Weight | Description |
+|------|--------|-------------|
+| Piece count (own − opp) | ×2 | |
+| Closed mills (own − opp) | ×32 × `mil_s` | |
+| Mill threats (own − opp) | ×80 × `mil_s` | Urgency is much higher in fly phase |
+| Cycling mill readiness (own − opp) | ×80 | |
+| Fork threats (own − opp) | ×55 | |
+| Win configuration | ×1190 | Opponent at ≤ 3 pieces with no moves |
+| Surplus threats (own − opp) | ×900 | Each extra threat beyond the first |
 
-Cross/cardinal nodes (`d7`, `a4`, `g4`, `d1`, and the equivalent middle and inner ring nodes) connect three lines instead of two, making them more tactically flexible.
+**Personality scale multipliers** — when `HeuristicWeights` are passed, `mil_s = mill_count_scale / 100`, `mob_s = mobility_scale / 100`, `blk_s = blocked_scale / 100` are applied inline. This is how personality presets affect leaf evaluation depth; tactical fields operate separately via `tactical_move_bonus`.
+
+### Legacy evaluator (`evaluate()`)
+
+The original v1 evaluator remains in `ai/heuristics.py` and is used by:
+- **MCTS** (`ai/mcts.py`) — leaf rollouts still use v1 + tanh.
+- **Position strength display** (`GameAI.position_eval()`) — the strength meter uses `evaluate(strength_mode=True)` with phase-calibrated tanh normalisation.
+
+It is no longer used in the main negamax search or quiescence search.
 
 ### Tactical move bonuses
 
-`tactical_move_bonus()` in `heuristics.py` is added directly to each root-move score *after* negamax returns. Unlike the negamax-internal `evaluate()` score, these bonuses are not negated through the tree — they only reward specific move qualities at the root:
+`tactical_move_bonus()` in `heuristics.py` is added directly to each root-move score *after* negamax returns — in both v1 and v2 modes. Unlike the leaf evaluator, these bonuses are not propagated through the tree; they only reward specific move qualities at the root. They are the primary mechanism by which personality presets (aggressive, defensive, positional, scholar, chaos) alter move selection — `close_mill`, `block_opponent_mill`, `cycling_mill`, `feeder_diamond`, `cardinal_block`, etc. are all tactical-bonus fields:
 
 | Bonus | What it rewards |
 |-------|-----------------|

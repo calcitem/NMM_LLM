@@ -91,7 +91,7 @@ See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
 
 - Full Nine Men's Morris rules: placement, movement, flying (3-piece phase), mill detection, and captures
 
-- 10 difficulty levels — levels 1–8 use fixed minimax depth (2–9 ply); levels 9–10 use iterative deepening (20 s / 45 s time budget)
+- 10 difficulty levels — all use iterative deepening; time budgets range from 0.3 s (level 1) to 90 s (level 10). Search depth cap is configurable per-difficulty via the Settings panel depth slider (levels 1–8 interpolated, default 5–16 ply)
 
 - Human vs AI, Human vs Human (local pass-and-play), AI vs AI spectator mode, or random colour selection
 
@@ -101,29 +101,17 @@ See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
 
 ### AI engine
 
-- **Negamax + alpha-beta** with phase-aware heuristics:
+- **Negamax + alpha-beta** with **HeuristicsV2** — a fast, stage-gated leaf evaluator that runs a single O(24) board pass + O(16) mill scan:
 
-  - Closed mills, blocked pieces, piece count, two-configurations, double-mill pivots
+  - **Placement phase**: piece count, hand pieces remaining, mobility, blocked opponent pieces, closed mills, mill threats, open-mill removal reach, positional value (connectivity bonus)
 
-  - Mobility and immediate mill threats (phase-weighted); fly-phase mobility capped at 5 to prevent fly-entry from looking artificially bad
+  - **Movement phase**: piece count, mobility, opponent blocked pieces, closed mills, mill threats, cycling-mill readiness, fork threats (simultaneous 2-config dual-threats), encirclement squeeze, zugzwang bonus when opponent mobility drops below 3
 
-  - Mill-cycle readiness (feeder mills), fork threats, herding and encirclement
+  - **Fly phase**: piece count, closed mills, mill threats (weighted ×80), cycling-mill readiness (×80), fork threats (×55), win-configuration detection, surplus-threat dominance
 
-  - Cycling mill and fork threat weights increase sharply in fly phase (×80/×55) to reflect the urgency of dual-threat structures
+  - Personality scale multipliers (`mill_count_scale`, `mobility_scale`, `blocked_scale`) from HeuristicWeights applied at leaf evaluation time — active across all phases
 
-  - Cross/cardinal node positional bonus (3-neighbour midpoint nodes score higher than 2-neighbour corners)
-
-  - Fly-phase asymmetry bonus (prefer reaching 3 pieces before opponent in 4v4 endgame)
-
-  - **Sealed 2-config detection**: 2-configs the opponent cannot contest score ~4× higher and receive elevated move-ordering priority
-
-  - **Own fork setup**: move-phase bonus for landing on a square that would create two simultaneous own 2-configs within 2 moves
-
-  - **Fly-phase fork creation**: bonus when a fly move transitions from fewer than 2 own 2-configs to 2+ simultaneously
-
-  - **Cold-piece convergence**: assembly gradient for positions where all pieces are isolated; rewards convergence on empty mill targets
-
-- **Tactical urgency layer** — delta-based bonuses applied at move-selection level (outside negamax):
+- **Tactical urgency layer** — delta-based bonuses applied at move-selection level (outside negamax), active in all AI modes including v2:
 
   - Closing a mill; building or disrupting cycling mill setups
 
@@ -182,6 +170,8 @@ During the placement phase, the Game Info panel shows the **opening family** as 
 - Extra search depth is added automatically when the current position matches a known endgame pattern
 
 - **Endgame Recogniser** detects named endgame phases (active / deep), zugzwang risk, and mill-cycle patterns
+
+- **Difficulty-graded DB access** — at level 1 the AI never probes the retrograde or Malom databases (0 %); at levels 8–10 it always does (100 %); levels 2–7 are linearly interpolated. The gate is rolled once per move so DB scores and heuristic scores are never mixed inside the same search tree
 
 ### LLM commentary (MillsAI)
 
@@ -250,6 +240,8 @@ Watch two AI personalities play each other — useful for testing weight changes
 - **Human takeover**: during any AI vs AI game, **Take over White** / **Take over Black** buttons let you take control of a side mid-game
 
 ### AI Tuning and Personalities
+
+Personality weights operate at two levels in the HeuristicsV2 engine: tactical fields (`close_mill`, `block_opponent_mill`, etc.) apply at root move-ordering via `tactical_move_bonus`; scale multipliers (`mill_count_scale`, `mobility_scale`, `blocked_scale`) apply at every leaf evaluation. Both layers are active simultaneously.
 
 - **13 configurable weight sliders** accessible via the **AI Tuning** header button (panel stays open during play); settings persist across sessions via **Save settings**:
 
@@ -370,7 +362,8 @@ Key differences to look for in play:
 | **Play as** | White, Black, or Random |
 | **Opponent** | AI, Human (local pass-and-play), or AI vs AI |
 | **AI Personality** | Per-game personality override; "Use current AI Tuning sliders" applies your custom weights |
-| **AI Difficulty** | 1 (Beginner) – 10 (Maximum 45 s) |
+| **AI Difficulty** | 1 (Beginner) – 10 (Maximum 90 s) |
+| **Search depth** | Dual range sliders (Level 1 depth / Level 8 depth); levels 2–7 are linearly interpolated. Time budget is derived automatically from the max depth. |
 | **MillsAI commentary** | Enable/disable LLM commentary for this game |
 | **Pure AI** (toggle) | Temporarily bypass all personality slider settings and use the pure evolved weights from `best.json`. Sliders and saved weights are untouched — toggle it off to restore normal behaviour. Hidden when playing Human vs Human. |
 | **New Game** | Start the game |

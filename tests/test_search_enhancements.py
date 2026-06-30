@@ -544,11 +544,12 @@ class TestQuiescence(unittest.TestCase):
     def test_qsearch_stand_pat_at_depth_zero(self):
         """_qsearch with q_depth=0 and wide window must return the static eval."""
         import math
-        from ai.heuristics import evaluate
+        from ai.heuristics import evaluate_v2
         b = self._board()
         ai = GameAI(color="W", difficulty=5)
         ai._deadline = math.inf
-        static = evaluate(b, b.turn, None, ai.force_aggressive, ai._weights)
+        # GameAI defaults to use_v2_heuristics=True; qsearch stand_pat matches.
+        static = evaluate_v2(b, b.turn, weights=ai._weights)
         score = ai._qsearch(b, q_depth=0, alpha=-20000, beta=20000)
         self.assertEqual(score, static)
 

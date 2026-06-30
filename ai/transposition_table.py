@@ -34,14 +34,19 @@ LOWER_BOUND = 1
 UPPER_BOUND = 2
 
 # Table size must be a power of two (bitmask index).
-# 2**18 = 262 144 slots.  Each filled slot is a 6-tuple (~224 bytes incl. Python
-# overhead) so worst-case memory is ~57 MB when every slot is filled.
-_TABLE_SIZE = 1 << 18
+# 2**21 = 2 097 152 slots — two-tier: depth-preferred primary + always-replace secondary.
+# Secondary slot offset (_ALT_OFFSET) is half the table size; both slots are in the same
+# array so the list stays a single allocation.  Typical memory: < 100 MB (only touched
+# slots allocate tuple objects); worst-case ~450 MB if every slot is filled.
+#
+# NOTE: this resize applies to both v1 and v2 searches — both benefit.
+_TABLE_SIZE = 1 << 21
 _MASK       = _TABLE_SIZE - 1
+_ALT_OFFSET = _TABLE_SIZE >> 1   # secondary-slot XOR offset within the same array
 
 
 class TranspositionTable:
-    """Fixed-size transposition table with depth-preferred replacement."""
+    """Fixed-size two-tier transposition table (depth-preferred + always-replace)."""
 
     __slots__ = ("_table",)
 
@@ -53,10 +58,18 @@ class TranspositionTable:
         self._table = [None] * _TABLE_SIZE
 
     def lookup(self, hash_key: int):
-        """Return (depth, score, flag, from_sq, to_sq) or None on miss/collision."""
-        entry = self._table[hash_key & _MASK]
+        """Return (depth, score, flag, from_sq, to_sq) or None on miss.
+
+        Checks primary (depth-preferred) slot first, then secondary (always-replace).
+        """
+        idx = hash_key & _MASK
+        entry = self._table[idx]
         if entry is not None and entry[0] == hash_key:
-            return entry[1:]   # strip stored hash_key before returning
+            return entry[1:]
+        alt_idx = (hash_key ^ _ALT_OFFSET) & _MASK
+        entry = self._table[alt_idx]
+        if entry is not None and entry[0] == hash_key:
+            return entry[1:]
         return None
 
     def store(
@@ -68,9 +81,11 @@ class TranspositionTable:
         from_sq: str | None,   # None for placement moves
         to_sq: str,
     ) -> None:
-        """Store an entry with depth-preferred replacement."""
+        """Two-deep replacement: depth-preferred primary + always-replace secondary."""
         idx = hash_key & _MASK
         existing = self._table[idx]
-        # Only overwrite if slot is empty or the new search is at least as deep.
         if existing is None or depth >= existing[1]:
             self._table[idx] = (hash_key, depth, score, flag, from_sq, to_sq)
+        else:
+            alt_idx = (hash_key ^ _ALT_OFFSET) & _MASK
+            self._table[alt_idx] = (hash_key, depth, score, flag, from_sq, to_sq)

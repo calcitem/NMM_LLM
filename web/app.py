@@ -740,6 +740,53 @@ async def save_weights(request: Request):
     return JSONResponse({"ok": True})
 
 
+_SEARCH_DEPTH_DEFAULTS = {"min": 5, "max": 16}
+
+def _compute_search_depth_for_level(level: int, min_depth: int, max_depth: int) -> int:
+    """Linearly interpolate max_search_depth for difficulty levels 1–8."""
+    if level <= 1:
+        return min_depth
+    if level >= 8:
+        return max_depth
+    return round(min_depth + (level - 1) / 7 * (max_depth - min_depth))
+
+def _time_budget_for_depth(d: int) -> float:
+    """Exponential formula: depth 14 ≈ 77 s, capped at 120 s."""
+    return min(120.0, 0.065 * (1.66 ** d))
+
+def _apply_search_depth(game_ai) -> None:
+    """Set game_ai.max_search_depth and time_budget_override from settings.json."""
+    settings = _load_settings()
+    sd = settings.get("search_depth", _SEARCH_DEPTH_DEFAULTS)
+    min_d = int(sd.get("min", _SEARCH_DEPTH_DEFAULTS["min"]))
+    max_d = int(sd.get("max", _SEARCH_DEPTH_DEFAULTS["max"]))
+    max_depth = _compute_search_depth_for_level(game_ai.difficulty, min_d, max_d)
+    game_ai.max_search_depth = max_depth
+    game_ai.time_budget_override = _time_budget_for_depth(max_depth)
+
+@app.get("/api/search_depth")
+async def get_search_depth():
+    from fastapi.responses import JSONResponse
+    settings = _load_settings()
+    sd = settings.get("search_depth", _SEARCH_DEPTH_DEFAULTS)
+    # Also return the interpolated table so the UI can show per-level values.
+    min_d = int(sd.get("min", _SEARCH_DEPTH_DEFAULTS["min"]))
+    max_d = int(sd.get("max", _SEARCH_DEPTH_DEFAULTS["max"]))
+    table = {str(lvl): _compute_search_depth_for_level(lvl, min_d, max_d) for lvl in range(1, 9)}
+    return JSONResponse({"min": min_d, "max": max_d, "table": table})
+
+@app.post("/api/search_depth")
+async def save_search_depth(request: Request):
+    from fastapi.responses import JSONResponse
+    body = await request.json()
+    min_d = max(2, min(12, int(body.get("min", _SEARCH_DEPTH_DEFAULTS["min"]))))
+    max_d = max(min_d + 2, min(22, int(body.get("max", _SEARCH_DEPTH_DEFAULTS["max"]))))
+    settings = _load_settings()
+    settings["search_depth"] = {"min": min_d, "max": max_d}
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    return JSONResponse({"ok": True, "min": min_d, "max": max_d})
+
+
 @app.get("/api/vn_status")
 async def get_vn_status():
     from fastapi.responses import JSONResponse
@@ -2183,7 +2230,7 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         value_net_blend=_w("value_net_blend", 80),
         cross_mill_cycling=_w("cross_mill_cycling", 300),
     )
-    return GameAI(
+    _gai = GameAI(
         color=color, difficulty=difficulty, weights=hw,
         blunder_probability=hw.make_mistakes / 100.0,
         fullgame_db=_fullgame_db,
@@ -2191,6 +2238,8 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         malom_db=_malom_db,
         value_net=_value_net,
     )
+    _apply_search_depth(_gai)
+    return _gai
 
 
 async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
@@ -2764,6 +2813,7 @@ async def ws_endpoint(websocket: WebSocket):
                         value_net=_value_net,
                     )
                     game_ai.suppress_fork_variety = _random.random() < 0.5
+                    _apply_search_depth(game_ai)
                     log.info(
                         "Adaptive: requested diff=%d effective diff=%d extra_blunder=%.2f",
                         diff, eff_diff, adaptive.extra_blunder,
@@ -2910,6 +2960,7 @@ async def ws_endpoint(websocket: WebSocket):
                         value_net=_value_net,
                     )
                     game_ai.suppress_fork_variety = _random.random() < 0.5
+                    _apply_search_depth(game_ai)
 
                     if use_perfect_db:
                         _sent_prob_s = SENTINEL_PROB_BY_DIFF.get(diff, 0.0)

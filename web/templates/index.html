@@ -16,6 +16,7 @@
     <button id="toggle-tournament" title="Open Tournament Mode">&#127942; Tournament</button>
     <button id="btn-ai-vs-ai" title="Watch two AIs play each other">&#x1F916; AI vs AI</button>
     <a href="/explorer" id="btn-explorer" target="_blank" rel="noopener" title="3D Position Explorer — browse human game data and Malom WDL" style="text-decoration:none">&#127759; Explorer</a>
+    <a href="/puzzles" id="btn-puzzles" target="_blank" rel="noopener" title="Endgame Puzzles — forced wins from the retrograde tablebase" style="text-decoration:none">&#x1F9E9; Puzzles</a>
     <button id="btn-new-game-header">&#9658; New Game</button>
     <select id="hdr-personality" title="AI Personality">
       <option value="random" selected>Random</option>
@@ -370,6 +371,40 @@
         <div class="form-row" id="row-pure-ai" style="flex-direction:row; align-items:center; gap:8px;">
           <button id="btn-pure-ai" class="btn-small" title="Toggle pure evolved AI weights — bypasses personality sliders while active">Pure AI</button>
           <span style="font-size:.78rem;color:var(--text-dim)">Bypass personality sliders</span>
+        </div>
+
+        <!-- Search depth range (levels 1–8) -->
+        <div class="form-row" style="flex-direction:column; gap:4px; margin-top:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="font-size:.85rem; font-weight:600;">Search Depth Range</label>
+            <button id="btn-save-search-depth" class="btn-small" style="font-size:.75rem;">Save</button>
+          </div>
+          <div style="font-size:.75rem; color:var(--text-dim); margin-bottom:2px;">
+            Controls max search depth for difficulty levels 1–8. Levels 9–10 use extended time budgets.
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-end;">
+            <div style="flex:1; display:flex; flex-direction:column; gap:2px;">
+              <div style="display:flex; justify-content:space-between; font-size:.75rem; color:var(--text-dim);">
+                <span>Level 1 depth</span>
+                <span id="lbl-depth-min" style="font-weight:600; color:var(--accent);">5</span>
+              </div>
+              <input type="range" id="rng-depth-min" min="2" max="12" step="1" value="5" style="width:100%">
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:2px;">
+              <div style="display:flex; justify-content:space-between; font-size:.75rem; color:var(--text-dim);">
+                <span>Level 8 depth</span>
+                <span id="lbl-depth-max" style="font-weight:600; color:var(--accent);">16</span>
+              </div>
+              <input type="range" id="rng-depth-max" min="6" max="22" step="1" value="16" style="width:100%">
+            </div>
+          </div>
+          <!-- Per-level preview bar -->
+          <div id="depth-level-bar" style="display:flex; gap:2px; margin-top:3px; align-items:flex-end; height:36px;">
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:.68rem; color:var(--text-dim); padding:0 1px;">
+            <span>Lv 1</span><span>Lv 2</span><span>Lv 3</span><span>Lv 4</span>
+            <span>Lv 5</span><span>Lv 6</span><span>Lv 7</span><span>Lv 8</span>
+          </div>
         </div>
 
         <button id="btn-new-game">New Game</button>
