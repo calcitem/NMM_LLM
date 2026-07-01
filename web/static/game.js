@@ -21,6 +21,7 @@ let forceAggressive = false;  // when true, AI ignores fly-sacrifice heuristic
 let thinkingInterval  = null; // setInterval handle while AI is thinking
 let thinkingStarted   = 0;    // Date.now() when thinking began
 let thinkingExpected  = 0;    // expected seconds from server
+let maxDepthExpected  = 0;    // expected max search depth for current difficulty
 let _hintCountdown    = null; // setInterval handle for hint countdown
 let canOverride       = false; // true only between ai_move and the next human move commit
 let inGuidanceMode    = false; // true while human is directing the AI's move after override
@@ -1254,7 +1255,7 @@ function handleMessage(msg) {
       } else {
         board && board.clearDiag();
       }
-      startThinkingTimer(msg.color, msg.expected_seconds ?? 0, ws);
+      startThinkingTimer(msg.color, msg.expected_seconds ?? 0, ws, msg.max_depth_expected ?? 0);
       $("btn-force-move").hidden = false;
       canOverride = false;
       $("btn-override").hidden = true;
@@ -1358,6 +1359,20 @@ function handleMessage(msg) {
       if (msg.can_mark_bad) {
         canOverride = true;
         $("btn-override").hidden = false;
+      }
+      {
+        const plyEl = $("ply-progress");
+        if (plyEl) {
+          const d = msg.depth_reached || 0;
+          if (d > 0 && maxDepthExpected > 0) {
+            const pct = Math.min(100, Math.round((d / maxDepthExpected) * 100));
+            plyEl.textContent = `Depth ${d} / ${maxDepthExpected} (${pct}%)`;
+          } else if (d > 0) {
+            plyEl.textContent = `Depth ${d}`;
+          } else {
+            plyEl.textContent = "";
+          }
+        }
       }
       break;
     }
@@ -1788,12 +1803,27 @@ function setAdaptiveBadge(difficulty, softened) {
     : `Adaptive: Diff ${difficulty}`;
 }
 
-function startThinkingTimer(color, expectedSec, socket) {
+function startThinkingTimer(color, expectedSec, socket, maxDepth) {
   stopThinkingTimer();
   thinkingStarted  = Date.now();
   thinkingExpected = expectedSec;
+  maxDepthExpected = maxDepth || 0;
   const colorName  = color === "W" ? "White" : "Black";
   let autoFired    = false;
+  const plyEl = $("ply-progress");
+  if (plyEl) plyEl.textContent = maxDepth ? `searching… (target depth ${maxDepth})` : "";
+
+  // Animate the think-bar: start at 20%, fill to 100% over expectedSec seconds.
+  const barWrap = $("think-bar-wrap");
+  const barFill = $("think-bar-fill");
+  if (barWrap && barFill) {
+    barWrap.style.display = "block";
+    barFill.style.transition = "none";
+    barFill.style.width = "20%";
+    barFill.offsetWidth; // force reflow so the transition fires from 20%
+    barFill.style.transition = `width ${expectedSec}s linear`;
+    barFill.style.width = "100%";
+  }
 
   function tick() {
     if (!thinkingInterval) return;
@@ -1817,6 +1847,13 @@ function stopThinkingTimer() {
   if (thinkingInterval !== null) {
     clearInterval(thinkingInterval);
     thinkingInterval = null;
+  }
+  const barWrap = $("think-bar-wrap");
+  const barFill = $("think-bar-fill");
+  if (barWrap && barFill) {
+    barFill.style.transition = "none";
+    barFill.style.width = "20%";
+    barWrap.style.display = "none";
   }
 }
 

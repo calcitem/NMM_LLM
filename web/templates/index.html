@@ -164,6 +164,7 @@
         <svg id="board-svg"></svg>
       </div>
       <div id="status-bar">Configure a game and click New Game.</div>
+      <div id="ply-progress" style="font-size:.75rem;color:#888;text-align:center;min-height:1.2em;margin-top:2px"></div>
     </div>
 
     <!-- Right column: moves list, status badge, game info, settings -->
@@ -405,6 +406,11 @@
             <span>Lv 1</span><span>Lv 2</span><span>Lv 3</span><span>Lv 4</span>
             <span>Lv 5</span><span>Lv 6</span><span>Lv 7</span><span>Lv 8</span>
           </div>
+        </div>
+
+        <!-- AI think-time progress bar -->
+        <div id="think-bar-wrap" title="AI search time">
+          <div id="think-bar-fill"></div>
         </div>
 
         <button id="btn-new-game">New Game</button>

@@ -2344,7 +2344,7 @@ async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
 
 
 def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
-    if total_pieces < 10:
+    if total_pieces < 3:
         return 4.0
     # Time-limited levels: return the actual budget so the UI countdown matches.
     budgets = {5: 12, 6: 18, 7: 20, 8: 30, 9: 40, 10: 60}
@@ -2353,6 +2353,11 @@ def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
     # Fixed-depth levels (1–4): generous estimate so force_move doesn't fire mid-search.
     estimates = {1: 3, 2: 3, 3: 6, 4: 9}
     return float(estimates.get(difficulty, 5))
+
+
+# Typical max search depth reachable at each time-limited difficulty.
+# Used to compute the ply-progress percentage shown in the UI.
+_EXPECTED_MAX_DEPTH = {5: 8, 6: 9, 7: 9, 8: 10, 9: 11, 10: 12}
 
 
 def _nollm_choose_move(session: Session, board: BoardState) -> dict:
@@ -2470,12 +2475,14 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     diff  = session.game_ai.difficulty if session.game_ai else 3
     total = sum(board.pieces_on_board.values())
     exp   = _expected_think_seconds(diff, total)
+    max_depth_exp = _EXPECTED_MAX_DEPTH.get(diff, 0)
     log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs",
              board.turn, diff, total, exp)
     await _send(ws, {
-        "type":             "thinking",
-        "color":            board.turn,
-        "expected_seconds": exp,
+        "type":              "thinking",
+        "color":             board.turn,
+        "expected_seconds":  exp,
+        "max_depth_expected": max_depth_exp,
     })
 
     # Pre-compute static overlay so client sees scores before the AI move arrives.
@@ -2562,13 +2569,15 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     if session.opening_recognizer and not session.coordinator and move.get("from") is None:
         session.opening_recognizer.update(move.get("to", ""), session.engine.board)
 
+    _depth_reached = getattr(session.game_ai, "last_depth_reached", 0) if session.game_ai else 0
     _ai_move_msg: dict = {
-        "type":        "ai_move",
-        "from":        move.get("from"),
-        "to":          move.get("to"),
-        "capture":     move.get("capture"),
-        "was_blunder": bool(session.game_ai and session.game_ai.last_was_blunder),
+        "type":         "ai_move",
+        "from":         move.get("from"),
+        "to":           move.get("to"),
+        "capture":      move.get("capture"),
+        "was_blunder":  bool(session.game_ai and session.game_ai.last_was_blunder),
         "can_mark_bad": True,
+        "depth_reached": _depth_reached,
     }
     _thinking = (
         (session.coordinator.last_thinking if session.coordinator else "")

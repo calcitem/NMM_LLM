@@ -313,7 +313,7 @@ _TIME_LIMIT = {
 
 # While fewer than this many pieces are on the board in total, use a short
 # time budget regardless of difficulty — the tree is tiny and deep search wastes time.
-_EARLY_GAME_PIECE_THRESHOLD = 10  # covers roughly the first 5 placements per side
+_EARLY_GAME_PIECE_THRESHOLD = 3   # only the first 3 placements total get the short budget
 _EARLY_GAME_TIME            = 2.0  # seconds — SE-8 extensions can push effective depth 2–4 plies
                                    # deeper than nominal, so the budget must be tighter
 
@@ -445,6 +445,7 @@ class GameAI:
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.last_thinking: str = ""          # short plain-English label for the chosen move
+        self.last_depth_reached: int = 1      # deepest completed depth from last _iterative_deepen
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
         # Set True by Coordinator when opponent's last move scored below poor_move_threshold.
         # Amplifies the placement busy-chain bonus so the AI exploits passive opponent play.
@@ -2094,6 +2095,7 @@ class GameAI:
         )
 
         prev_score: int | None = None
+        last_completed_depth = 1
         for depth in range(2, max_depth + 1):
             if time.time() >= self._deadline:
                 break
@@ -2141,9 +2143,11 @@ class GameAI:
                         move, score = self._root_search(board, depth, top_n=top_n, moves=moves)
                         best_move = move      # only update if depth completed cleanly
                         prev_score = score
+                last_completed_depth = depth
             except _SearchAbort:
                 break                     # deadline hit mid-depth; keep previous best
         self._deadline = math.inf
+        self.last_depth_reached = last_completed_depth
         return best_move
 
     def position_eval(self, board: BoardState) -> float:
