@@ -9,7 +9,7 @@ used by both the game engine and the minimax AI.
 from __future__ import annotations
 from typing import List, Optional, Tuple
 
-from .board import MILLS, BoardState
+from .board import MILLS, SQUARE_MILLS, BoardState
 
 
 # ── Phase helpers ─────────────────────────────────────────────────────────────
@@ -71,17 +71,18 @@ def is_terminal(board: BoardState) -> Tuple[bool, Optional[str]]:
 
 def does_form_mill(board: BoardState, move: dict) -> bool:
     """
-    Return True if applying the placement / movement part of 'move' (ignoring
+    Return True if applying the placement/movement part of 'move' (ignoring
     any capture) would place board.turn's piece in a mill.
-    Used to decide whether a capture step is required.
+
+    Uses precomputed SQUARE_MILLS to check only the 2 mills containing the
+    destination square, without constructing a temporary BoardState.
     """
     color = board.turn
-    new_positions = dict(board.positions)
-    if move["from"] is not None:
-        new_positions[move["from"]] = ""
-    new_positions[move["to"]] = color
-    for mill in MILLS:
-        if move["to"] in mill and all(new_positions[p] == color for p in mill):
+    to  = move["to"]
+    src = move["from"]
+    pos = board.positions
+    for mill in SQUARE_MILLS[to]:
+        if all(p == to or (p != src and pos[p] == color) for p in mill):
             return True
     return False
 
@@ -95,6 +96,9 @@ def get_all_legal_moves(board: BoardState) -> List[dict]:
 
     Mill formation is expanded into all legal capture combinations so the
     minimax AI receives atomic, fully-specified moves.
+    `legal_captures` is called at most once per call (result reused for all
+    mill-forming moves, since capture options are the same regardless of which
+    move formed the mill).
     """
     color = board.turn
     phase = get_game_phase(board, color)
@@ -108,9 +112,11 @@ def get_all_legal_moves(board: BoardState) -> List[dict]:
             partial.append({"from": src, "to": dest})
 
     complete: List[dict] = []
+    captures: List[str] | None = None
     for pm in partial:
         if does_form_mill(board, pm):
-            captures = board.legal_captures(color)
+            if captures is None:
+                captures = board.legal_captures(color)
             for cap in captures:
                 complete.append({**pm, "capture": cap})
         else:

@@ -88,6 +88,14 @@ MILLS: List[Tuple[str, str, str]] = [
     ("a4", "b4", "c4"),
 ]
 
+# ── Precomputed square→mills lookup ──────────────────────────────────────────
+# SQUARE_MILLS[pos] = list of mills that contain pos.
+# Each square appears in exactly 2 mills in Nine Men's Morris.
+# Used by does_form_mill and legal_captures to avoid iterating all 16 mills.
+SQUARE_MILLS: Dict[str, List[Tuple[str, str, str]]] = {
+    pos: [m for m in MILLS if pos in m] for pos in POSITIONS
+}
+
 # ── Display template ──────────────────────────────────────────────────────────
 # Fixed 13-row × 26-char template. Column alignment verified:
 #   outer corners   @ cols  1, 25
@@ -252,13 +260,22 @@ class BoardState:
             self.pieces_placed[color] == 9
             and self.pieces_on_board[color] <= 3
         )
-        own_pieces = [pos for pos in POSITIONS if self.positions[pos] == color]
-        empty = [pos for pos in POSITIONS if self.positions[pos] == ""]
+        pos = self.positions
+        own_pieces: List[str] = []
+        empty: List[str] = []
+        for sq in POSITIONS:
+            v = pos[sq]
+            if v == color:
+                own_pieces.append(sq)
+            elif not v:
+                empty.append(sq)
+        if flying:
+            return [(src, tgt) for src in own_pieces for tgt in empty]
         moves: List[Tuple[str, str]] = []
         for src in own_pieces:
-            targets = empty if flying else [t for t in ADJACENCY[src] if self.positions[t] == ""]
-            for tgt in targets:
-                moves.append((src, tgt))
+            for tgt in ADJACENCY[src]:
+                if not pos[tgt]:
+                    moves.append((src, tgt))
         return moves
 
     def legal_captures(self, color: str) -> List[str]:
@@ -268,8 +285,12 @@ class BoardState:
         opponent piece is currently in a mill.
         """
         opponent = "B" if color == "W" else "W"
-        opp_pieces = [pos for pos in POSITIONS if self.positions[pos] == opponent]
-        non_mill = [pos for pos in opp_pieces if not self.is_mill(pos, opponent)]
+        pos = self.positions
+        opp_pieces = [sq for sq in POSITIONS if pos[sq] == opponent]
+        non_mill = [
+            sq for sq in opp_pieces
+            if not any(all(pos[p] == opponent for p in mill) for mill in SQUARE_MILLS[sq])
+        ]
         return non_mill if non_mill else opp_pieces
 
     # ── Move application ──────────────────────────────────────────────────────
