@@ -938,6 +938,7 @@ class GameAI:
             trajectory_db.query_line(board) if trajectory_db is not None else []
         )
         moves = get_all_legal_moves(board)
+        _original_move_count = len(moves)   # for detecting later filtering (mandatory block, bans, …)
         if not moves:
             return {}
         if len(moves) == 1:
@@ -1236,6 +1237,24 @@ class GameAI:
             deadline = time.time() + time_budget
             return self._mcts.choose_move(board, deadline=deadline)
 
+        # Rust bypasses all Python-side hint pipelines (opening book, TrajectoryDB,
+        # HumanDB, mandatory-block filter). Skip Rust when any of these are active
+        # so the Python search can apply them.
+        _hint_reasons: list[str] = []
+        if len(moves) != _original_move_count:
+            _hint_reasons.append(f"moves-filtered({len(moves)}/{_original_move_count})")
+        if recognition is not None and recognition.status not in ("novel", "inactive"):
+            _hint_reasons.append(f"recognition={recognition.status}")
+        if trajectory_hints:
+            _hint_reasons.append("trajectory-hints")
+        if self._trajectory_line:
+            _hint_reasons.append("trajectory-line")
+        _python_hints_active = bool(_hint_reasons)
+        _use_rust = (top_n == 1) and not _python_hints_active
+        if _python_hints_active and top_n == 1:
+            print(f"P:HINTS-ACTIVE reasons={','.join(_hint_reasons)} — routing to Python search",
+                  flush=True)
+
         # Early-game fast path: while few pieces are on the board the tree is
         # tiny — cap the search to a short budget regardless of difficulty.
         # Early-game cap: for time-limited difficulties only (5+), use a shorter
@@ -1257,12 +1276,15 @@ class GameAI:
             # per side — enough for tactical awareness without the distortion.
             # Skipped when override_time_budget is set (training fast-mode).
             early_max = 6 if total_on_board < 4 else 19
-            move = self._iterative_deepen(
-                board, _EARLY_GAME_TIME,
-                recognition=recognition, trajectory_hints=trajectory_hints,
-                top_n=top_n, moves=moves,
-                max_depth=early_max,
-            )
+            # Rust is fast enough for any early-game depth; fall back to Python
+            # when hints are active or Rust unavailable.
+            move = (self._choose_rust(board, early_max) if _use_rust else None) \
+                or self._iterative_deepen(
+                    board, _EARLY_GAME_TIME,
+                    recognition=recognition, trajectory_hints=trajectory_hints,
+                    top_n=top_n, moves=moves,
+                    max_depth=early_max,
+                )
             move = self._apply_sentinel_intervention(board, move, moves)
             self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
@@ -1278,12 +1300,15 @@ class GameAI:
                 )
             )
             time_budget = 2.0 if fast_early_game else _base_budget
-            move = self._iterative_deepen(
-                board, time_budget,
-                recognition=recognition, trajectory_hints=trajectory_hints,
-                top_n=top_n, moves=moves,
-                max_depth=self.max_search_depth,
-            )
+            # Use Rust search (evaluate_v2) when no Python-side hints are active.
+            # top_n > 1 is self-play (needs ranked move list) — Python only.
+            move = (self._choose_rust(board, self.max_search_depth) if _use_rust else None) \
+                or self._iterative_deepen(
+                    board, time_budget,
+                    recognition=recognition, trajectory_hints=trajectory_hints,
+                    top_n=top_n, moves=moves,
+                    max_depth=self.max_search_depth,
+                )
             move = self._apply_sentinel_intervention(board, move, moves)
             self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
@@ -2084,6 +2109,8 @@ class GameAI:
         _ASP_MARGIN = 175
         self._deadline = time.time() + time_limit
         clear_eval_cache()  # SE-12: fresh cache per depth iteration
+        _p_t0 = time.perf_counter()
+        print(f"P:START budget={time_limit:.1f}s max_depth={max_depth}", flush=True)
         if moves is None:
             moves = get_all_legal_moves(board)
         best_move     = moves[0]
@@ -2148,7 +2175,55 @@ class GameAI:
                 break                     # deadline hit mid-depth; keep previous best
         self._deadline = math.inf
         self.last_depth_reached = last_completed_depth
+        _p_dt = time.perf_counter() - _p_t0
+        print(f"P:END depth={last_completed_depth} t={_p_dt:.2f}s", flush=True)
         return best_move
+
+    def _choose_rust(self, board: BoardState, max_depth: int) -> "dict | None":
+        """Rust negamax using evaluate_v2 — always reaches max_depth.
+
+        Returns the best-move dict and sets self.last_depth_reached.
+        Returns None only when the Rust extension is not installed, so the
+        caller can fall back to the Python search transparently.
+
+        Time limit: generous enough that even depth 16 completes before the
+        cap fires on typical NMM positions (~60 s for depth 16 at 2.4M n/s).
+        """
+        _t0 = time.perf_counter()
+        try:
+            from . import native_core as _nc
+            if not _nc.RUST_AVAILABLE:
+                print("R:UNAVAILABLE (nmm_core not importable)", flush=True)
+                return None
+            import nmm_core as _rc
+            white, black, wp, bp, stm = _nc.board_to_bits(board)
+            # Use configured budget when available; fall back to quadratic cap.
+            if self.time_budget_override is not None:
+                time_limit_ms = min(300_000, int(self.time_budget_override * 1000))
+            else:
+                time_limit_ms = min(300_000, max_depth * max_depth * 300)
+            frm, to, cap, _nodes, depth = _rc.py_search_stats(
+                white, black, wp, bp, stm, max_depth, time_limit_ms
+            )
+            _dt = time.perf_counter() - _t0
+            if to is None:
+                print(f"R:NO-MOVE depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
+                return None
+            self.last_depth_reached = depth
+            print(f"R:OK depth={depth} nodes={_nodes} t={_dt:.2f}s "
+                  f"to={POSITIONS[to]}{' cap='+POSITIONS[cap] if cap is not None else ''}",
+                  flush=True)
+            return {
+                "from": None if frm is None else POSITIONS[frm],
+                "to":   POSITIONS[to],
+                "capture": None if cap is None else POSITIONS[cap],
+            }
+        except Exception:
+            _dt = time.perf_counter() - _t0
+            # Full traceback so the actual crash cause is visible.
+            _logger.exception("R:FAIL after %.2fs — falling back to Python", _dt)
+            print(f"R:FAIL after {_dt:.2f}s (see traceback above) — falling back to Python", flush=True)
+            return None
 
     def position_eval(self, board: BoardState) -> float:
         """Return tanh-normalised score in (-1, +1): positive = White winning.

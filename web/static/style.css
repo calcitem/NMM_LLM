@@ -283,21 +283,21 @@ main {
   min-height: 1.4em;
 }
 
-/* ── AI think-time progress bar ──────────────────────────────────────── */
+/* ── AI think-time progress bar (below status bar in board-col) ──────── */
 #think-bar-wrap {
   display: none;
-  height: 8px;
+  height: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
-  margin-top: 8px;
+  margin: 4px 0 0;
 }
 #think-bar-fill {
   height: 100%;
-  width: 20%;
+  width: 10%;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 /* ── Diagnostic eval bar ─────────────────────────────────────────────── */

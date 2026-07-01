@@ -44,7 +44,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-01-a3fa19",
@@ -87,7 +87,7 @@
     },
     "outcome_stats": {
       "W": 1,
-      "B": 7,
+      "B": 9,
       "D": 0
     },
     "confidence": 0.8,
@@ -150,7 +150,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-03-572229",
@@ -269,7 +269,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 1,
+      "W": 2,
       "B": 2,
       "D": 0
     },
@@ -336,7 +336,7 @@
     },
     "outcome_stats": {
       "W": 2,
-      "B": 12,
+      "B": 18,
       "D": 0
     },
     "confidence": 0.8,
@@ -346,11 +346,11 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-07-a33845",
-    "name": "Z mill c4 intrerrupt",
+    "name": "Battle Lines - rapid response",
     "aliases": [],
     "family": "Early Game",
     "side": "W",
@@ -401,8 +401,8 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 75,
-      "B": 4,
+      "W": 87,
+      "B": 5,
       "D": 0
     },
     "confidence": 0.8,
@@ -478,7 +478,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-10-5ce37b",
@@ -544,7 +544,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-11-04f0dc",
@@ -600,7 +600,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 12,
+      "B": 14,
       "D": 0
     },
     "confidence": 0.8,
@@ -671,7 +671,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "B"
+    "favored_side": "W"
   },
   {
     "opening_id": "book-13-a872a2",
@@ -733,7 +733,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-14-b4b5b3",
@@ -863,7 +863,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "B"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-16-c24880",
@@ -927,7 +927,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-19-5af166",
@@ -1119,7 +1119,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-23-5f1cc8",
@@ -1246,7 +1246,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-25-b14595",
@@ -1490,7 +1490,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-29-36a60f",
@@ -2022,7 +2022,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-38-fc8361",
@@ -2404,7 +2404,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-44-2f8c37",
@@ -2794,7 +2794,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-51-b4d21a",
@@ -2989,7 +2989,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-54-f97b6d",
@@ -3118,7 +3118,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-56-cde7dd",
@@ -3243,7 +3243,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "book-58-706988",
@@ -3295,7 +3295,7 @@
     ],
     "source_reference": "Nine Men's Morris Strategy — Brandwood",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "book-59-a76197",
@@ -3422,7 +3422,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "B"
+    "favored_side": "W"
   },
   {
     "opening_id": "novel-3212661a",
@@ -3488,7 +3488,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-d838a418",
@@ -3619,7 +3619,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "W"
   },
   {
     "opening_id": "novel-fff7d408",
@@ -3677,7 +3677,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "B"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-90a3812e",
@@ -3724,7 +3724,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-6309fc03",
@@ -3970,7 +3970,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-aaff64e3",
@@ -4031,7 +4031,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-8954c3ea",
@@ -4205,7 +4205,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-03c5f5dc",
@@ -4271,7 +4271,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-6390aa8a",
@@ -4337,7 +4337,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "B"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-052cdb96",
@@ -4469,7 +4469,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-75f55995",
@@ -4599,7 +4599,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-1555692c",
@@ -4730,7 +4730,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-e375a1d7",
@@ -4796,7 +4796,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-003932a3",
@@ -4857,7 +4857,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-c6599580",
@@ -4920,7 +4920,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-a19466e5",
@@ -5049,7 +5049,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-c1383e61",
@@ -5181,7 +5181,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-dd9c428c",
@@ -5247,7 +5247,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-ba1f7236",
@@ -5313,7 +5313,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-462cd0d7",
@@ -5435,7 +5435,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 2,
+      "B": 3,
       "D": 0
     },
     "confidence": 0.3,
@@ -5445,7 +5445,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "B"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-d1624efa",
@@ -5501,7 +5501,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 1,
+      "B": 2,
       "D": 0
     },
     "confidence": 0.3,
@@ -5511,7 +5511,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-9ae57f57",
@@ -5643,7 +5643,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-2d9a1245",
@@ -5709,7 +5709,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "equal"
+    "favored_side": "W"
   },
   {
     "opening_id": "novel-17e922b1",
@@ -5841,7 +5841,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "B"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-8ae3cee3",
@@ -5907,7 +5907,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-98450726",
@@ -6039,7 +6039,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-c5295bcb",
@@ -6301,7 +6301,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-c25d4b08",
@@ -6362,7 +6362,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-c95b15b4",
@@ -6418,7 +6418,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 0,
+      "B": 1,
       "D": 0
     },
     "confidence": 0.3,
@@ -6428,7 +6428,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "novel-f201dfd5",
@@ -6494,7 +6494,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-b66c36fb",
@@ -6692,7 +6692,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": false,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-57888c26",
@@ -6758,7 +6758,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "B"
+    "favored_side": "W"
   },
   {
     "opening_id": "novel-522128b4",
@@ -6824,7 +6824,7 @@
     ],
     "source_reference": "",
     "needs_llm_name": true,
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "novel-dcd1704b",
@@ -6891,5 +6891,269 @@
     "source_reference": "",
     "needs_llm_name": false,
     "favored_side": "B"
+  },
+  {
+    "opening_id": "novel-286d491b",
+    "name": "Novel — a4-f4-b2",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "a4",
+      "f4",
+      "b2",
+      "b6",
+      "f2",
+      "e3",
+      "d7",
+      "c3",
+      "d2",
+      "c3",
+      "d3",
+      "d1",
+      "c4",
+      "b4",
+      "e4",
+      "d6",
+      "f6",
+      "g7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".......WB..B..W.........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".......WB..BW.W.....B...|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.....WB..BW.W.....B.B.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.....WB..BWWW.....B.B.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-4589926f",
+    "name": "Novel — d6-f4-b4",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "f4",
+      "b4",
+      "d7",
+      "b6",
+      "b2",
+      "f6",
+      "b2",
+      "e4",
+      "d2",
+      "c3",
+      "c4",
+      "e3",
+      "d3",
+      "e5",
+      "d3",
+      "d1",
+      "f2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".B.......W.B...W........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".B......WW.B..BW........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B......WWWB..BW........|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B......WWWB.BBW...W....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-a48f60e9",
+    "name": "Novel — c3-f4-d1",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "c3",
+      "f4",
+      "d1",
+      "d6",
+      "f6",
+      "b4",
+      "d7",
+      "a1",
+      "c4",
+      "c5",
+      "g7",
+      "a7",
+      "a4",
+      "e5",
+      "d5",
+      "e4",
+      "g4",
+      "e3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....W...B.B..........W.|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".....W...BWB...B......W.|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W...WB..BWB...B......W.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W...WB..BWB...BB.....WW|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-516132d6",
+    "name": "Novel — g1-d6-d7",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "g1",
+      "d6",
+      "d7",
+      "f4",
+      "f6",
+      "a4",
+      "d1",
+      "a1",
+      "g7",
+      "g4",
+      "a7",
+      "e4",
+      "c3",
+      "g4",
+      "d2",
+      "d3",
+      "b4",
+      "c4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W..W....B.B............|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W..W..B.BWB............|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W..WWBB.BWB............|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".WWBWWBB.BWB............|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
   }
 ]

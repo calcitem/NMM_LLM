@@ -3,7 +3,7 @@
 //! See `docs/RUST_INTEGRATION_PLAN.md` §6.
 
 use crate::board::{get_phase, ADJACENCY};
-use crate::mills::mill_mask;
+use crate::mills::{MILL_MASKS, SQUARE_MILLS};
 use crate::types::{Board, Color, Move, Phase, N_SQUARES};
 
 /// True if `color` has at least one legal (partial) move in movement/fly phase.
@@ -34,10 +34,9 @@ fn does_form_mill(board: &Board, color: Color, from: Option<u8>, to: u8) -> bool
         bits &= !(1u32 << f);
     }
     bits |= 1u32 << to;
-    let to_mask = 1u32 << to;
-    for i in 0..16 {
-        let mm = mill_mask(i);
-        if mm & to_mask != 0 && (bits & mm) == mm {
+    for &mi in &SQUARE_MILLS[to as usize] {
+        let mm = MILL_MASKS[mi as usize];
+        if (bits & mm) == mm {
             return true;
         }
     }
@@ -51,30 +50,20 @@ fn legal_captures(board: &Board, color: Color) -> Vec<u8> {
     let opp_bits = board.bits(opp);
     let mut non_mill: Vec<u8> = Vec::new();
     let mut all: Vec<u8> = Vec::new();
-    for sq in 0..N_SQUARES as u8 {
-        if opp_bits & (1 << sq) == 0 {
-            continue;
-        }
+    // Iterate over set bits only instead of scanning all 24 squares.
+    let mut bits = opp_bits;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
         all.push(sq);
-        // is this opp piece in a mill?
-        let mut in_mill = false;
-        let sq_mask = 1u32 << sq;
-        for i in 0..16 {
-            let mm = mill_mask(i);
-            if mm & sq_mask != 0 && (opp_bits & mm) == mm {
-                in_mill = true;
-                break;
-            }
-        }
+        let in_mill = SQUARE_MILLS[sq as usize]
+            .iter()
+            .any(|&mi| (opp_bits & MILL_MASKS[mi as usize]) == MILL_MASKS[mi as usize]);
         if !in_mill {
             non_mill.push(sq);
         }
     }
-    if non_mill.is_empty() {
-        all
-    } else {
-        non_mill
-    }
+    if non_mill.is_empty() { all } else { non_mill }
 }
 
 /// All complete legal moves for `board.side_to_move`, in the same order Python's

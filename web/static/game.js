@@ -1813,14 +1813,14 @@ function startThinkingTimer(color, expectedSec, socket, maxDepth) {
   const plyEl = $("ply-progress");
   if (plyEl) plyEl.textContent = maxDepth ? `searching… (target depth ${maxDepth})` : "";
 
-  // Animate the think-bar: start at 20%, fill to 100% over expectedSec seconds.
+  // Animate the think-bar: start at 10%, fill to 100% over expectedSec seconds.
   const barWrap = $("think-bar-wrap");
   const barFill = $("think-bar-fill");
   if (barWrap && barFill) {
     barWrap.style.display = "block";
     barFill.style.transition = "none";
-    barFill.style.width = "20%";
-    barFill.offsetWidth; // force reflow so the transition fires from 20%
+    barFill.style.width = "10%";
+    barFill.offsetWidth; // force reflow so the transition fires from 10%
     barFill.style.transition = `width ${expectedSec}s linear`;
     barFill.style.width = "100%";
   }
@@ -1830,7 +1830,7 @@ function startThinkingTimer(color, expectedSec, socket, maxDepth) {
     const elapsed    = (Date.now() - thinkingStarted) / 1000;
     const remaining  = Math.max(0, expectedSec - elapsed);
     if (remaining > 0) {
-      setStatus(`AI (${colorName}) thinking… ${remaining.toFixed(1)}s`);
+      setStatus(`AI (${colorName}) thinking… ${elapsed.toFixed(1)}s`);
     } else {
       setStatus(`AI (${colorName}) finalizing…`);
       if (!autoFired && socket && socket.readyState === WebSocket.OPEN) {
@@ -1852,7 +1852,7 @@ function stopThinkingTimer() {
   const barFill = $("think-bar-fill");
   if (barWrap && barFill) {
     barFill.style.transition = "none";
-    barFill.style.width = "20%";
+    barFill.style.width = "10%";
     barWrap.style.display = "none";
   }
 }

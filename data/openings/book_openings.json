@@ -202,7 +202,7 @@
         "fen": ".....W.BBBBWWWWB........|W|5|5"
       }
     ],
-    "favored_side": "equal"
+    "favored_side": "W"
   },
   {
     "opening_id": "mill-rush-perpendicular-alt",
@@ -385,7 +385,7 @@
         "fen": ".W...B..B.WWW.BB........|W|4|4"
       }
     ],
-    "favored_side": "equal"
+    "favored_side": "B"
   },
   {
     "opening_id": "inverted-mill-rush-perpendicular",
@@ -444,7 +444,7 @@
         "fen": ".W...B..B.WWW..B.......B|W|4|4"
       }
     ],
-    "favored_side": "B"
+    "favored_side": "W"
   },
   {
     "opening_id": "battle-lines",
@@ -512,7 +512,7 @@
         "fen": ".B...W..BBWWWWBB........|W|5|5"
       }
     ],
-    "favored_side": "W"
+    "favored_side": "B"
   },
   {
     "opening_id": "z-mill-closed",
@@ -653,7 +653,7 @@
         "fen": ".........B.W.W.BB.B.W..W|W|4|4"
       }
     ],
-    "favored_side": "W"
+    "favored_side": "equal"
   },
   {
     "opening_id": "corner-gambit",

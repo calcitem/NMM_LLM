@@ -6,8 +6,8 @@
 //! self-contained Rust search. Python remains the default evaluator.
 
 use crate::board::{get_phase, terminal_winner, ADJACENCY};
-use crate::mills::mill_mask;
-use crate::types::{Board, Color, Phase, N_SQUARES};
+use crate::mills::{MILL_MASKS, SQUARE_MILLS};
+use crate::types::{Board, Color, Phase};
 
 pub const INF: i64 = 10_000_000;
 const FLY_MOBILITY_CAP: i64 = 5;
@@ -92,8 +92,7 @@ fn domination_weight(p: Phase) -> i64 {
 pub fn closed_mills(board: &Board, color: Color) -> i64 {
     let bits = board.bits(color);
     let mut n = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (bits & mm) == mm {
             n += 1;
         }
@@ -108,8 +107,11 @@ pub fn blocked_count(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if own & (1 << sq) != 0 && (ADJACENCY[sq] & empty) == 0 {
+    let mut bits = own;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        if (ADJACENCY[sq] & empty) == 0 {
             count += 1;
         }
     }
@@ -120,8 +122,7 @@ pub fn two_configs(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (own & mm).count_ones() == 2 && (empty & mm).count_ones() == 1 {
             count += 1;
         }
@@ -132,18 +133,14 @@ pub fn two_configs(board: &Board, color: Color) -> i64 {
 pub fn double_mills(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if own & (1 << sq) == 0 {
-            continue;
-        }
-        let mut n = 0;
-        let sq_mask = 1u32 << sq;
-        for i in 0..16 {
-            let mm = mill_mask(i);
-            if mm & sq_mask != 0 && (own & mm) == mm {
-                n += 1;
-            }
-        }
+    let mut bits = own;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
+        let n = SQUARE_MILLS[sq as usize]
+            .iter()
+            .filter(|&&mi| (own & MILL_MASKS[mi as usize]) == MILL_MASKS[mi as usize])
+            .count();
         if n >= 2 {
             count += 1;
         }
@@ -168,10 +165,11 @@ pub fn mobility(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if own & (1 << sq) != 0 {
-            count += (ADJACENCY[sq] & empty).count_ones() as i64;
-        }
+    let mut bits = own;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        count += (ADJACENCY[sq] & empty).count_ones() as i64;
     }
     count
 }
@@ -182,15 +180,13 @@ pub fn mill_threats(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (own & mm).count_ones() == 2 && (empty & mm).count_ones() == 1 {
             let empty_sq = (empty & mm).trailing_zeros() as usize;
             let reachable = match phase {
                 Phase::Place => can_place,
                 Phase::Fly => true,
                 Phase::Move => {
-                    // own piece adjacent to closing sq, excluding pieces inside this mill
                     let adj_own = ADJACENCY[empty_sq] & own & !mm;
                     adj_own != 0
                 }
@@ -217,15 +213,17 @@ pub fn mill_cycle_ready(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (own & mm) != mm {
             continue;
         }
-        // any piece in the mill with a free adjacent square
+        // Any piece in the mill with a free adjacent square — iterate set bits of mm.
+        let mut mill_bits = mm;
         let mut ready = false;
-        for sq in 0..N_SQUARES {
-            if mm & (1 << sq) != 0 && (ADJACENCY[sq] & empty) != 0 {
+        while mill_bits != 0 {
+            let sq = mill_bits.trailing_zeros() as usize;
+            mill_bits &= mill_bits - 1;
+            if (ADJACENCY[sq] & empty) != 0 {
                 ready = true;
                 break;
             }
@@ -240,21 +238,26 @@ pub fn mill_cycle_ready(board: &Board, color: Color) -> i64 {
 pub fn fork_threats(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
-    // open mills = two-configs
-    let mut open_masks: Vec<u32> = Vec::new();
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    // Collect bitmask of open-mill mask indices as a u16 bitset (16 mills fit in u16).
+    let mut open_mask_bits: u16 = 0;
+    for (i, &mm) in MILL_MASKS.iter().enumerate() {
         if (own & mm).count_ones() == 2 && (empty & mm).count_ones() == 1 {
-            open_masks.push(mm);
+            open_mask_bits |= 1 << i;
         }
     }
+    if open_mask_bits.count_ones() < 2 {
+        return 0;
+    }
+    // For each own piece, count how many open mills contain it via SQUARE_MILLS.
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if own & (1 << sq) == 0 {
-            continue;
-        }
-        let sq_mask = 1u32 << sq;
-        let n = open_masks.iter().filter(|&&mm| mm & sq_mask != 0).count();
+    let mut bits = own;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
+        let n = SQUARE_MILLS[sq as usize]
+            .iter()
+            .filter(|&&mi| open_mask_bits & (1 << mi) != 0)
+            .count();
         if n >= 2 {
             count += 1;
         }
@@ -269,10 +272,11 @@ pub fn encirclement(board: &Board, color: Color) -> i64 {
     let opp = board.bits(color.opponent());
     let own = board.bits(color);
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if opp & (1 << sq) != 0 {
-            count += (ADJACENCY[sq] & own).count_ones() as i64;
-        }
+    let mut bits = opp;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        count += (ADJACENCY[sq] & own).count_ones() as i64;
     }
     count
 }
@@ -284,8 +288,11 @@ pub fn squeeze_count(board: &Board, color: Color) -> i64 {
     let own = board.bits(color);
     let empty = board.empty();
     let mut count = 0;
-    for sq in 0..N_SQUARES {
-        if own & (1 << sq) != 0 && (ADJACENCY[sq] & empty).count_ones() == 1 {
+    let mut bits = own;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        if (ADJACENCY[sq] & empty).count_ones() == 1 {
             count += 1;
         }
     }
@@ -300,17 +307,16 @@ pub fn mill_wrapping_pressure(board: &Board, color: Color) -> i64 {
     let opp_bits = board.bits(opp);
     let own = board.bits(color);
     let mut total = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (opp_bits & mm) != mm {
             continue;
         }
-        // covered: own pieces adjacent to any mill piece, not in the mill itself
         let mut covered = 0u32;
-        for sq in 0..N_SQUARES {
-            if mm & (1 << sq) != 0 {
-                covered |= ADJACENCY[sq] & own & !mm;
-            }
+        let mut mill_bits = mm;
+        while mill_bits != 0 {
+            let sq = mill_bits.trailing_zeros() as usize;
+            mill_bits &= mill_bits - 1;
+            covered |= ADJACENCY[sq] & own & !mm;
         }
         total += covered.count_ones() as i64;
     }
@@ -338,6 +344,110 @@ pub fn open_mill_domination(board: &Board, color: Color) -> i64 {
         return 0;
     }
     (two_configs(board, color) - (opp_pieces - 1)).max(0)
+}
+
+/// Simple leaf evaluator matching Python `evaluate_v2` exactly.
+/// Two passes: O(24) board scan + O(16) mill scan. No helper calls beyond
+/// `closed_mills` and `two_configs` which are already O(16).
+///
+/// Weights:
+///   Place: piece(1) mob(1) blocked(8) mill(30) threat(15)
+///   Move:  piece(12) mob(1) opp_blocked(48) mill(30) threat(18) zugzwang(600)
+///   Fly:   piece(2) mill(32) threat(80) surplus(900)
+pub fn evaluate_v2(board: &Board, color: Color) -> i64 {
+    if let Some(winner) = terminal_winner(board) {
+        return if winner == color { INF } else { -INF };
+    }
+    let opp = color.opponent();
+    let own_p = board.count(color) as i64;
+    let opp_p = board.count(opp) as i64;
+    // Piece-loss terminal (mirrors Python's fast check).
+    if board.placed(color) >= 9 && own_p < 3 {
+        return -INF;
+    }
+    if board.placed(opp) >= 9 && opp_p < 3 {
+        return INF;
+    }
+    let phase = get_phase(board, color);
+    let own_bits = board.bits(color);
+    let opp_bits = board.bits(opp);
+    let empty = board.empty();
+
+    // Mobility + blocked: iterate only over occupied squares via set-bit loop.
+    let mut own_mob: i64 = 0;
+    let mut opp_mob: i64 = 0;
+    let mut own_blocked: i64 = 0;
+    let mut opp_blocked: i64 = 0;
+    let mut bits = own_bits;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        let free = (ADJACENCY[sq] & empty).count_ones() as i64;
+        own_mob += free;
+        if free == 0 { own_blocked += 1; }
+    }
+    let mut bits = opp_bits;
+    while bits != 0 {
+        let sq = bits.trailing_zeros() as usize;
+        bits &= bits - 1;
+        let free = (ADJACENCY[sq] & empty).count_ones() as i64;
+        opp_mob += free;
+        if free == 0 { opp_blocked += 1; }
+    }
+
+    // Blockade: if own side cannot move it's a loss.
+    if phase == Phase::Move && own_mob == 0 {
+        return -INF;
+    }
+
+    // Single pass over 16 mill masks: compute closed mills + two-configs for both sides.
+    let mut own_mills: i64 = 0;
+    let mut opp_mills: i64 = 0;
+    let mut own_thr: i64 = 0;
+    let mut opp_thr: i64 = 0;
+    for &mm in &MILL_MASKS {
+        let own_in = (own_bits & mm).count_ones();
+        let opp_in = (opp_bits & mm).count_ones();
+        let emp_in = (empty & mm).count_ones();
+        match own_in {
+            3 => own_mills += 1,
+            2 if emp_in == 1 => own_thr += 1,
+            _ => {}
+        }
+        match opp_in {
+            3 => opp_mills += 1,
+            2 if emp_in == 1 => opp_thr += 1,
+            _ => {}
+        }
+    }
+    match phase {
+        Phase::Place => {
+            (own_p - opp_p)
+                + (own_mob - opp_mob)
+                + 8 * (opp_blocked - own_blocked)
+                + 30 * (own_mills - opp_mills)
+                + 15 * (own_thr - opp_thr)
+        }
+        Phase::Move => {
+            let mut score = 12 * (own_p - opp_p)
+                + (own_mob - opp_mob)
+                + 48 * opp_blocked
+                + 30 * (own_mills - opp_mills)
+                + 18 * (own_thr - opp_thr);
+            if opp_mob < 3 {
+                score += 600 * (3 - opp_mob);
+            }
+            score
+        }
+        Phase::Fly => {
+            let own_surp = (own_thr - 1).max(0);
+            let opp_surp = (opp_thr - 1).max(0);
+            2 * (own_p - opp_p)
+                + 32 * (own_mills - opp_mills)
+                + 80 * (own_thr - opp_thr)
+                + 900 * (own_surp - opp_surp)
+        }
+    }
 }
 
 /// Integer base evaluate from `color`'s perspective. Mirrors the base formula in

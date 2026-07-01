@@ -3,7 +3,7 @@
 //! mandatory-block rule and move ordering. See `docs/RUST_INTEGRATION_PLAN.md` §8.
 
 use crate::board::{get_phase, ADJACENCY};
-use crate::mills::mill_mask;
+use crate::mills::{MILL_MASKS, SQUARE_MILLS};
 use crate::types::{Board, Color, Phase, N_SQUARES};
 
 /// Squares where the side-to-move's OPPONENT could close a mill next move.
@@ -17,8 +17,7 @@ pub fn immediate_mill_threats(board: &Board) -> u32 {
     let empty = board.empty();
     let opp_phase = get_phase(board, opp);
     let mut threats = 0u32;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (opp_bits & mm).count_ones() == 2 && (empty & mm).count_ones() == 1 {
             let closing = empty & mm;
             let closing_idx = closing.trailing_zeros() as usize;
@@ -42,10 +41,10 @@ pub fn move_forms_mill(board: &Board, color: Color, from: Option<u8>, to: u8) ->
         bits &= !(1u32 << f);
     }
     bits |= 1u32 << to;
-    let to_mask = 1u32 << to;
-    for i in 0..16 {
-        let mm = mill_mask(i);
-        if mm & to_mask != 0 && (bits & mm) == mm {
+    // Each square belongs to exactly 2 mills — only check those.
+    for &mi in &SQUARE_MILLS[to as usize] {
+        let mm = MILL_MASKS[mi as usize];
+        if (bits & mm) == mm {
             return true;
         }
     }

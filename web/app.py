@@ -2474,10 +2474,16 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     board = session.engine.board
     diff  = session.game_ai.difficulty if session.game_ai else 3
     total = sum(board.pieces_on_board.values())
-    exp   = _expected_think_seconds(diff, total)
-    max_depth_exp = _EXPECTED_MAX_DEPTH.get(diff, 0)
-    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs",
-             board.turn, diff, total, exp)
+
+    # Graduated time budget: turn 3 = 50%, turn 4 = 75%, turn 5+ = 100%.
+    _moves_played = len(session.engine.game_record.get("moves", []))
+    _turn_num = _moves_played + 1
+    _budget_frac = 0.5 if _turn_num == 3 else (0.75 if _turn_num == 4 else 1.0)
+
+    exp   = _expected_think_seconds(diff, total) * _budget_frac
+    max_depth_exp = getattr(session.game_ai, "max_search_depth", 0) if session.game_ai else 0
+    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs turn=%d frac=%.2f",
+             board.turn, diff, total, exp, _turn_num, _budget_frac)
     await _send(ws, {
         "type":              "thinking",
         "color":             board.turn,
@@ -2498,6 +2504,12 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         if _ponder_result is not None:
             _ponder_hit, _ponder_ai_done = _ponder_result
 
+    # Apply fractional budget to the AI's time budget for early turns.
+    _orig_budget = None
+    if _budget_frac < 1.0 and session.game_ai and session.game_ai.time_budget_override is not None:
+        _orig_budget = session.game_ai.time_budget_override
+        session.game_ai.time_budget_override = _orig_budget * _budget_frac
+
     t0 = _time.time()
     try:
         if _ponder_hit is not None:
@@ -2505,7 +2517,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
                 # B-94: deepen on pre-warmed TT from completed ponder search.
                 _ponder_ai_done._force_stop = False
                 _ponder_ai_done._deadline   = float("inf")
-                _deepen_budget = min(3.0, _expected_think_seconds(diff, total) * 0.3)
+                _deepen_budget = min(3.0, exp * 0.3)
                 move = await asyncio.to_thread(
                     _ponder_ai_done._iterative_deepen, board, _deepen_budget
                 )
@@ -2521,6 +2533,9 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     except Exception as exc:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
+    finally:
+        if _orig_budget is not None and session.game_ai:
+            session.game_ai.time_budget_override = _orig_budget
 
     # Overseer player mode: replace engine's choice with policy-network argmax.
     if session.use_overseer_player and _overseer_advisor is not None and _overseer_advisor.is_loaded():

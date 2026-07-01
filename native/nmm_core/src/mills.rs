@@ -27,20 +27,53 @@ pub const MILLS: [[u8; 3]; 16] = [
     [7, 15, 23], // a4 b4 c4
 ];
 
-/// Precomputed bit masks for each mill (lazily-free: const fn would be nicer but
-/// keep it simple with a runtime-built table accessed via `mill_mask`).
-#[inline]
+const fn build_mill_masks() -> [u32; 16] {
+    let mut out = [0u32; 16];
+    let mut i = 0;
+    while i < 16 {
+        let m = MILLS[i];
+        out[i] = (1u32 << m[0]) | (1u32 << m[1]) | (1u32 << m[2]);
+        i += 1;
+    }
+    out
+}
+
+/// Precomputed bitmask for each of the 16 mills.
+pub const MILL_MASKS: [u32; 16] = build_mill_masks();
+
+const fn build_square_mills() -> [[u8; 2]; 24] {
+    let mut out = [[0u8; 2]; 24];
+    let mut counts = [0u8; 24];
+    let mut i = 0;
+    while i < 16 {
+        let m = MILLS[i];
+        let mut j = 0;
+        while j < 3 {
+            let sq = m[j] as usize;
+            out[sq][counts[sq] as usize] = i as u8;
+            counts[sq] += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// For each of the 24 squares: the indices of the 2 mills it belongs to.
+/// Every square in NMM belongs to exactly 2 mills.
+pub const SQUARE_MILLS: [[u8; 2]; 24] = build_square_mills();
+
+#[inline(always)]
 pub fn mill_mask(i: usize) -> u32 {
-    let m = MILLS[i];
-    (1u32 << m[0]) | (1u32 << m[1]) | (1u32 << m[2])
+    MILL_MASKS[i]
 }
 
 /// True if `color` would have a completed mill involving `square`.
 pub fn forms_mill(board: &Board, square: u8, color: Color) -> bool {
     let bits = board.bits(color);
-    for i in 0..16 {
-        let mm = mill_mask(i);
-        if mm & (1 << square) != 0 && (bits & mm) == mm {
+    for &mi in &SQUARE_MILLS[square as usize] {
+        let mm = MILL_MASKS[mi as usize];
+        if (bits & mm) == mm {
             return true;
         }
     }
@@ -51,8 +84,7 @@ pub fn forms_mill(board: &Board, square: u8, color: Color) -> bool {
 pub fn count_mills(board: &Board, color: Color) -> u32 {
     let bits = board.bits(color);
     let mut n = 0;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (bits & mm) == mm {
             n += 1;
         }
@@ -67,8 +99,7 @@ pub fn all_in_mills(board: &Board, color: Color) -> bool {
         return false;
     }
     let mut covered = 0u32;
-    for i in 0..16 {
-        let mm = mill_mask(i);
+    for &mm in &MILL_MASKS {
         if (bits & mm) == mm {
             covered |= mm;
         }
@@ -120,5 +151,16 @@ mod tests {
         let bd = board_from_idx(&[0, 1], &[2]);
         assert!(!forms_mill(&bd, 0, Color::White));
         assert_eq!(count_mills(&bd, Color::White), 0);
+    }
+
+    #[test]
+    fn square_mills_each_has_two() {
+        for sq in 0..24usize {
+            assert_eq!(SQUARE_MILLS[sq].len(), 2, "sq {sq}");
+            // Both mills contain the square.
+            for &mi in &SQUARE_MILLS[sq] {
+                assert!(MILL_MASKS[mi as usize] & (1 << sq) != 0, "sq {sq} mi {mi}");
+            }
+        }
     }
 }

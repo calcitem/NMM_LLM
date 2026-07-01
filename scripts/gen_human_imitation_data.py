@@ -194,9 +194,10 @@ def run(args: argparse.Namespace) -> None:
     all_h_top1_idxs:   list[int]        = []
     all_weights:       list[float]      = []
     all_deviates:      list[bool]       = []
+    all_is_winner:     list[bool]       = []
 
     n_won = n_draw = n_lost = n_selfplay = 0
-    n_pos_won = n_pos_draw = 0
+    n_pos_won = n_pos_draw = n_pos_loser = 0
     n_deviates = 0
     n_db_labels = n_sentinel_labels = 0
     n_errors = 0
@@ -221,16 +222,18 @@ def run(args: argparse.Namespace) -> None:
                 continue
 
             if winner == human_color:
-                weight = args.won_weight
                 n_won += 1
             elif winner is None:
-                weight = args.draw_weight
                 n_draw += 1
             else:
                 n_lost += 1
                 continue
 
             moves = game.get("moves", [])
+
+            # ── Winner/draw side: human player's moves ─────────────────────────
+            weight   = args.won_weight if winner == human_color else args.draw_weight
+            is_w_pos = winner == human_color
             for mv in moves:
                 if mv.get("color") != human_color:
                     continue
@@ -259,7 +262,6 @@ def run(args: argparse.Namespace) -> None:
                     n_errors += 1
                     continue
 
-                # Soft label: Malom/sentinel background + human move bonus
                 label_dist = _compute_human_soft_label(
                     enc.db_moves, enc.legal_moves, enc.sentinel_scores, chosen_idx
                 )
@@ -282,11 +284,64 @@ def run(args: argparse.Namespace) -> None:
                 all_h_top1_idxs.append(enc.h_top1_idx)
                 all_weights.append(weight)
                 all_deviates.append(deviates)
+                all_is_winner.append(is_w_pos)
 
-                if winner == human_color:
+                if is_w_pos:
                     n_pos_won += 1
                 else:
                     n_pos_draw += 1
+
+            # ── Loser side: AI/computer's moves in human-won games only ────────
+            if winner == human_color:
+                loser_color = "B" if human_color == "W" else "W"
+                for mv in moves:
+                    if mv.get("color") != loser_color:
+                        continue
+
+                    fen = mv.get("board_fen_before")
+                    if not fen:
+                        continue
+
+                    try:
+                        board = BoardState.from_fen_string(fen)
+                    except Exception:
+                        n_errors += 1
+                        continue
+
+                    enc = encode_position(board, loser_color, sentinel_advisor=sentinel, db=db, value_net=value_net)
+                    if enc is None or not enc.legal_moves:
+                        continue
+
+                    chosen_key = _move_key(mv)
+                    chosen_idx = next(
+                        (i for i, m in enumerate(enc.legal_moves)
+                         if _move_key(m) == chosen_key),
+                        None,
+                    )
+                    if chosen_idx is None:
+                        n_errors += 1
+                        continue
+
+                    # Target: heuristic top-1 — teach the loser to correct its mistakes
+                    k = len(enc.legal_moves)
+                    h_idx = enc.h_top1_idx
+                    loser_label = np.full(k, 0.05 / max(k - 1, 1), dtype=np.float32)
+                    if 0 <= h_idx < k:
+                        loser_label[h_idx] = 0.95
+                    else:
+                        loser_label[:] = 1.0 / k  # fallback: uniform
+
+                    all_feat_matrices.append(enc.feat_matrix)
+                    all_value_inputs.append(enc.value_input)
+                    all_label_dists.append(loser_label)
+                    all_chosen_idxs.append(chosen_idx)
+                    all_h_evals.append(enc.h_before)
+                    all_vn_evals.append(enc.vn_before)
+                    all_h_top1_idxs.append(enc.h_top1_idx)
+                    all_weights.append(args.loser_weight)
+                    all_deviates.append(False)
+                    all_is_winner.append(False)
+                    n_pos_loser += 1
 
     # ── save ───────────────────────────────────────────────────────────────────
     n = len(all_chosen_idxs)
@@ -314,12 +369,13 @@ def run(args: argparse.Namespace) -> None:
         h_top1_idxs=  np.array(all_h_top1_idxs,   dtype=np.int32),
         weights=      np.array(all_weights,         dtype=np.float32),
         deviates=     np.array(all_deviates,        dtype=bool),
+        is_winner=    np.array(all_is_winner,        dtype=bool),
     )
 
     elapsed = time.time() - t_start
     print(f"\n[hgen] Saved {n} positions to {out_path}  ({elapsed:.0f}s)")
     print(f"[hgen] Games:  won={n_won}  draw={n_draw}  lost={n_lost}  skipped(self-play)={n_selfplay}")
-    print(f"[hgen] Positions: from-won={n_pos_won}  from-draw={n_pos_draw}")
+    print(f"[hgen] Positions: winner={n_pos_won}  draw={n_pos_draw}  loser={n_pos_loser}")
     print(f"[hgen] Labels: {n_db_labels} Malom-DB  {n_sentinel_labels} sentinel-fallback")
     print(f"[hgen] Human deviated from heuristic top-1: {n_deviates}/{n_pos_won} won-game moves")
     if n_errors:
@@ -340,8 +396,10 @@ def main() -> None:
     )
     p.add_argument("--malom",       default="")
     p.add_argument("--value-net",   type=str,   default=str(_ROOT / "data" / "value_net.npz"))
-    p.add_argument("--won-weight",  type=float, default=1.0)
-    p.add_argument("--draw-weight", type=float, default=0.3)
+    p.add_argument("--won-weight",   type=float, default=1.0)
+    p.add_argument("--draw-weight",  type=float, default=0.3)
+    p.add_argument("--loser-weight", type=float, default=0.5,
+                   help="Weight for AI/loser move positions from human-won games")
     args = p.parse_args()
     run(args)
 

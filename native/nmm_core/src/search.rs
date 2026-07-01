@@ -8,7 +8,7 @@
 use std::time::Instant;
 
 use crate::board::{make_move, terminal_winner, ADJACENCY, get_phase};
-use crate::heuristics::{evaluate_base, INF};
+use crate::heuristics::{evaluate_v2, INF};
 use crate::hash::{TranspositionTable, TtEntry, Zobrist, EXACT, LOWER_BOUND, UPPER_BOUND};
 use crate::movegen::legal_moves;
 use crate::tactics::move_forms_mill;
@@ -96,7 +96,7 @@ impl Searcher {
         }
 
         if depth == 0 {
-            return evaluate_base(board, color);
+            return evaluate_v2(board, color);
         }
 
         let alpha_orig = alpha;
