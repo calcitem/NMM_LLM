@@ -74,16 +74,23 @@ def does_form_mill(board: BoardState, move: dict) -> bool:
     Return True if applying the placement/movement part of 'move' (ignoring
     any capture) would place board.turn's piece in a mill.
 
-    Uses precomputed SQUARE_MILLS to check only the 2 mills containing the
-    destination square, without constructing a temporary BoardState.
+    Uses precomputed SQUARE_MILLS (2 mills per square) with fully inlined
+    checks — no genexpr, no all() call overhead.
     """
     color = board.turn
     to  = move["to"]
     src = move["from"]
     pos = board.positions
-    for mill in SQUARE_MILLS[to]:
-        if all(p == to or (p != src and pos[p] == color) for p in mill):
-            return True
+    for p0, p1, p2 in SQUARE_MILLS[to]:
+        if p0 == to:
+            if (p1 != src and pos[p1] == color) and (p2 != src and pos[p2] == color):
+                return True
+        elif p1 == to:
+            if (p0 != src and pos[p0] == color) and (p2 != src and pos[p2] == color):
+                return True
+        else:
+            if (p0 != src and pos[p0] == color) and (p1 != src and pos[p1] == color):
+                return True
     return False
 
 

@@ -1626,9 +1626,14 @@ class GameAI:
         if self._nodes & 0xFFF == 0 and time.time() >= self._deadline:
             raise _SearchAbort()
 
-        terminal, _ = is_terminal(board)
-        if terminal:
+        # Fast terminal: O(1) piece-count check for captures.
+        # Blockade is handled below by `if not moves` after move generation.
+        _col = board.turn
+        _opp_t = "B" if _col == "W" else "W"
+        if board.pieces_placed[_col] == 9 and board.pieces_on_board[_col] < 3:
             return -(INF - ply)
+        if board.pieces_placed[_opp_t] == 9 and board.pieces_on_board[_opp_t] < 3:
+            return (INF - ply)
 
         # SE-14: FullGameDB probe — exact outcomes short-circuit; best-move hints
         # are stored for promotion after the move list is generated.
@@ -1742,12 +1747,18 @@ class GameAI:
             if _all_placed:
                 _total_pieces = sum(board.pieces_on_board.values())
                 _in_endgame = _total_pieces <= 7
-                _own_mob = sum(
-                    1 for pos in POSITIONS
-                    if board.positions[pos] == board.turn
-                    for nb in ADJACENCY[pos]
-                    if not board.positions[nb]
-                )
+                _own_mob = 0
+                _bpos = board.positions
+                _bturn = board.turn
+                for _sq in POSITIONS:
+                    if _bpos[_sq] == _bturn:
+                        for _nb in ADJACENCY[_sq]:
+                            if not _bpos[_nb]:
+                                _own_mob += 1
+                                if _own_mob >= 3:
+                                    break
+                    if _own_mob >= 3:
+                        break
                 if _own_mob >= 3 and not _in_endgame:
                     null_board = board.swap_turn()
                     null_score = -self._negamax(
