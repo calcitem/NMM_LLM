@@ -10,7 +10,7 @@ import math
 import threading
 from dataclasses import dataclass, field
 from game.board import ADJACENCY, MILLS, POSITIONS, BoardState
-from game.rules import get_game_phase, is_terminal
+from game.rules import get_game_phase, is_terminal, is_blocked
 
 # SE-12: thread-local eval cache — keyed by (hash_key, color_bit, id(weights), force_aggressive).
 # Only active when endgame_state is None and strength_mode is False.
@@ -3372,152 +3372,27 @@ def endgame_score(board: BoardState, color: str, endgame_state=None) -> int:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _v2_scan_board(board: BoardState, color: str) -> tuple:
-    """Single O(24) pass: piece count, mobility, blocked counts, pieces in hand."""
-    opp = "B" if color == "W" else "W"
-    own_p = opp_p = own_mob = opp_mob = own_blocked = opp_blocked = 0
-    for pos in POSITIONS:
-        owner = board.positions[pos]
-        if not owner:
-            continue
-        free = sum(1 for nb in ADJACENCY[pos] if not board.positions[nb])
-        if owner == color:
-            own_p += 1
-            own_mob += free
-            if free == 0:
-                own_blocked += 1
-        else:
-            opp_p += 1
-            opp_mob += free
-            if free == 0:
-                opp_blocked += 1
-    own_hand = max(0, 9 - board.pieces_placed.get(color, 0))
-    opp_hand = max(0, 9 - board.pieces_placed.get(opp, 0))
-    return own_p, opp_p, own_mob, opp_mob, own_blocked, opp_blocked, own_hand, opp_hand
-
-
-def _v2_scan_mills(board: BoardState, color: str) -> tuple:
-    """Single O(16) pass over MILLS: mill count, threat count, removable proxy."""
-    opp = "B" if color == "W" else "W"
-    own_mills = opp_mills = own_thr = opp_thr = 0
-    for mill in MILLS:
-        vals = [board.positions[p] for p in mill]
-        c = vals.count(color)
-        o = vals.count(opp)
-        e = vals.count("")
-        if c == 3:
-            own_mills += 1
-        elif o == 3:
-            opp_mills += 1
-        elif c == 2 and e == 1:
-            own_thr += 1
-        elif o == 2 and e == 1:
-            opp_thr += 1
-    own_rem_proxy = own_thr + own_mills
-    opp_rem_proxy = opp_thr + opp_mills
-    return own_mills, opp_mills, own_thr, opp_thr, own_rem_proxy, opp_rem_proxy
-
-
-def _v2_cycle_ready(board: BoardState, color: str) -> int:
-    """Count mills where one piece has an adjacent empty square outside the mill.
-
-    A cycle-ready mill can open/close on consecutive turns, producing repeated captures.
-    """
-    count = 0
-    for mill in MILLS:
-        vals = [board.positions[p] for p in mill]
-        if vals.count(color) != 3:
-            continue
-        mill_set = set(mill)
-        if any(
-            not board.positions[nb]
-            for p in mill
-            for nb in ADJACENCY[p]
-            if nb not in mill_set
-        ):
-            count += 1
-    return count
-
-
-def _v2_fork_threats(board: BoardState, color: str) -> int:
-    """Count empty squares where a piece would simultaneously close 2+ mills."""
-    count = 0
-    for pos in POSITIONS:
-        if board.positions[pos]:
-            continue
-        closes = sum(
-            1 for mill in MILLS
-            if pos in mill
-            and [board.positions[p] for p in mill].count(color) == 2
-        )
-        if closes >= 2:
-            count += 1
-    return count
-
-
-def _v2_squeeze_count(board: BoardState, opp: str) -> int:
-    """Count opponent pieces with exactly one free neighbour (nearly blocked)."""
-    count = 0
-    for pos in POSITIONS:
-        if board.positions[pos] != opp:
-            continue
-        free = sum(1 for nb in ADJACENCY[pos] if not board.positions[nb])
-        if free == 1:
-            count += 1
-    return count
-
-
-def _v2_position_value(board: BoardState, color: str) -> int:
-    """Sum positional value of all own pieces by connectivity degree.
-
-    Cardinal squares (4 neighbours): 3 pts — highest mobility potential.
-    Cross squares (3 neighbours): 2 pts.
-    Corner squares (2 neighbours): 1 pt.
-    """
-    total = 0
-    for pos in POSITIONS:
-        if board.positions[pos] != color:
-            continue
-        n = len(ADJACENCY[pos])
-        total += 3 if n == 4 else (2 if n == 3 else 1)
-    return total
-
-
-def _v2_win_config(board: BoardState, opp: str) -> int:
-    """1 if opponent has exactly 3 pieces on board (fly phase or about to lose)."""
-    return 1 if board.pieces_on_board.get(opp, 0) <= 3 else 0
-
-
 # -- V2 weight constants -------------------------------------------------------
 
-# Placement phase
-_V2_PL_HAND    =  1
+# Placement phase: piece count, mobility, blocked, mills, threats
 _V2_PL_PIECE   =  1
 _V2_PL_MOB     =  1
 _V2_PL_BLOCKED =  8
 _V2_PL_MILL    = 30
 _V2_PL_THREAT  = 15
-_V2_PL_REM     = 10
-_V2_PL_POS     =  2
 
-# Movement phase
+# Movement phase: piece count, mobility, blocked, mills, threats, zugzwang
 _V2_MV_PIECE   = 12
 _V2_MV_MOB     =  1
 _V2_MV_BLOCKED = 48
 _V2_MV_MILL    = 30
 _V2_MV_THREAT  = 18
-_V2_MV_CYCLE   = 22
-_V2_MV_FORK    = 14
-_V2_MV_SQUEEZE = 30
 _V2_MV_ZUGZ    = 600
 
-# Fly phase
+# Fly phase: piece count, mills, threats, surplus (unblockable threats)
 _V2_FLY_PIECE  =  2
 _V2_FLY_MILL   = 32
 _V2_FLY_THREAT = 80
-_V2_FLY_CYCLE  = 80
-_V2_FLY_FORK   = 55
-_V2_FLY_WIN    = 1190
 _V2_FLY_SURP   = 900
 
 
@@ -3529,25 +3404,33 @@ def evaluate_v2(
     *,
     _ply: int = 0,
 ) -> int:
-    """Bare-bones stage-relevant leaf evaluator (HeuristicsV2).
+    """Bare-bones leaf evaluator (HeuristicsV2).
 
+    Computes only what deep search cannot find cheaply itself:
+    piece counts, mobility, blocked count, mill count, threat count.
+    Zugzwang bonus (move) and surplus threats (fly) are kept because
+    the low-weight mobility term alone under-signals near-blockade.
+
+    Two passes: O(24) board scan + O(16) mill scan. No helper calls.
     Returns score in the same integer scale as evaluate() so TT entries,
     alpha-beta windows, and sentinel comparisons remain valid.
-
-    Score = own_features - opp_features. Terminal positions return +/-INF.
-    `endgame_state` is accepted for API compatibility but ignored.
-    `weights` applies mill_count_scale, mobility_scale, blocked_scale when provided.
+    `endgame_state` accepted for API compatibility but ignored.
+    `weights` applies mill_count_scale, mobility_scale, blocked_scale.
     """
-    from game.rules import is_terminal, get_game_phase
-
-    terminal, winner = is_terminal(board)
-    if terminal:
-        return -(INF - _ply) if winner != color else (INF - _ply)
-
     opp = "B" if color == "W" else "W"
+
+    # ── Fast terminal check: piece loss O(1) ─────────────────────────────────
+    _ppc = board.pieces_placed[color]
+    _ppo = board.pieces_placed[opp]
+    _col_on = board.pieces_on_board[color]
+    _opp_on = board.pieces_on_board[opp]
+    if _ppc == 9 and _col_on < 3:
+        return -(INF - _ply)
+    if _ppo == 9 and _opp_on < 3:
+        return (INF - _ply)
+
     phase = get_game_phase(board, color)
 
-    # Apply personality scale multipliers when weights provided.
     if weights is not None:
         _mill_s  = weights.mill_count_scale / 100.0
         _mob_s   = weights.mobility_scale   / 100.0
@@ -3555,63 +3438,82 @@ def evaluate_v2(
     else:
         _mill_s = _mob_s = _block_s = 1.0
 
-    own_p, opp_p, own_mob, opp_mob, own_blocked, opp_blocked, own_hand, opp_hand = \
-        _v2_scan_board(board, color)
-    own_mills, opp_mills, own_thr, opp_thr, own_rem_proxy, opp_rem_proxy = \
-        _v2_scan_mills(board, color)
+    # ── Board pass: O(24) ────────────────────────────────────────────────────
+    pos_vals = board.positions
+    own_p = opp_p = own_mob = opp_mob = own_blocked = opp_blocked = 0
 
+    for pos in POSITIONS:
+        owner = pos_vals[pos]
+        if not owner:
+            continue
+        free = 0
+        for nb in ADJACENCY[pos]:
+            if not pos_vals[nb]:
+                free += 1
+        if owner == color:
+            own_p += 1
+            own_mob += free
+            if free == 0:
+                own_blocked += 1
+        else:
+            opp_p += 1
+            opp_mob += free
+            if free == 0:
+                opp_blocked += 1
+
+    # Deferred blockade check: only fires when own_mob==0 in move phase.
+    if own_mob == 0 and phase == "move":
+        if is_blocked(board, color):
+            return -(INF - _ply)
+
+    # ── Mill pass: O(16) ─────────────────────────────────────────────────────
+    own_mills = opp_mills = own_thr = opp_thr = 0
+
+    for mill in MILLS:
+        p0, p1, p2 = mill
+        v0, v1, v2 = pos_vals[p0], pos_vals[p1], pos_vals[p2]
+
+        if v0 == color and v1 == color and v2 == color:
+            own_mills += 1
+        elif v0 == opp and v1 == opp and v2 == opp:
+            opp_mills += 1
+        elif (v0 == color and v1 == color and not v2) or \
+             (v0 == color and v2 == color and not v1) or \
+             (v1 == color and v2 == color and not v0):
+            own_thr += 1
+        elif (v0 == opp and v1 == opp and not v2) or \
+             (v0 == opp and v2 == opp and not v1) or \
+             (v1 == opp and v2 == opp and not v0):
+            opp_thr += 1
+
+    # ── Phase-specific score ──────────────────────────────────────────────────
     if phase == "place":
-        own_pos = _v2_position_value(board, color)
-        opp_pos = _v2_position_value(board, opp)
-        score = int(
-            _V2_PL_HAND    * (own_hand    - opp_hand)
-            + _V2_PL_PIECE   * (own_p      - opp_p)
+        return int(
+            _V2_PL_PIECE   * (own_p      - opp_p)
             + _V2_PL_MOB     * _mob_s   * (own_mob    - opp_mob)
             + _V2_PL_BLOCKED * _block_s * (opp_blocked - own_blocked)
             + _V2_PL_MILL    * _mill_s  * (own_mills  - opp_mills)
             + _V2_PL_THREAT  * _mill_s  * (own_thr    - opp_thr)
-            + _V2_PL_REM     * (own_rem_proxy - opp_rem_proxy)
-            + _V2_PL_POS     * (own_pos    - opp_pos)
         )
 
     elif phase == "move":
-        own_cycle = _v2_cycle_ready(board, color)
-        opp_cycle = _v2_cycle_ready(board, opp)
-        own_fork  = _v2_fork_threats(board, color)
-        opp_fork  = _v2_fork_threats(board, opp)
-        own_sqz   = _v2_squeeze_count(board, opp)
-        opp_sqz   = _v2_squeeze_count(board, color)
         score = int(
             _V2_MV_PIECE   * (own_p      - opp_p)
             + _V2_MV_MOB     * _mob_s   * (own_mob    - opp_mob)
             + _V2_MV_BLOCKED * _block_s * opp_blocked
             + _V2_MV_MILL    * _mill_s  * (own_mills  - opp_mills)
             + _V2_MV_THREAT  * _mill_s  * (own_thr    - opp_thr)
-            + _V2_MV_CYCLE   * (own_cycle  - opp_cycle)
-            + _V2_MV_FORK    * (own_fork   - opp_fork)
-            + _V2_MV_SQUEEZE * (own_sqz    - opp_sqz)
         )
-        if own_p >= 6 and opp_p <= 4:
-            score += 80 * max(0, own_mills - opp_p)
         if opp_mob < 3:
             score += _V2_MV_ZUGZ * (3 - opp_mob)
+        return score
 
     else:  # fly
-        own_cycle = _v2_cycle_ready(board, color)
-        opp_cycle = _v2_cycle_ready(board, opp)
-        own_fork  = _v2_fork_threats(board, color)
-        opp_fork  = _v2_fork_threats(board, opp)
-        win_cfg   = _v2_win_config(board, opp)
-        own_surp  = max(0, own_thr - 1)
-        opp_surp  = max(0, opp_thr - 1)
-        score = int(
+        own_surp = max(0, own_thr - 1)
+        opp_surp = max(0, opp_thr - 1)
+        return int(
             _V2_FLY_PIECE  * (own_p      - opp_p)
             + _V2_FLY_MILL   * _mill_s  * (own_mills  - opp_mills)
             + _V2_FLY_THREAT * _mill_s  * (own_thr    - opp_thr)
-            + _V2_FLY_CYCLE  * (own_cycle  - opp_cycle)
-            + _V2_FLY_FORK   * (own_fork   - opp_fork)
-            + _V2_FLY_WIN    * win_cfg
-            + _V2_FLY_SURP   * (own_surp   - opp_surp)
+            + _V2_FLY_SURP   * (own_surp  - opp_surp)
         )
-
-    return score

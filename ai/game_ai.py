@@ -1691,7 +1691,7 @@ class GameAI:
         if depth == 0:
             _q_moves = get_all_legal_moves(board)
             if any(m.get("capture") for m in _q_moves):
-                _qdepth = 4 if self.use_v2_heuristics else self._Q_DEPTH
+                _qdepth = self._Q_DEPTH
                 heur = self._qsearch(board, _qdepth, alpha, beta, endgame_state, _q_moves)
             else:
                 if self.use_v2_heuristics:
