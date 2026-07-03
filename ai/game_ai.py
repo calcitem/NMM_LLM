@@ -59,29 +59,44 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
     capture is at least as urgent as occupying the opponent's closing square (B-66).
     """
     opp = "B" if board.turn == "W" else "W"
-    stm = board.turn
     opp_placed = board.pieces_placed.get(opp, 0)
     opp_in_fly = opp_placed >= 9 and board.pieces_on_board[opp] <= 3
 
-    threats: set[str] = set()
+    try:
+        from . import native_core as _nc
+        if _nc.RUST_AVAILABLE:
+            import nmm_core as _rc
+            white, black, wp, bp, stm_u8 = _nc.board_to_bits(board)
+            mask = _rc.py_immediate_threats(white, black, wp, bp, stm_u8)
+            threats: set[str] = {POSITIONS[i] for i in range(24) if mask & (1 << i)}
+            # B-66 carveout: single threat (non-fly) + STM can close own mill → do not restrict.
+            if not opp_in_fly and len(threats) == 1 and _stm_can_close_mill(board, board.turn):
+                threats.clear()
+            return threats
+    except Exception:
+        pass
+
+    # Pure-Python fallback.
+    stm = board.turn
+    threats_py: set[str] = set()
     for mill in MILLS:
         vals = [board.positions[p] for p in mill]
         if vals.count(opp) == 2 and vals.count("") == 1:
             empty = next(p for p in mill if board.positions[p] == "")
             if opp_in_fly:
-                threats.add(empty)
+                threats_py.add(empty)
             elif opp_placed >= 9:  # move phase: need adjacent EXTERNAL opp piece
                 mill_set = set(mill)
                 if any(
                     board.positions[nb] == opp and nb not in mill_set
                     for nb in ADJACENCY[empty]
                 ):
-                    threats.add(empty)
+                    threats_py.add(empty)
 
     # Move phase: single threat + own mill available → do not restrict (B-66).
-    if opp_placed >= 9 and not opp_in_fly and len(threats) == 1:
+    if opp_placed >= 9 and not opp_in_fly and len(threats_py) == 1:
         if _stm_can_close_mill(board, stm):
-            threats.clear()
+            threats_py.clear()
 
     # Placement phase: any opponent 2-config is an immediate threat — restrict STM
     # to blocking squares.  Fork (≥2 simultaneous threats) always restricts.
@@ -94,12 +109,33 @@ def _immediate_mill_threats(board: BoardState) -> set[str]:
                 and [board.positions[p] for p in mill].count("") == 1)
         ]
         if len(closing) >= 2:
-            threats.update(closing)
+            threats_py.update(closing)
         elif closing:
             if not _stm_can_close_mill(board, stm):
-                threats.update(closing)
+                threats_py.update(closing)
 
-    return threats
+    return threats_py
+
+
+def _notation_to_triple(notation: str) -> "tuple[int | None, int, int | None] | None":
+    """Parse a move notation into a (from_idx|None, to_idx, cap_idx|None) triple."""
+    try:
+        cap: "int | None" = None
+        if "x" in notation:
+            main, cap_str = notation.split("x", 1)
+            cap = POSITIONS.index(cap_str)
+        else:
+            main = notation
+        frm: "int | None" = None
+        if "-" in main:
+            fr_str, to_str = main.split("-", 1)
+            frm = POSITIONS.index(fr_str)
+        else:
+            to_str = main
+        to = POSITIONS.index(to_str)
+        return (frm, to, cap)
+    except (ValueError, IndexError):
+        return None
 
 
 def _pinned_fly_squares(board: BoardState, color: str) -> frozenset:
@@ -434,6 +470,10 @@ class GameAI:
                 value_net=value_net,
             )
         self._tt = TranspositionTable()
+        self._rust_tt_handle: "object | None" = None              # T-C4: lazy RustTtHandle (persists between turns)
+        self._rust_fullgame_db_handle: "object | None" = None     # T-C2: lazy FullgameDbHandle (mmap'd DB)
+        self._rust_endgame_solved_handle: "object | None" = None  # T-C3: lazy EndgameSolvedDbHandle
+        self.search_threads: int = 1         # T-E3: Lazy SMP thread count; 1 = single-threaded
         # SE-2: 2 killer moves per remaining-depth level (up to depth 32).
         # Each slot is (from_sq, to_sq) or None.
         self._killers: list[list] = [[None, None] for _ in range(32)]
@@ -835,6 +875,12 @@ class GameAI:
     def reset_game_bans(self) -> None:
         """Clear all per-game move bans (call when a new game starts)."""
         self._pos_bans.clear()
+        # T-C4: also clear persistent Rust TT on new game so stale positions don't pollute.
+        if self._rust_tt_handle is not None:
+            try:
+                self._rust_tt_handle.clear()
+            except Exception:
+                pass
 
     def force_stop(self) -> None:
         """Interrupt any running search immediately; _negamax raises _SearchAbort.
@@ -1237,20 +1283,6 @@ class GameAI:
             deadline = time.time() + time_budget
             return self._mcts.choose_move(board, deadline=deadline)
 
-        # Rust now handles hint semantics via _choose_rust_scored (py_search_root_scored
-        # returns per-move scores; Python applies filters and bonuses on top).
-        _hint_reasons: list[str] = []
-        if len(moves) != _original_move_count:
-            _hint_reasons.append(f"moves-filtered({len(moves)}/{_original_move_count})")
-        if recognition is not None and recognition.status not in ("novel", "inactive"):
-            _hint_reasons.append(f"recognition={recognition.status}")
-        if trajectory_hints:
-            _hint_reasons.append("trajectory-hints")
-        if self._trajectory_line:
-            _hint_reasons.append("trajectory-line")
-        _python_hints_active = bool(_hint_reasons)  # kept for diagnostics; no longer gates Rust
-        _use_rust = (top_n == 1)
-
         # Early-game fast path: while few pieces are on the board the tree is
         # tiny — cap the search to a short budget regardless of difficulty.
         # Early-game cap: for time-limited difficulties only (5+), use a shorter
@@ -1272,10 +1304,8 @@ class GameAI:
             # per side — enough for tactical awareness without the distortion.
             # Skipped when override_time_budget is set (training fast-mode).
             early_max = 6 if total_on_board < 4 else 19
-            # Rust is fast enough for any early-game depth; fall back to Python
-            # when hints are active or Rust unavailable.
-            move = (self._choose_rust_scored(board, early_max, recognition, trajectory_hints, moves,
-                                              time_limit_ms=int(_EARLY_GAME_TIME * 1000)) if _use_rust else None) \
+            move = self._choose_rust_scored(board, early_max, recognition, trajectory_hints, moves,
+                                            time_limit_ms=int(_EARLY_GAME_TIME * 1000), top_n=top_n) \
                 or self._iterative_deepen(
                     board, _EARLY_GAME_TIME,
                     recognition=recognition, trajectory_hints=trajectory_hints,
@@ -1297,10 +1327,8 @@ class GameAI:
                 )
             )
             time_budget = 2.0 if fast_early_game else _base_budget
-            # Use Rust search (evaluate_v2) when no Python-side hints are active.
-            # top_n > 1 is self-play (needs ranked move list) — Python only.
-            move = (self._choose_rust_scored(board, self.max_search_depth, recognition, trajectory_hints, moves,
-                                              time_limit_ms=int(time_budget * 1000)) if _use_rust else None) \
+            move = self._choose_rust_scored(board, self.max_search_depth, recognition, trajectory_hints, moves,
+                                            time_limit_ms=int(time_budget * 1000), top_n=top_n) \
                 or self._iterative_deepen(
                     board, time_budget,
                     recognition=recognition, trajectory_hints=trajectory_hints,
@@ -2188,6 +2216,7 @@ class GameAI:
         trajectory_hints: "dict | None" = None,
         moves: "list | None" = None,
         time_limit_ms: "int | None" = None,
+        top_n: int = 1,
     ) -> "dict | None":
         """Rust negamax returning per-move scores; Python applies hint semantics on top.
 
@@ -2209,8 +2238,63 @@ class GameAI:
                     time_limit_ms = min(300_000, int(self.time_budget_override * 1000))
                 else:
                     time_limit_ms = min(300_000, max_depth * max_depth * 300)
+
+            # T-C4: lazy-init persistent Rust TT handle (reused across turns; cleared on new game).
+            if self._rust_tt_handle is None:
+                try:
+                    self._rust_tt_handle = _rc.RustTtHandle()
+                except Exception:
+                    pass
+
+            # T-C2: lazy-init mmap'd fullgame DB handle.
+            if self._rust_fullgame_db_handle is None and self._fullgame_db is not None:
+                try:
+                    self._rust_fullgame_db_handle = _rc.FullgameDbHandle.open(
+                        str(self._fullgame_db.path)
+                    )
+                except Exception:
+                    pass
+
+            # T-C3: lazy-init endgame solved DB handle (mmap'd .wdl files).
+            if self._rust_endgame_solved_handle is None and self._endgame_solved_db is not None:
+                try:
+                    _esdb_dir = str(self._endgame_solved_db.db_dir)
+                    self._rust_endgame_solved_handle = _rc.EndgameSolvedDbHandle.open(_esdb_dir)
+                except Exception:
+                    pass
+
+            # T-C1: collect high-frequency opponent moves for SE-11b depth extension.
+            _opp_ext: list = []
+            if self._trajectory_db is not None:
+                try:
+                    _root_moves = moves if moves is not None else get_all_legal_moves(board)
+                    for _mv in _root_moves:
+                        _nb = board.apply_move(_mv)
+                        _freqs = self._trajectory_db.query_all_frequencies(_nb)
+                        for _notation, _freq in _freqs.items():
+                            if _freq >= 0.5:
+                                _triple = _notation_to_triple(_notation)
+                                if _triple is not None:
+                                    _opp_ext.append(_triple)
+                except Exception:
+                    pass
+
+            # M3: preferred_root from trajectory line (top-3 moves promoted in Rust ordering).
+            _preferred: list = []
+            for _nota, _conf in self._trajectory_line[:3]:
+                _t = _notation_to_triple(_nota)
+                if _t is not None:
+                    _preferred.append(_t)
+
+            _threads = self.search_threads if self.search_threads > 1 else None
             _nodes, depth, raw_moves = _rc.py_search_root_scored(
-                white, black, wp, bp, stm, max_depth, time_limit_ms
+                white, black, wp, bp, stm, max_depth, time_limit_ms,
+                preferred_root=_preferred if _preferred else None,
+                tt_handle=self._rust_tt_handle,
+                db_handle=self._rust_fullgame_db_handle,
+                endgame_db_handle=self._rust_endgame_solved_handle,
+                opp_ext_moves=_opp_ext if _opp_ext else None,
+                threads=_threads,
             )
             _dt = time.perf_counter() - _t0
             if not raw_moves:
@@ -2245,7 +2329,10 @@ class GameAI:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
                 n_bonuses += 1
 
-            best_move = max(scored, key=lambda x: x[1])[0]
+            if top_n > 1:
+                best_move = random.choice(sorted(scored, key=lambda x: x[1], reverse=True)[:top_n])[0]
+            else:
+                best_move = max(scored, key=lambda x: x[1])[0]
             self.last_depth_reached = depth
             self._nodes = _nodes  # expose Rust node count to test observers
             _cap_str = f" cap={best_move['capture']}" if best_move.get("capture") else ""

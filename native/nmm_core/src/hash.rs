@@ -1,10 +1,19 @@
 //! Zobrist hashing + transposition table for the Rust-internal search.
 //!
-//! This Zobrist is search-local (not shared with Python's `game/zobrist.py`),
-//! so cross-process key compatibility is NOT required. The structure mirrors
-//! `ai/transposition_table.py`: depth-preferred replacement, EXACT/LOWER/UPPER
-//! flags. See `docs/RUST_INTEGRATION_PLAN.md` §10.
+//! T-E1: TT slots are now two AtomicU64 per entry (xor_key + data), enabling
+//! shared Arc<TranspositionTable> across Lazy-SMP helper threads. Xor-key trick
+//! (Stockfish-style) gives integrity checking of torn reads for free.
+//!
+//! Data layout (u64):
+//!   bits  0-31: score (i32 stored as u32 — scores are bounded by ±INF=10M)
+//!   bits 32-39: depth (u8)
+//!   bits 40-41: flag (u8, 2 bits; 0=EXACT, 1=LOWER, 2=UPPER)
+//!   bits 42-57: best_idx (u16; u16::MAX = no move)
+//!   bits 58-63: zero
+//!
+//! data=0 is the empty sentinel: depth=0 → treated as miss (negamax never stores depth=0).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use crate::types::{Board, Color, N_SQUARES};
 
 pub const EXACT: u8 = 0;
@@ -80,43 +89,75 @@ impl Zobrist {
 
 #[derive(Clone, Copy)]
 pub struct TtEntry {
-    pub key: u64,
     pub depth: u8,
-    pub score: i64,
+    pub score: i32,
     pub flag: u8,
-    pub best_idx: u16, // index into the move list, or u16::MAX if none
+    pub best_idx: u16, // u16::MAX = no move
 }
 
+#[inline]
+fn pack(score: i32, depth: u8, flag: u8, best_idx: u16) -> u64 {
+    (score as u32 as u64)
+        | ((depth as u64) << 32)
+        | ((flag as u64 & 0x03) << 40)
+        | ((best_idx as u64) << 42)
+}
+
+#[inline]
+fn unpack(data: u64) -> (i32, u8, u8, u16) {
+    let score = data as u32 as i32;
+    let depth = (data >> 32) as u8;
+    let flag = ((data >> 40) & 0x03) as u8;
+    let best_idx = ((data >> 42) & 0xFFFF) as u16;
+    (score, depth, flag, best_idx)
+}
+
+/// T-E1: lock-free TT using two AtomicU64 slots per entry (xor-key trick).
+/// layout: table[2*i] = xor_key = key ^ data, table[2*i+1] = data.
+/// Sync (AtomicU64 is Sync) — safe to share via Arc<TranspositionTable>.
 pub struct TranspositionTable {
-    table: Vec<Option<TtEntry>>,
+    table: Vec<AtomicU64>,
 }
 
 impl TranspositionTable {
     pub fn new() -> Self {
-        TranspositionTable {
-            table: vec![None; TT_SIZE],
-        }
+        let table: Vec<AtomicU64> = (0..TT_SIZE * 2).map(|_| AtomicU64::new(0)).collect();
+        TranspositionTable { table }
     }
 
-    pub fn clear(&mut self) {
-        for e in self.table.iter_mut() {
-            *e = None;
+    pub fn clear(&self) {
+        for slot in self.table.iter() {
+            slot.store(0, Ordering::Relaxed);
         }
     }
 
     pub fn lookup(&self, key: u64) -> Option<TtEntry> {
-        let e = self.table[(key & TT_MASK) as usize];
-        match e {
-            Some(entry) if entry.key == key => Some(entry),
-            _ => None,
+        let idx = (key & TT_MASK) as usize;
+        let xor_key = self.table[idx * 2].load(Ordering::Relaxed);
+        let data = self.table[idx * 2 + 1].load(Ordering::Relaxed);
+        if xor_key ^ data != key {
+            return None;
         }
+        let (score, depth, flag, best_idx) = unpack(data);
+        if depth == 0 {
+            return None;
+        }
+        Some(TtEntry { depth, score, flag, best_idx })
     }
 
-    pub fn store(&mut self, entry: TtEntry) {
-        let idx = (entry.key & TT_MASK) as usize;
-        match self.table[idx] {
-            Some(existing) if existing.depth > entry.depth => {}
-            _ => self.table[idx] = Some(entry),
+    pub fn store(&self, key: u64, entry: TtEntry) {
+        let idx = (key & TT_MASK) as usize;
+        // Depth-preferred replacement (racy but benign in SMP context).
+        let existing_data = self.table[idx * 2 + 1].load(Ordering::Relaxed);
+        if existing_data != 0 {
+            let (_, existing_depth, _, _) = unpack(existing_data);
+            if existing_depth > entry.depth {
+                return;
+            }
         }
+        let data = pack(entry.score, entry.depth, entry.flag, entry.best_idx);
+        // Write data before xor_key so a torn read sees a failed XOR check.
+        self.table[idx * 2 + 1].store(data, Ordering::Relaxed);
+        self.table[idx * 2].store(key ^ data, Ordering::Relaxed);
     }
 }

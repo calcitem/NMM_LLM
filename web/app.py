@@ -763,6 +763,7 @@ def _apply_search_depth(game_ai) -> None:
     max_depth = _compute_search_depth_for_level(game_ai.difficulty, min_d, max_d)
     game_ai.max_search_depth = max_depth
     game_ai.time_budget_override = _time_budget_for_depth(max_depth)
+    game_ai.search_threads = max(1, int(settings.get("search_threads", 1)))
 
 @app.get("/api/search_depth")
 async def get_search_depth():

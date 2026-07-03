@@ -423,6 +423,7 @@ class Coordinator:
             endgame_state=endgame_state,
             trajectory_hints=trajectory_hints,
             force_book_early=force_book_early,
+            trajectory_db=self.trajectory_db,
         )
         self.last_thinking = self.game_ai.last_thinking
         ai_score = self.game_ai.score_move(board, ai_move)

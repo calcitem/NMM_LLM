@@ -51,5 +51,6 @@
   "search_depth": {
     "min": 5,
     "max": 15
-  }
+  },
+  "search_threads": 2
 }

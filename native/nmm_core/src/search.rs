@@ -5,9 +5,13 @@
 //! NOT required to return the same move as the Python AI — only legal, sane
 //! play. See `docs/RUST_INTEGRATION_PLAN.md` §10.
 
+use std::collections::{HashSet, HashMap};
+use std::sync::Arc;
 use std::time::Instant;
+use memmap2::Mmap;
 
 use crate::board::{make_move, terminal_winner, ADJACENCY, get_phase};
+use crate::db_probe;
 use crate::heuristics::{evaluate_v2, INF};
 use crate::hash::{TranspositionTable, TtEntry, Zobrist, EXACT, LOWER_BOUND, UPPER_BOUND};
 use crate::movegen::legal_moves;
@@ -34,12 +38,18 @@ pub struct SearchResultScored {
 
 struct Searcher {
     zobrist: Zobrist,
-    tt: TranspositionTable,
+    tt: Arc<TranspositionTable>,
     nodes: u64,
     deadline: Instant,
     aborted: bool,
     killers: [[Option<Move>; 2]; MAX_PLY],
     history: [[i32; 24]; 25],  // [from_or_24][to]; from=24 for placements
+    // T-C1: high-frequency opponent moves that earn a SE-11 depth extension.
+    opp_ext_set: HashSet<(Option<u8>, u8, Option<u8>)>,
+    // T-C2: mmap'd fullgame DB for in-search probe (probe between terminal check and TT).
+    fullgame_db: Option<Arc<Mmap>>,
+    // T-C3: mmap'd endgame solved tables, keyed by (nW, nB). O(1) WDL probe.
+    endgame_solved_db: Option<Arc<HashMap<(u8, u8), Mmap>>>,
 }
 
 const ABORT_SCORE: i64 = i64::MIN + 1;
@@ -139,6 +149,40 @@ impl Searcher {
             };
         }
 
+        // T-C2: FullGame DB probe (between terminal check and TT, matching Python ordering).
+        if let Some(ref db) = self.fullgame_db {
+            if let Some(white_score) = db_probe::probe_fullgame(db, board) {
+                let stm_score = if color == Color::White { white_score as i64 } else { -(white_score as i64) };
+                return if stm_score > 0 {
+                    INF - depth as i64
+                } else if stm_score < 0 {
+                    -(INF - depth as i64)
+                } else {
+                    0
+                };
+            }
+        }
+
+        // T-C3: EndgameSolvedDB probe — O(1) WDL for post-placement positions ≤7 pieces each.
+        // Only fires when both sides have fully placed (≥9 placed) and piece counts are in range.
+        if board.white_placed >= 9 && board.black_placed >= 9 {
+            let nw = board.white.count_ones() as u8;
+            let nb = board.black.count_ones() as u8;
+            if (3..=7).contains(&nw) && (3..=7).contains(&nb) {
+                if let Some(ref tables) = self.endgame_solved_db {
+                    if let Some(table) = tables.get(&(nw, nb)) {
+                        if let Some(stm_result) = db_probe::probe_endgame_solved(table, board) {
+                            return match stm_result {
+                                1  => INF - depth as i64,
+                                -1 => -(INF - depth as i64),
+                                _  => 0,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
         let key = self.zobrist.hash(board);
         let mut tt_best: Option<u16> = None;
         if let Some(e) = self.tt.lookup(key) {
@@ -146,10 +190,11 @@ impl Searcher {
                 tt_best = Some(e.best_idx);
             }
             if e.depth >= depth {
+                let s = e.score as i64;
                 match e.flag {
-                    EXACT => return e.score,
-                    LOWER_BOUND if e.score >= beta => return e.score,
-                    UPPER_BOUND if e.score <= alpha => return e.score,
+                    EXACT => return s,
+                    LOWER_BOUND if s >= beta => return s,
+                    UPPER_BOUND if s <= alpha => return s,
                     _ => {}
                 }
             }
@@ -186,8 +231,12 @@ impl Searcher {
         for (i, mv) in moves.iter().enumerate() {
             let nb = make_move(board, mv);
             let is_tactical = mv.capture.is_some() || move_forms_mill(board, color, mv.from, mv.to);
-            // SE-11: extend by 1 for mill-forming moves at first opponent ply.
-            let se11_ext: u8 = if first_opp_ply && is_tactical { 1 } else { 0 };
+            // SE-11: extend by 1 at first opponent ply for tactical moves (original) or
+            // high-frequency trajectory moves (T-C1: opp_ext_set from trajectory_db).
+            let in_opp_ext = first_opp_ply
+                && !self.opp_ext_set.is_empty()
+                && self.opp_ext_set.contains(&(mv.from, mv.to, mv.capture));
+            let se11_ext: u8 = if first_opp_ply && (is_tactical || in_opp_ext) { 1 } else { 0 };
 
             // T-B1 + T-B2: PVS with LMR for moves after the first.
             let score = if i == 0 {
@@ -239,10 +288,9 @@ impl Searcher {
         } else {
             EXACT
         };
-        self.tt.store(TtEntry {
-            key,
+        self.tt.store(key, TtEntry {
             depth,
-            score: best_score,
+            score: best_score as i32,
             flag,
             best_idx,
         });
@@ -336,12 +384,15 @@ impl Searcher {
 fn new_searcher(deadline: Instant) -> Searcher {
     Searcher {
         zobrist: Zobrist::new(),
-        tt: TranspositionTable::new(),
+        tt: Arc::new(TranspositionTable::new()),
         nodes: 0,
         deadline,
         aborted: false,
         killers: [[None; 2]; MAX_PLY],
         history: [[0i32; 24]; 25],
+        opp_ext_set: HashSet::new(),
+        fullgame_db: None,
+        endgame_solved_db: None,
     }
 }
 
@@ -407,15 +458,34 @@ pub fn iterative_deepening(board: &Board, max_depth: u8, time_limit_ms: u64) -> 
 /// Iterative deepening returning scores for all root moves. Each move is
 /// evaluated with a full (-INF, INF) window so every score is exact.
 /// `preferred` moves are promoted to the front of root ordering (M3 hint).
-/// Returns sorted descending by score.
+/// `tt` (T-C4, T-E1): shared Arc TT — persists across turns via RustTtHandle, thread-safe.
+/// `opp_ext_set` (T-C1): high-frequency opponent moves that earn SE-11 extension.
+/// `fullgame_db` (T-C2): mmap'd DB for in-search binary-search probe.
+/// `endgame_solved_db` (T-C3): mmap'd .wdl tables for O(1) endgame WDL probe.
+/// Sorted descending by score.
 pub fn iterative_deepening_scored(
     board: &Board,
     max_depth: u8,
     time_limit_ms: u64,
     preferred: &[(Option<u8>, u8, Option<u8>)],
+    tt: Arc<TranspositionTable>,
+    opp_ext_set: HashSet<(Option<u8>, u8, Option<u8>)>,
+    fullgame_db: Option<Arc<Mmap>>,
+    endgame_solved_db: Option<Arc<HashMap<(u8, u8), Mmap>>>,
 ) -> SearchResultScored {
     let deadline = Instant::now() + std::time::Duration::from_millis(time_limit_ms.max(1));
-    let mut searcher = new_searcher(deadline);
+    let mut searcher = Searcher {
+        zobrist: Zobrist::new(),
+        tt,
+        nodes: 0,
+        deadline,
+        aborted: false,
+        killers: [[None; 2]; MAX_PLY],
+        history: [[0i32; 24]; 25],
+        opp_ext_set,
+        fullgame_db,
+        endgame_solved_db,
+    };
 
     let mut best = SearchResultScored {
         scored_moves: Vec::new(),
@@ -443,6 +513,68 @@ pub fn iterative_deepening_scored(
     best.nodes = searcher.nodes;
     best.scored_moves.sort_by(|a, b| b.score.cmp(&a.score));
     best
+}
+
+/// T-E2b: Lazy SMP — run `n_threads - 1` helper threads that all share the same
+/// Arc<TT>. Each helper starts at a different depth spread across [1..max_depth]
+/// so they reach higher depths before the main thread, pre-warming the TT there.
+/// Thread i starts at depth (max_depth * i / n_threads).max(1), so helpers
+/// cover deep nodes early and the main thread benefits from their TT entries.
+/// Falls back to single-threaded when n_threads <= 1.
+pub fn iterative_deepening_scored_smp(
+    board: &Board,
+    max_depth: u8,
+    time_limit_ms: u64,
+    preferred: &[(Option<u8>, u8, Option<u8>)],
+    tt: Arc<TranspositionTable>,
+    opp_ext_set: HashSet<(Option<u8>, u8, Option<u8>)>,
+    fullgame_db: Option<Arc<Mmap>>,
+    endgame_solved_db: Option<Arc<HashMap<(u8, u8), Mmap>>>,
+    n_threads: usize,
+) -> SearchResultScored {
+    if n_threads <= 1 {
+        return iterative_deepening_scored(board, max_depth, time_limit_ms, preferred, tt, opp_ext_set, fullgame_db, endgame_solved_db);
+    }
+
+    let board_copy = *board;
+    let duration = std::time::Duration::from_millis(time_limit_ms.max(1));
+
+    let helpers: Vec<_> = (1..n_threads)
+        .map(|i| {
+            let tt_c = Arc::clone(&tt);
+            let db_c = fullgame_db.clone();
+            let esdb_c = endgame_solved_db.clone();
+            let opp_c = opp_ext_set.clone();
+            // Spread helpers across [1..max_depth]: helper i starts at max_depth*i/n_threads.
+            let start_depth = ((max_depth as usize * i) / n_threads).max(1) as u8;
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + duration;
+                let mut helper = Searcher {
+                    zobrist: Zobrist::new(),
+                    tt: tt_c,
+                    nodes: 0,
+                    deadline,
+                    aborted: false,
+                    killers: [[None; 2]; MAX_PLY],
+                    history: [[0i32; 24]; 25],
+                    opp_ext_set: opp_c,
+                    fullgame_db: db_c,
+                    endgame_solved_db: esdb_c,
+                };
+                for d in start_depth..=max_depth {
+                    helper.root(&board_copy, d, -INF * 4, INF * 4);
+                    if helper.aborted {
+                        break;
+                    }
+                }
+            })
+        })
+        .collect();
+
+    let result = iterative_deepening_scored(board, max_depth, time_limit_ms, preferred, tt, opp_ext_set, fullgame_db, endgame_solved_db);
+
+    drop(helpers);
+    result
 }
 
 /// Convenience entry used by the PyO3 binding.
@@ -502,7 +634,7 @@ mod tests {
             black_placed: 0,
             side_to_move: Color::White,
         };
-        let r = iterative_deepening_scored(&board, 3, 5000, &[]);
+        let r = iterative_deepening_scored(&board, 3, 5000, &[], Arc::new(TranspositionTable::new()), HashSet::new(), None);
         assert_eq!(r.scored_moves.len(), 24, "expected 24 moves on empty board");
         assert!(r.nodes > 0);
         for rm in &r.scored_moves {

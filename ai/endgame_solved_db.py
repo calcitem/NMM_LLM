@@ -183,11 +183,13 @@ class EndgameSolvedDB:
 
     def __init__(self, db_dir: str | Path | None) -> None:
         self._tables: dict[tuple[int, int], bytes] = {}
+        self.db_dir: Path | None = None
         if db_dir is None:
             return
         db_path = Path(db_dir)
         if not db_path.is_dir():
             return
+        self.db_dir = db_path
         for wdl_path in sorted(db_path.glob("endgame_*.wdl")):
             stem = wdl_path.stem  # e.g. "endgame_3_3"
             parts = stem.split("_")

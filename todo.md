@@ -252,10 +252,13 @@ Rust search context.
 Every DB hit inside the search skips a Python round-trip. Impact scales with
 DB coverage in the search tree — could be very large in mid/endgame positions.
 
-### T-C3 — Endgame DB mmap probe in Rust
+### T-C3 — Endgame DB mmap probe in Rust ✅ DONE
 
-Same as T-C2 but for the endgame DB (line 1696). Key already Rust'd
-(`py_endgame_key`).
+`EndgameSolvedDbHandle` PyO3 class holds `Arc<HashMap<(u8,u8), Mmap>>`;
+opened once in `game_ai._choose_rust_scored`, passed to `py_search_root_scored`.
+In `negamax`: guard on `white_placed >= 9 && black_placed >= 9` + piece range
+3..=7, then direct O(1) combinatorial-rank lookup via `probe_endgame_solved`.
+Returns `INF-depth` / `-(INF-depth)` / `0`.
 
 ### T-C4 — Persistent Rust TT across turns
 
@@ -307,76 +310,106 @@ reads/writes.
 
 **Thread policy: default to `max(1, num_cpus / 2)`** — leaves headroom for the
 OS, the Python process, background pondering, and thermal/battery margin on
-laptops. User-configurable via a settings key + web UI slider if desired.
+laptops. User-configurable via `settings.json:"search_threads"` and a UI slider.
 
 Depends on **T-C4 (persistent TT)** as a prerequisite — Lazy SMP needs an
 atomic-friendly TT.
 
-### T-E1 — Atomicize TT slots
+### T-E1 — Atomicize TT slots ✅ DONE
 
-**File:** `native/nmm_core/src/hash.rs`
+Xor-key trick (Stockfish-style): two `AtomicU64` per slot `(key^data, data)`.
+Read verifies `xor_key ^ data == key`; torn reads fail the check = miss.
+`TranspositionTable` is `Sync` via `AtomicU64`; shared across threads as `Arc<TT>`.
 
-- Convert `TtEntry` storage to lock-free atomic slots. Two options:
-  - **Xor-key trick** (used by Stockfish): pack `(key ^ data, data)` as two
-    `AtomicU64`s per slot. On read, verify `key ^ data == stored_xor`; if not,
-    treat as miss. Handles torn reads with no locks.
-  - **Sharded mutex**: `Vec<Mutex<Vec<TtEntry>>>` with N shards (e.g. 64). Each
-    slot access takes a per-shard mutex — cheap under low contention.
-- No behavioural change on a single thread; just makes concurrent access safe.
-- Verify with a stress test: 8 threads hammering the TT with random reads/
-  writes; assert no torn reads.
+### T-E2 — Lazy SMP driver in Rust ✅ DONE (needs fix — see T-E2b)
 
-### T-E2 — Lazy SMP driver in Rust
+`iterative_deepening_scored_smp` spawns `n_threads-1` helpers sharing `Arc<TT>`.
+Current stagger `start_depth = 1 + (i % 2)` causes helpers to race main thread
+in sync — zero TT warming benefit. Benchmarks: 2 threads = 0% speedup, 4 threads
+= 15% slowdown (contention). Fix tracked as **T-E2b**.
 
-**File:** `native/nmm_core/src/search.rs`
+### T-E2b — Fix Lazy SMP: mid-depth stagger ✅ DONE (Approach A)
 
-- Add `pub fn iterative_deepening_scored_smp(board, max_depth, time_limit_ms,
-  threads, tt: &SharedTt) -> SearchResultScored`.
-- Main thread + `threads - 1` helpers all run `iterative_deepening_scored`
-  against the same shared TT.
-- Helpers start each iteration at slightly different depths (e.g. helper `i`
-  starts at `depth + i % 2`) to diversify the search tree — a Stockfish trick
-  called "skipped depths" that reduces overlap.
-- On time abort or main thread finish, join all helpers.
-- Return the main thread's best-move list. (Alternatively return the deepest
-  completed depth's list across all threads, but main-only is simpler.)
+**Root cause:** helpers and main all start at depth 1-2 and complete each ply in
+roughly the same time, so TT entries arrive too late to benefit the main thread.
 
-### T-E3 — Python: expose threads parameter
+**Implemented:** `start_depth = ((max_depth * i) / n_threads).max(1)` in
+`iterative_deepening_scored_smp`. For 4 threads at depth 12: helpers start at
+depths 3, 6, 9 — pre-warming deep nodes before main arrives.
 
-**File:** `native/nmm_core/src/lib.rs`
+**Remaining optional improvements** (Approach B and shared stop flag):
 
-- Extend `py_search_root_scored` with an optional `threads: Option<usize>`
-  parameter. Default: `num_cpus::get() / 2` clamped to ≥ 1.
-- Add `num_cpus = "1"` (or use `std::thread::available_parallelism`) as the
-  crate default.
+#### Step 0 — Shared stop flag (optional)
 
-**File:** `ai/game_ai.py`
+Add `stop: Arc<AtomicBool>` to `Searcher`. In the `nodes & 2047 == 0` branches of
+`negamax` and `qsearch`, check it:
+```rust
+if self.stop.load(Ordering::Relaxed) { self.aborted = true; return ABORT_SCORE; }
+```
+Thread through `new_searcher`. Lets main signal helpers to exit immediately after
+time expires (avoids join blocking past the budget).
 
-- Pass `threads` from a config key (`settings.json:"search_threads"` or
-  similar). Default: `None` (Rust picks half of `num_cpus`).
-- Log the chosen thread count on the first `R:OK` of a game so it's visible.
+#### Approach A — Mid-depth stagger (implement first, low risk)
 
-**File:** `web/app.py` / `web/templates/index.html`
+Replace helper `start_depth` calculation in `iterative_deepening_scored_smp`:
+```rust
+// Old:
+let start_depth = 1u8 + (i % 2) as u8;
+// New — spread helpers evenly across [1..max_depth]:
+let start_depth = ((max_depth as usize * i) / n_threads).max(1) as u8;
+```
+For `n_threads=4, max_depth=12`: helpers start at depths 3, 6, 9. Helper 3 begins
+near `max_depth`, pre-warming the deepest nodes before main arrives. Keep
+`drop(helpers)` + let deadline bound them. Signal stop flag before returning so
+helpers exit promptly instead of burning their remaining budget.
 
-- Add a slider or dropdown in the settings panel: "Search threads" with
-  values 1 / 2 / 4 / half / all. Default to half.
-- Persist to `settings.json` alongside other AI knobs.
+After implementing A, benchmark. If speedup is confirmed, ship. Proceed to B only
+if A is insufficient.
 
-### T-E4 — Parallel ponder on top-N predicted replies
+#### Approach B — Root move partitioning (join-based, deeper change)
 
-**File:** `ai/ponder.py`
+Divide root moves among threads. Each thread does full iterative deepening on its
+assigned slice, writing TT entries. Main collects all thread results and assembles
+the final ranked list.
 
-- Instead of pondering only the single most-likely opponent reply, spawn N
-  ponder searches — one per top-N predicted reply — each on its own
-  Rust-thread pool. Share the persistent TT across all of them (T-C4).
-- N=2 or N=3 is enough; diminishing returns above that.
-- On opponent move, pick the ponder result whose predicted move matched;
-  discard the rest.
-- Requires: TT shared across ponder + live search + parallel ponder branches.
-- Doubles/triples ponder-hit rate at the cost of CPU while pondering. With
-  half-core default, distribute ponder threads within the half-budget too
-  (e.g. 8-core machine: 4 threads for live search, 2 per parallel ponder
-  branch × 2 branches).
+1. **Add `root_scored_subset(&mut self, moves: &[Move], depth, alpha, beta)`** on
+   `Searcher` — mirrors `root_scored` but iterates over a pre-computed move slice
+   instead of calling `ordered_moves`. Identical B-64 penalty and extension logic.
+
+2. **Restructure `iterative_deepening_scored_smp`**:
+   - Compute `ordered_moves` once on the calling thread (canonical order).
+   - Distribute moves round-robin to `n_threads` threads (not contiguous slices —
+     round-robin balances strong/weak moves across threads).
+   - Create shared `stop: Arc<AtomicBool>`.
+   - Spawn `n_threads - 1` helpers; each runs `iterative_deepening` (all depths
+     1..=max_depth) on its subset, writing to the shared TT.
+   - Main thread runs `iterative_deepening_scored` on the full move list (TT hits
+     from helpers give it free depth on helper-explored lines).
+   - **After main completes**: set `stop = true`, then `join()` all helpers.
+   - **Merge**: for each root move, take the score from whichever thread reached the
+     highest `depth_reached`. Do NOT compare raw scores across different depths —
+     only substitute helper's score if helper's `depth_reached > main's depth_reached`.
+
+3. Return merged result sorted descending by adjusted score.
+
+**Risk:** merge-depth hazard — a helper's shallower score for move X must not
+override main's deeper score. The per-move depth check in step 2 mitigates this.
+
+### T-E3 — Python: expose threads parameter ✅ DONE
+
+`py_search_root_scored` accepts `threads: Option<usize>`. `game_ai.search_threads`
+set from `settings.json:"search_threads"` via `_apply_search_depth`. Passed as
+`threads=_threads` (None when 1 = single-threaded default).
+
+### T-E4 — Parallel ponder on top-N predicted replies ✅ DONE
+
+**File:** `ai/ponder.py` — `PonderManager` rewritten for N branches.
+- `N_PONDER_BRANCHES = 2` (top-2 predicted opponent replies pondered in parallel)
+- Each branch is a `_Branch` dataclass with its own `GameAI` + daemon thread
+- `start()` predicts top-N moves with trajectory/fullgame/ngram scoring, spawns N threads
+- `stop()` force-stops all branch AIs, joins all threads (0.5s each)
+- `get_result(board)` checks all branches for hash match, returns first hit
+- Tests in `tests/test_ponder.py` updated to use multi-branch API (`pm._branches[0]`)
 
 **Realistic speedup (Lazy SMP alone, on top of Tracks A-D):**
 

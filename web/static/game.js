@@ -336,6 +336,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return Math.round(minD + (level - 1) / 7 * (maxD - minD));
   }
 
+  function _timeForDepth(d) {
+    const t = Math.min(120, 0.065 * Math.pow(1.66, d));
+    return t < 1 ? t.toFixed(1) + "s" : t < 60 ? Math.round(t) + "s" : (t / 60).toFixed(1) + "m";
+  }
+
+  function _currentDifficulty() {
+    const el = $("sel-difficulty") || $("hdr-difficulty");
+    return el ? parseInt(el.value, 10) : null;
+  }
+
   function _updateDepthBar() {
     const bar  = $("depth-level-bar");
     const minD = parseInt($("rng-depth-min").value, 10);
@@ -343,19 +353,25 @@ document.addEventListener("DOMContentLoaded", () => {
     $("lbl-depth-min").textContent = minD;
     $("lbl-depth-max").textContent = maxD;
     if (!bar) return;
+    const activeDiff = _currentDifficulty();
     const maxVal = Math.max(maxD, 8);
     bar.innerHTML = "";
     for (let lvl = 1; lvl <= 8; lvl++) {
-      const d    = _depthForLevel(lvl, minD, maxD);
-      const pct  = Math.round(d / maxVal * 100);
-      const col  = `hsl(${210 + (lvl - 1) * 12}, 70%, 55%)`;
-      const seg  = document.createElement("div");
-      seg.title  = `Lv ${lvl}: depth ${d}`;
-      seg.style.cssText = `flex:1; height:${pct}%; background:${col}; border-radius:2px 2px 0 0; position:relative; cursor:default;`;
-      const label = document.createElement("span");
-      label.textContent = d;
-      label.style.cssText = "position:absolute; top:-14px; left:50%; transform:translateX(-50%); font-size:.65rem; color:var(--text); white-space:nowrap;";
-      seg.appendChild(label);
+      const d      = _depthForLevel(lvl, minD, maxD);
+      const pct    = Math.round(d / maxVal * 100);
+      const active = activeDiff === lvl;
+      const col    = active ? `hsl(42, 90%, 58%)` : `hsl(${210 + (lvl - 1) * 12}, 70%, 55%)`;
+      const seg    = document.createElement("div");
+      seg.title    = `Lv ${lvl}: depth ${d} (~${_timeForDepth(d)})`;
+      seg.style.cssText = `flex:1; height:${pct}%; background:${col}; border-radius:2px 2px 0 0; position:relative; cursor:default;${active ? " box-shadow:0 0 0 1px #fff4;" : ""}`;
+      const depthLbl = document.createElement("span");
+      depthLbl.textContent = d;
+      depthLbl.style.cssText = "position:absolute; top:-14px; left:50%; transform:translateX(-50%); font-size:.65rem; color:var(--text); white-space:nowrap;";
+      seg.appendChild(depthLbl);
+      const timeLbl = document.createElement("span");
+      timeLbl.textContent = _timeForDepth(d);
+      timeLbl.style.cssText = "position:absolute; bottom:-16px; left:50%; transform:translateX(-50%); font-size:.6rem; color:var(--text-dim); white-space:nowrap;";
+      seg.appendChild(timeLbl);
       bar.appendChild(seg);
     }
   }
@@ -376,6 +392,8 @@ document.addEventListener("DOMContentLoaded", () => {
       _updateDepthBar();
     });
   }
+  const selDiff = $("sel-difficulty");
+  if (selDiff) selDiff.addEventListener("change", _updateDepthBar);
 
   const btnSaveDepth = $("btn-save-search-depth");
   if (btnSaveDepth) {
