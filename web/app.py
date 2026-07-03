@@ -258,27 +258,26 @@ except Exception as _oe:
 # ── Malom perfect DB (ExternalSolvedDB) — used for DB Lines overlay and DB fallback ──
 # Path is read from settings.json "malom_db_path" (user-configurable via Tools page);
 # falls back to the sentinel config's external_db_path when the setting is absent.
+# _malom_puzzle_db (MalomDB) and hash-cache prewarm are deferred to the startup event
+# so they don't block or pollute the console before the server is ready.
 _malom_db = None        # ExternalSolvedDB — WDL string, used by game AI + validate
 _malom_puzzle_db = None  # MalomDB          — WDL dict with dtw, used by puzzle generators
+_malom_db_path: str = ""  # stored for deferred puzzle-DB init in startup event
 try:
     from learned_ai.sentinel.db_teacher import ExternalSolvedDB as _ExternalSolvedDB
-    _malom_path = _load_settings().get("malom_db_path") or ""
-    if not _malom_path:
+    _malom_db_path = _load_settings().get("malom_db_path") or ""
+    if not _malom_db_path:
         from learned_ai.sentinel.config import load_config as _load_sentinel_config_malom
         _mcfg = _load_sentinel_config_malom()
-        _malom_path = getattr(_mcfg, "external_db_path", "") or ""
-    if _malom_path:
-        _malom_db = _ExternalSolvedDB(_malom_path)
+        _malom_db_path = getattr(_mcfg, "external_db_path", "") or ""
+    if _malom_db_path:
+        _malom_db = _ExternalSolvedDB(_malom_db_path)
         if _malom_db.is_available():
-            log.info("Malom perfect DB loaded from %s", _malom_path)
-            from ai.malom_db import MalomDB as _MalomDB
-            _mpdb = _MalomDB(_malom_path)
-            if _mpdb.is_available():
-                _malom_puzzle_db = _mpdb
-                log.info("MalomDB puzzle instance ready")
+            log.info("Malom perfect DB loaded from %s", _malom_db_path)
         else:
-            log.warning("Malom DB path configured but unavailable: %s", _malom_path)
+            log.warning("Malom DB path configured but unavailable: %s", _malom_db_path)
             _malom_db = None
+            _malom_db_path = ""
     else:
         log.info("Malom DB not configured (no malom_db_path in settings)")
 except Exception as _e:
@@ -287,19 +286,6 @@ except Exception as _e:
 # Wire Malom DB into Overseer now that both are loaded.
 if _overseer_advisor is not None and _malom_db is not None:
     _overseer_advisor.set_db(_malom_db)
-
-# Pre-warm Malom hash states in background so midgame puzzle generation is fast.
-if _malom_db is not None and _malom_db.is_available():
-    import threading as _threading
-    def _malom_prewarm():
-        try:
-            from ai.malom_puzzle_search import prewarm_hash_cache
-            log.info("Malom hash cache warming (3–7 pieces)…")
-            prewarm_hash_cache(7)
-            log.info("Malom hash cache warmed.")
-        except Exception as _pe:
-            log.warning("Malom hash prewarm failed (non-fatal): %s", _pe)
-    _threading.Thread(target=_malom_prewarm, daemon=True).start()
 
 # Probability that sentinel (or DB fallback) intervenes, by difficulty level.
 SENTINEL_PROB_BY_DIFF: dict[int, float] = {
@@ -714,6 +700,32 @@ def _static_ver() -> str:
         if p.exists():
             h.update(p.read_bytes())
     return h.hexdigest()[:8]
+
+
+@app.on_event("startup")
+async def _startup_malom_deferred():
+    """Init MalomDB puzzle instance and prewarm hash cache after server is ready."""
+    if not _malom_db_path:
+        return
+    import threading as _threading
+    def _init_and_prewarm():
+        global _malom_puzzle_db
+        try:
+            from ai.malom_db import MalomDB as _MalomDB
+            _mpdb = _MalomDB(_malom_db_path)
+            if _mpdb.is_available():
+                _malom_puzzle_db = _mpdb
+                log.info("MalomDB puzzle instance ready")
+        except Exception as _e:
+            log.warning("MalomDB puzzle init failed (non-fatal): %s", _e)
+        try:
+            from ai.malom_puzzle_search import prewarm_hash_cache
+            log.info("Malom hash cache warming (3–7 pieces)…")
+            prewarm_hash_cache(7)
+            log.info("Malom hash cache warmed.")
+        except Exception as _pe:
+            log.warning("Malom hash prewarm failed (non-fatal): %s", _pe)
+    _threading.Thread(target=_init_and_prewarm, daemon=True).start()
 
 
 @app.get("/")
