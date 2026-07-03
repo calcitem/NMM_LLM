@@ -537,12 +537,12 @@ class TournamentState:
     QUALIFY_GAMES = 0  # no qualification required — tournament always available
 
     ROSTER: list[dict] = [  # ordered weakest → strongest
-        {"name": "chaos",      "label": "Chaos — The Trickster",      "diff": 2, "elo": 720},
-        {"name": "aggressive", "label": "Aggressive — The Crusher",    "diff": 3, "elo": 850},
-        {"name": "scholar",    "label": "Scholar — The Bookworm",      "diff": 3, "elo": 900},
-        {"name": "balanced",   "label": "Balanced",                    "diff": 4, "elo": 960},
-        {"name": "defensive",  "label": "Defensive — The Blocker",     "diff": 4, "elo": 1020},
-        {"name": "positional", "label": "Positional — The Strategist", "diff": 5, "elo": 1080},
+        {"name": "chaos",      "label": "Chaos — The Trickster",      "diff": 3, "elo": 720},
+        {"name": "aggressive", "label": "Aggressive — The Crusher",    "diff": 4, "elo": 850},
+        {"name": "scholar",    "label": "Scholar — The Bookworm",      "diff": 4, "elo": 900},
+        {"name": "balanced",   "label": "Balanced",                    "diff": 5, "elo": 960},
+        {"name": "defensive",  "label": "Defensive — The Blocker",     "diff": 5, "elo": 1020},
+        {"name": "positional", "label": "Positional — The Strategist", "diff": 6, "elo": 1080},
     ]
     _COLORS = ["W", "B", "W", "B", "W", "B"]  # alternate for fairness
 

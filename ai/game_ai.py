@@ -2094,17 +2094,20 @@ class GameAI:
 
     def _pick_blunder(self, board: BoardState, moves: list) -> dict:
         """
-        Select a deliberately poor move from the bottom quartile of scored moves.
-        Uses a shallow fixed depth (3) with a hard time cap — blunders just need
-        to avoid picking the obviously best move, not evaluate perfectly.
+        Select a suboptimal-but-not-catastrophic move from the middle band of
+        scored moves: skip the top ~30% (best moves) and the bottom ~30%
+        (obvious disasters), then pick randomly from what remains.
+        Uses a shallow fixed depth with a hard time cap.
         """
         self._deadline = time.time() + self._BLUNDER_TIME
         scored = self._score_all(board, moves, self._BLUNDER_DEPTH)
         self._deadline = math.inf
-        scored.sort(key=lambda x: x[1])  # ascending: worst first
-        cutoff = max(1, len(scored) // 4)
-        worst = scored[:cutoff]
-        return random.choice(worst)[0]
+        scored.sort(key=lambda x: x[1], reverse=True)  # descending: best first
+        n = len(scored)
+        lo = max(0, round(n * 0.30))   # skip top 30%
+        hi = max(lo + 1, round(n * 0.70))  # keep up to 70th percentile
+        pool = scored[lo:hi] or scored  # fallback: all moves if pool is empty
+        return random.choice(pool)[0]
 
     def diagnostic_scores(
         self,
