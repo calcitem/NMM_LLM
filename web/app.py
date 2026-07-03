@@ -2712,11 +2712,15 @@ async def ws_endpoint(websocket: WebSocket):
             if session and session.engine.finished:
                 await _after_game_end()
         except Exception as exc:
-            log.error("AI background task failed: %s", exc, exc_info=True)
-            try:
-                await _send(websocket, {"type": "error", "message": str(exc)})
-            except Exception:
-                pass
+            _exc_str = str(exc)
+            if "websocket.send" in _exc_str or "websocket.close" in _exc_str:
+                log.debug("AI task: client disconnected mid-search, move discarded")
+            else:
+                log.error("AI background task failed: %s", exc, exc_info=True)
+                try:
+                    await _send(websocket, {"type": "error", "message": _exc_str})
+                except Exception:
+                    pass
         finally:
             auto_task.cancel()
             ai_thinking = False
@@ -3348,23 +3352,17 @@ async def ws_endpoint(websocket: WebSocket):
                     mv_e["eg_flag"] = eg_flags.get(cap_pos or ntn)  # "W"/"L"/"D"/None
 
                 # ── Sentinel overlay: score each legal move ───────────────────
-                if _sentinel_advisor is not None and _sentinel_advisor.is_loaded():
+                # 2D: sentinel/overseer are skipped in capture mode — they encode
+                # from the projected board (post-mill) where the from→to move is
+                # already applied, making the move-feature encoding nonsensical.
+                # Heuristic scores above are the correct signal for capture choice.
+                if _sentinel_advisor is not None and _sentinel_advisor.is_loaded() and diag_mode != "capture":
                     try:
-                        if diag_mode == "capture" and session._pending is not None:
-                            # Build candidates matching training format:
-                            # {"from": mill_from, "to": mill_to, "capture": cap_sq}
-                            _pend = session._pending
-                            candidates = [
-                                {"from": _pend.get("from"), "to": _pend.get("to"),
-                                 "capture": mv_e.get("to")}
-                                for mv_e in moves_out
-                            ]
-                        else:
-                            candidates = [
-                                {"from": mv_e.get("from"), "to": mv_e.get("to"),
-                                 "capture": mv_e.get("capture")}
-                                for mv_e in moves_out
-                            ]
+                        candidates = [
+                            {"from": mv_e.get("from"), "to": mv_e.get("to"),
+                             "capture": mv_e.get("capture")}
+                            for mv_e in moves_out
+                        ]
                         if candidates:
                             sent_advice = await asyncio.to_thread(
                                 _sentinel_advisor.advise,
@@ -3381,21 +3379,13 @@ async def ws_endpoint(websocket: WebSocket):
                         mv_e["sentinel_score"] = None
 
                 # ── Overseer overlay: per-move pick probabilities ─────────────
-                if _overseer_advisor is not None and _overseer_advisor.is_loaded():
+                if _overseer_advisor is not None and _overseer_advisor.is_loaded() and diag_mode != "capture":
                     try:
-                        if diag_mode == "capture" and session._pending is not None:
-                            _pend = session._pending
-                            ov_candidates = [
-                                {"from": _pend.get("from"), "to": _pend.get("to"),
-                                 "capture": mv_e.get("to")}
-                                for mv_e in moves_out
-                            ]
-                        else:
-                            ov_candidates = [
-                                {"from": mv_e.get("from"), "to": mv_e.get("to"),
-                                 "capture": mv_e.get("capture")}
-                                for mv_e in moves_out
-                            ]
+                        ov_candidates = [
+                            {"from": mv_e.get("from"), "to": mv_e.get("to"),
+                             "capture": mv_e.get("capture")}
+                            for mv_e in moves_out
+                        ]
                         if ov_candidates:
                             ov_probs = await asyncio.to_thread(
                                 _overseer_advisor.score_moves,

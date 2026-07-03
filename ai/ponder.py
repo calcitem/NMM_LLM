@@ -134,6 +134,12 @@ class PonderManager:
                 fullgame_db=fullgame_db,
                 endgame_solved_db=game_ai._endgame_solved_db,
             )
+            # 1A: inherit search depth + cap budget at 60% so Rust searches
+            # finish before the human's next move, reducing terminal noise.
+            ponder_ai.max_search_depth = game_ai.max_search_depth
+            if game_ai.time_budget_override is not None:
+                ponder_ai.time_budget_override = game_ai.time_budget_override * 0.6
+            ponder_ai.search_threads = 1  # no nested SMP inside ponder branches
 
             branch = _Branch(
                 predicted_hash=predicted_hash,
