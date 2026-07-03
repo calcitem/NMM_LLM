@@ -2481,10 +2481,19 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     _turn_num = _moves_played + 1
     _budget_frac = 0.5 if _turn_num == 3 else (0.75 if _turn_num == 4 else 1.0)
 
+    # Early-game depth cap: AI's own turn number (1-indexed).
+    # AI is Black (human W first): ai_turn = (moves_played+1)//2
+    # AI is White (AI goes first):  ai_turn = moves_played//2 + 1
+    _ai_turn_num = (
+        (_moves_played + 1) // 2 if session.human_color == "W"
+        else _moves_played // 2 + 1
+    )
+    _depth_cap = 9 if _ai_turn_num <= 3 else (11 if _ai_turn_num == 4 else None)
+
     exp   = _expected_think_seconds(diff, total) * _budget_frac
     max_depth_exp = getattr(session.game_ai, "max_search_depth", 0) if session.game_ai else 0
-    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs turn=%d frac=%.2f",
-             board.turn, diff, total, exp, _turn_num, _budget_frac)
+    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs turn=%d ai_turn=%d depth_cap=%s",
+             board.turn, diff, total, exp, _turn_num, _ai_turn_num, _depth_cap)
     await _send(ws, {
         "type":              "thinking",
         "color":             board.turn,
@@ -2505,11 +2514,22 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         if _ponder_result is not None:
             _ponder_hit, _ponder_ai_done = _ponder_result
 
-    # Apply fractional budget to the AI's time budget for early turns.
+    # Apply fractional budget and early-game depth cap; both restored in finally.
     _orig_budget = None
-    if _budget_frac < 1.0 and session.game_ai and session.game_ai.time_budget_override is not None:
-        _orig_budget = session.game_ai.time_budget_override
-        session.game_ai.time_budget_override = _orig_budget * _budget_frac
+    _orig_depth  = None
+    if session.game_ai:
+        if _depth_cap is not None:
+            _orig_depth = session.game_ai.max_search_depth
+            if _orig_depth > _depth_cap:
+                session.game_ai.max_search_depth = _depth_cap
+                # Also tighten the time budget to match the shallower depth.
+                session.game_ai.time_budget_override = (
+                    _time_budget_for_depth(_depth_cap) * _budget_frac
+                )
+                _orig_budget = None  # already baked budget_frac in above
+        if _orig_depth is None and _budget_frac < 1.0 and session.game_ai.time_budget_override is not None:
+            _orig_budget = session.game_ai.time_budget_override
+            session.game_ai.time_budget_override = _orig_budget * _budget_frac
 
     t0 = _time.time()
     try:
@@ -2535,8 +2555,13 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
     finally:
-        if _orig_budget is not None and session.game_ai:
-            session.game_ai.time_budget_override = _orig_budget
+        if session.game_ai:
+            if _orig_depth is not None:
+                session.game_ai.max_search_depth = _orig_depth
+                # Restore original time budget (depth-derived, pre-cap).
+                session.game_ai.time_budget_override = _time_budget_for_depth(_orig_depth)
+            elif _orig_budget is not None:
+                session.game_ai.time_budget_override = _orig_budget
 
     # Overseer player mode: replace engine's choice with policy-network argmax.
     if session.use_overseer_player and _overseer_advisor is not None and _overseer_advisor.is_loaded():
