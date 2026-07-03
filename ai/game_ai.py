@@ -1349,9 +1349,11 @@ class GameAI:
         if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
 
+        _vn_blend_active = self._value_net is not None and self._weights.value_net_blend > 0
         use_adjustments = (
             (recognition is not None and recognition.status not in ("novel", "inactive"))
             or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
+            or _vn_blend_active
         )
         if use_adjustments:
             scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
@@ -1359,6 +1361,8 @@ class GameAI:
                 scored = self._apply_opening_adjustments(scored, recognition, board)
             if trajectory_hints:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
+            if _vn_blend_active:
+                scored = self._apply_vn_blend(scored, board)
             if top_n > 1:
                 scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
                 move = random.choice(scored_sorted[:top_n])[0]
@@ -1489,6 +1493,30 @@ class GameAI:
             _bonus_cap = self._weights.close_mill - 1   # 499 < 500 (close_mill)
             bonus = min(int(delta * scale), _bonus_cap) if scale else 0
             adjusted.append((move, raw + bonus))
+        return adjusted
+
+    def _apply_vn_blend(
+        self,
+        scored: list[tuple[dict, int]],
+        board: "BoardState",
+    ) -> list[tuple[dict, int]]:
+        """Blend value-network score into root move scores for ordering.
+
+        VN runs once per root move (not at every leaf), so cost is negligible
+        (~5–25 calls × 13µs = <1ms). Terminal scores (|s| >= INF/2) are
+        preserved unchanged so mate distances aren't distorted.
+        """
+        blend = self._weights.value_net_blend / 100.0
+        adjusted = []
+        for move, raw in scored:
+            if abs(raw) >= 5_000_000:  # terminal/INF score — don't distort
+                adjusted.append((move, raw))
+                continue
+            succ = board.apply_move(move)
+            vn_raw = self._value_net.predict(succ, board.turn)  # (-1, 1)
+            vn_score = int(vn_raw * _VN_SCALE)
+            blended = int((1.0 - blend) * raw + blend * vn_score)
+            adjusted.append((move, blended))
         return adjusted
 
     def _apply_opening_adjustments(
@@ -2154,6 +2182,9 @@ class GameAI:
         )
 
         prev_score: int | None = None
+        _vn_blend_active = self._value_net is not None and self._weights.value_net_blend > 0
+        use_adjustments = use_adjustments or _vn_blend_active
+
         last_completed_depth = 1
         for depth in range(2, max_depth + 1):
             if time.time() >= self._deadline:
@@ -2165,6 +2196,8 @@ class GameAI:
                         scored = self._apply_opening_adjustments(scored, recognition, board)
                     if trajectory_hints:
                         scored = self._apply_trajectory_hints(scored, trajectory_hints)
+                    if _vn_blend_active:
+                        scored = self._apply_vn_blend(scored, board)
                     if top_n > 1:
                         scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
                         best_move = random.choice(scored_sorted[:top_n])[0]
@@ -2340,6 +2373,9 @@ class GameAI:
                 n_bonuses += 1
             if trajectory_hints:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
+                n_bonuses += 1
+            if self._value_net is not None and self._weights.value_net_blend > 0:
+                scored = self._apply_vn_blend(scored, board)
                 n_bonuses += 1
 
             if top_n > 1:

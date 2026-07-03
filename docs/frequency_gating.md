@@ -187,7 +187,27 @@ ruled out (~26s overhead at 50k nodes).
 
 ---
 
-## Expected gains
+## Empirical result — eval-only implementation
+
+**Result: eval-only gate (without Gate 2b) increased node count by ~40%.**
+
+Baseline (depth 10): 871,188 nodes. With eval-only gate (DEPTH=5, MARGIN=150,
+hard prune): ~1.22M nodes (+40%). Depth-reduction variant (gate_red=3) also
+increased nodes.
+
+**Root cause:** Move ordering already puts captures/mills first. `best_opp_static`
+after MIN_KEEP=2 reflects these tactical moves. Subsequent quiet/positional moves
+score ~150–400 below tactically. The eval gate fires on quiet moves that humans
+*do* play and that alpha-beta needs for β-cutoffs. Removing them prevents cutoffs
+→ more nodes explored downstream. PVS null-window re-searches also inflate when
+gated moves look good from AI's perspective.
+
+**Conclusion:** Gate 2b (structural properties) is required. Eval-only is
+insufficient and harmful. The dual-gate condition `eval_gate AND structural_gate`
+is the correct design — `is_structurally_rare` must be implemented in Rust before
+this feature can be turned on.
+
+## Expected gains (with both gates)
 
 | Phase | Branching factor | Bottom 30% pruned | Node reduction | Effective ply gain |
 |-------|-----------------|-------------------|---------------|-------------------|
@@ -195,8 +215,7 @@ ruled out (~26s overhead at 50k nodes).
 | Fly | 3–6 | ~1–2 moves | ~20–30% | +0.4–0.7 ply |
 | Placement | 15–24 | ~5–7 moves | ~30% | +0.5 ply |
 
-These are rough estimates; real gains depend on move ordering quality and
-how often the structural gate fires.
+These are rough estimates assuming correct dual-gate implementation.
 
 ---
 
