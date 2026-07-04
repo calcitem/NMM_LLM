@@ -488,6 +488,8 @@ class GameAI:
         self._force_stop: bool = False     # set by force_stop(); cleared by choose_move()
         self.last_was_blunder: bool = False   # flag readable by Coordinator / MillsLLM
         self.last_thinking: str = ""          # short plain-English label for the chosen move
+        # Prefix used in terminal search output: "R" = main search, "P" = ponder branch.
+        self._search_label: str = "R"
         self.last_depth_reached: int = 1      # deepest completed depth from last _iterative_deepen
         self.force_aggressive: bool = False   # when True, disables fly-sacrifice heuristic
         # Set True by Coordinator when opponent's last move scored below poor_move_threshold.
@@ -1363,7 +1365,17 @@ class GameAI:
                 scored = self._apply_trajectory_hints(scored, trajectory_hints)
             if _vn_blend_active:
                 scored = self._apply_vn_blend(scored, board)
-            if top_n > 1:
+            _var_pct = (self._weights.move_variance_pct if self._weights else 0)
+            if _var_pct > 0 and scored:
+                _best_sc = max(sc for _, sc in scored)
+                if abs(_best_sc) < INF // 2:
+                    _spread = _best_sc - min(sc for _, sc in scored)
+                    _threshold = _best_sc - (_var_pct / 100.0) * max(1, _spread)
+                    _candidates = [mv for mv, sc in scored if sc >= _threshold]
+                    move = random.choice(_candidates)
+                else:
+                    move = max(scored, key=lambda x: x[1])[0]
+            elif top_n > 1:
                 scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
                 move = random.choice(scored_sorted[:top_n])[0]
             else:
@@ -1645,6 +1657,7 @@ class GameAI:
         self._move_path_buf = list(self._game_notations)
         self._opp_plies_budget = _MAX_OPP_PLIES_V2 if self.use_v2_heuristics else _MAX_OPP_PLIES
 
+        _var_pct = (self._weights.move_variance_pct if self._weights else 0)
         scored_any = False
         for move in moves:
             nb = board.apply_move(move)
@@ -1671,7 +1684,7 @@ class GameAI:
                 )
             else:
                 score = score_raw
-            if top_n > 1:
+            if top_n > 1 or _var_pct > 0:
                 all_scored.append((move, score))
             if score > best_score:
                 best_score = score
@@ -1681,7 +1694,12 @@ class GameAI:
             if alpha_raw >= beta:
                 break
 
-        if top_n > 1 and all_scored:
+        if _var_pct > 0 and all_scored and abs(best_score) < INF // 2:
+            _spread = best_score - min(s for _, s in all_scored)
+            _threshold = best_score - (_var_pct / 100.0) * max(1, _spread)
+            _candidates = [mv for mv, sc in all_scored if sc >= _threshold]
+            best_move = random.choice(_candidates)
+        elif top_n > 1 and all_scored:
             top = sorted(all_scored, key=lambda x: x[1], reverse=True)[:top_n]
             best_move = random.choice(top)[0]
         if best_score == -INF:
@@ -2340,7 +2358,7 @@ class GameAI:
             )
             _dt = time.perf_counter() - _t0
             if not raw_moves:
-                print(f"R:NO-MOVE depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
+                print(f"{self._search_label}:NO-MOVE depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
                 return None
 
             # T-D2: filter raw index tuples before allocating move dicts.
@@ -2356,7 +2374,7 @@ class GameAI:
                 raw_moves = [(frm, to, cap, s) for frm, to, cap, s in raw_moves
                              if (frm, to, cap) in allowed_idx]
                 if not raw_moves:
-                    print(f"R:FILTERED-OUT depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
+                    print(f"{self._search_label}:FILTERED-OUT depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
                     return None
 
             # Convert surviving Rust (from_idx, to_idx, cap_idx, score) tuples to (move_dict, score).
@@ -2391,14 +2409,14 @@ class GameAI:
             self.last_depth_reached = depth
             self._nodes = _nodes  # expose Rust node count to test observers
             _cap_str = f" cap={best_move['capture']}" if best_move.get("capture") else ""
-            print(f"R:OK depth={depth} nodes={_nodes} t={_dt:.2f}s "
+            print(f"{self._search_label}:OK depth={depth} nodes={_nodes} t={_dt:.2f}s "
                   f"to={best_move['to']}{_cap_str} adjusted={n_bonuses}",
                   flush=True)
             return best_move
         except Exception:
             _dt = time.perf_counter() - _t0
-            _logger.exception("R:FAIL after %.2fs — falling back to Python", _dt)
-            print(f"R:FAIL after {_dt:.2f}s (see traceback above) — falling back to Python", flush=True)
+            _logger.exception("%s:FAIL after %.2fs — falling back to Python", self._search_label, _dt)
+            print(f"{self._search_label}:FAIL after {_dt:.2f}s (see traceback above) — falling back to Python", flush=True)
             return None
 
     def position_eval(self, board: BoardState) -> float:

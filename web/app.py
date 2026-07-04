@@ -65,6 +65,36 @@ from ai.player_profile import PlayerProfile, load_profile, save_profile, is_vali
 _GAMES_PATH = _ROOT / "data" / "games"
 _GAMES_PATH.mkdir(parents=True, exist_ok=True)
 
+_AUTOSAVE_PATH = _ROOT / "data" / "autosave_game.json"
+
+
+def _write_autosave(session: "Session") -> None:
+    """Write current game state to autosave_game.json after each move."""
+    try:
+        from datetime import datetime as _dt
+        ai_color = session.game_ai.color if session.game_ai else None
+        diff = session.game_ai.difficulty if session.game_ai else 3
+        save = {
+            "fen":          session.engine.board.to_fen_string(),
+            "human_color":  session.human_color,
+            "vs_human":     session.vs_human,
+            "ai_color":     ai_color,
+            "difficulty":   diff,
+            "game_record":  session.engine.game_record,
+            "timestamp":    _dt.now().isoformat(),
+            "game_ended":   session.engine.finished,
+        }
+        _AUTOSAVE_PATH.write_text(json.dumps(save))
+    except Exception as _e:
+        log.debug("Autosave write failed: %s", _e)
+
+
+def _clear_autosave() -> None:
+    try:
+        _AUTOSAVE_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 
 def _persist_game_record(record: dict) -> None:
     """Write a completed game record to the games JSONL folder (no LLM required)."""
@@ -2077,6 +2107,7 @@ async def _commentary(ws: WebSocket, session: Session) -> None:
 
 
 async def _game_over(ws: WebSocket, session: Session) -> None:
+    _clear_autosave()
     winner      = session.engine.winner
     draw_reason = session.engine.draw_reason
     if winner:
@@ -2257,6 +2288,7 @@ def _make_game_ai_for_personality(color: str, personality: str, difficulty: int)
         opening_adherence=_w("opening_adherence", 50),
         value_net_blend=_w("value_net_blend", 80),
         cross_mill_cycling=_w("cross_mill_cycling", 300),
+        move_variance_pct=_w("move_variance_pct", 0),
     )
     _gai = GameAI(
         color=color, difficulty=difficulty, weights=hw,
@@ -2519,8 +2551,8 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
 
     exp   = _expected_think_seconds(diff, total) * _budget_frac
     max_depth_exp = getattr(session.game_ai, "max_search_depth", 0) if session.game_ai else 0
-    log.info("AI turn start  color=%s diff=%s total_pieces=%s expected=%.1fs turn=%d ai_turn=%d depth_cap=%s",
-             board.turn, diff, total, exp, _turn_num, _ai_turn_num, _depth_cap)
+    log.info("AI turn start  color=%s diff=%s total_pieces=%s turn=%d ai_turn=%d depth_cap=%s",
+             board.turn, diff, total, _turn_num, _ai_turn_num, _depth_cap)
     await _send(ws, {
         "type":              "thinking",
         "color":             board.turn,
@@ -2632,6 +2664,7 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     session._can_undo_ai             = True
 
     session.engine.apply_move(move)
+    _write_autosave(session)
 
     # Advance no-LLM opening recognizer for AI placement moves.
     if session.opening_recognizer and not session.coordinator and move.get("from") is None:
@@ -2695,6 +2728,24 @@ def _is_ai_turn(session: Session) -> bool:
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
+    # Offer autosave restore before the first new_game message arrives.
+    if _AUTOSAVE_PATH.exists():
+        try:
+            _as = json.loads(_AUTOSAVE_PATH.read_text())
+            if _as.get("fen") and not _as.get("game_ended"):
+                _moves_count = len(_as.get("game_record", {}).get("moves", []))
+                await websocket.send_text(json.dumps({
+                    "type":        "autosave_available",
+                    "fen":         _as["fen"],
+                    "human_color": _as.get("human_color", "W"),
+                    "difficulty":  _as.get("difficulty", 3),
+                    "ai_color":    _as.get("ai_color"),
+                    "vs_human":    _as.get("vs_human", False),
+                    "moves_count": _moves_count,
+                    "timestamp":   _as.get("timestamp", ""),
+                }))
+        except Exception:
+            pass
     session: Optional[Session] = None
     ai_thinking: bool = False
     adaptive = AdaptiveTracker()   # persists across new_game messages on this connection
@@ -2804,8 +2855,51 @@ async def ws_endpoint(websocket: WebSocket):
 
             log.debug("WS msg kind=%s", kind)
 
+            # ── clear_autosave — user dismissed the restore banner ────────────
+            if kind == "clear_autosave":
+                _clear_autosave()
+                continue
+
+            # ── restore_game — resume the autosaved game ─────────────────────
+            if kind == "restore_game":
+                try:
+                    _as = json.loads(_AUTOSAVE_PATH.read_text())
+                    _fen       = _as["fen"]
+                    _hc        = _as.get("human_color", "W")
+                    _diff      = int(_as.get("difficulty", 3))
+                    _ai_col    = _as.get("ai_color")
+                    _vs_human  = bool(_as.get("vs_human", False))
+                    _as_record = _as.get("game_record") or {}
+
+                    _re_engine = GameEngine(human_color=_hc)
+                    _re_engine.board = BoardState.from_fen_string(_fen)
+                    _re_engine.game_record.update(_as_record)
+
+                    _re_ai = None
+                    if not _vs_human and _ai_col:
+                        _re_ai = GameAI(
+                            color=_ai_col, difficulty=_diff,
+                            fullgame_db=_fullgame_db,
+                            endgame_solved_db=_endgame_solved_db,
+                            malom_db=_malom_db,
+                            value_net=_value_net,
+                        )
+                        _apply_search_depth(_re_ai)
+
+                    session = Session(_re_engine, _re_ai, None, _hc, _vs_human)
+                    log.info("Game restored from autosave: fen=%s diff=%d", _fen, _diff)
+                    await _send(websocket, {"type": "game_restored"})
+                    await _send(websocket, _state(session))
+                    if not _vs_human and not session.engine.finished:
+                        _maybe_start_ai()
+                except Exception as _re_exc:
+                    log.warning("restore_game failed: %s", _re_exc)
+                    await _send(websocket, {"type": "error", "message": "Could not restore game"})
+                continue
+
             # ── new_game ──────────────────────────────────────────────────────
             if kind == "new_game":
+                _clear_autosave()
                 import random as _random
                 is_tournament = (
                     bool(msg.get("tournament_game", False))
@@ -3522,6 +3616,7 @@ async def ws_endpoint(websocket: WebSocket):
                     cross_mill_cycling=_w("cross_mill_cycling", 300),
                 )
                 new_ai = GameAI(color=handoff_color, difficulty=diff, weights=_hw, fullgame_db=_fullgame_db, endgame_solved_db=_endgame_solved_db, malom_db=_malom_db, value_net=_value_net)
+                _apply_search_depth(new_ai)
 
                 new_coord = None
                 if use_llm:
@@ -3630,6 +3725,7 @@ async def ws_endpoint(websocket: WebSocket):
                 ))
                 session._can_undo_ai = False   # human move committed — no more undo of AI
                 session.engine.apply_move(move)
+                _write_autosave(session)
 
                 if session.coordinator and not session.vs_human:
                     await asyncio.to_thread(
@@ -3674,6 +3770,7 @@ async def ws_endpoint(websocket: WebSocket):
                 ))
                 session._can_undo_ai = False   # human move committed
                 session.engine.apply_move(completed_move)
+                _write_autosave(session)
                 session._pending      = None
                 session._board_before = None
 

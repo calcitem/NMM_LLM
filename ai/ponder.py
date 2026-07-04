@@ -143,6 +143,7 @@ class PonderManager:
                 0.065 * (1.66 ** _PONDER_MAX_DEPTH), 2.0
             )  # ≈ 0.9s; hard cap at 2s for safety
             ponder_ai.search_threads = 1  # no nested SMP inside ponder branches
+            ponder_ai._search_label = "P"
 
             branch = _Branch(
                 predicted_hash=predicted_hash,

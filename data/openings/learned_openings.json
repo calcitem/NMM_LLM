@@ -87,7 +87,7 @@
     },
     "outcome_stats": {
       "W": 1,
-      "B": 9,
+      "B": 10,
       "D": 0
     },
     "confidence": 0.8,
@@ -350,7 +350,7 @@
   },
   {
     "opening_id": "book-07-a33845",
-    "name": "Battle Lines - rapid response",
+    "name": "Battle Lines - Bloss v2",
     "aliases": [],
     "family": "Early Game",
     "side": "W",
@@ -401,7 +401,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 90,
+      "W": 95,
       "B": 5,
       "D": 0
     },
@@ -600,7 +600,7 @@
     },
     "outcome_stats": {
       "W": 0,
-      "B": 14,
+      "B": 15,
       "D": 0
     },
     "confidence": 0.8,
@@ -852,7 +852,7 @@
       "B": []
     },
     "outcome_stats": {
-      "W": 1,
+      "W": 2,
       "B": 0,
       "D": 0
     },

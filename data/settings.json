@@ -49,8 +49,8 @@
     "opening_adherence": 90
   },
   "search_depth": {
-    "min": 5,
-    "max": 15
+    "min": 3,
+    "max": 13
   },
   "search_threads": 2
 }

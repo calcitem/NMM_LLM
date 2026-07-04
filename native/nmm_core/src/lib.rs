@@ -352,6 +352,19 @@ fn py_transform_notation(notation: &str, sym_idx: usize) -> Option<String> {
     opening_probe::transform_notation(notation, sym_idx)
 }
 
+/// Returns the cumulative count of Phase-2 forcing extensions fired across all searches
+/// since the last reset (or process start). Thread-safe; uses Relaxed ordering.
+#[pyfunction]
+fn py_get_forcing_ext_count() -> u64 {
+    search::FORCING_EXT_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Resets the Phase-2 forcing extension counter to zero.
+#[pyfunction]
+fn py_reset_forcing_ext_count() {
+    search::FORCING_EXT_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 #[pymodule]
 fn nmm_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RustTtHandle>()?;
@@ -373,5 +386,7 @@ fn nmm_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_endgame_key, m)?)?;
     m.add_function(wrap_pyfunction!(py_opening_key, m)?)?;
     m.add_function(wrap_pyfunction!(py_transform_notation, m)?)?;
+    m.add_function(wrap_pyfunction!(py_get_forcing_ext_count, m)?)?;
+    m.add_function(wrap_pyfunction!(py_reset_forcing_ext_count, m)?)?;
     Ok(())
 }

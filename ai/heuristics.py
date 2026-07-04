@@ -128,6 +128,7 @@ class HeuristicWeights:
     # ── Behaviour (consumed by GameAI, not heuristics) ───────────────────
     make_mistakes: int        = 0     # blunder probability 0-100 %
     opening_adherence: int    = 50    # how strongly to follow the opening book (0-100)
+    move_variance_pct: int    = 0     # pick randomly from moves within top N% of score range (0=off)
 
 
 DEFAULT_WEIGHTS = HeuristicWeights()

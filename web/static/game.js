@@ -109,6 +109,8 @@ const WEIGHT_DEFAULTS = [
   // ── Behaviour ─────────────────────────────────────────────────────────
   { key: "value_net_blend",      group: "Behaviour",  label: "Value network blend %",       def: 80,  min: 0,   max: 100,  step: 5,
     tip: "How much the trained value network influences leaf evaluation (0 = heuristic only, 100 = value net only). Requires data/value_net.npz to be present." },
+  { key: "move_variance_pct",    group: "Behaviour",  label: "Move variance %",             def: 0,   min: 0,   max: 50,   step: 5,
+    tip: "Pick randomly from moves within the top N% of the score range (0 = always best move, 50 = consider any move within the top half of scored moves). Only affects the bare heuristic model; no effect when forced wins/losses are on the board." },
   { key: "make_mistakes",        group: "Behaviour",  label: "Make mistakes %",             def: 0,   min: 0,   max: 100,  step: 5,
     tip: "Probability (%) of playing a deliberately bad move each turn" },
   { key: "opening_adherence",    group: "Behaviour",  label: "Opening book adherence %",    def: 50,  min: 0,   max: 100,  step: 5,
@@ -136,7 +138,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 100, mobility_scale: 100, blocked_scale: 100,
     fork_anticipation: 90, locked_mill_escape: 160, redirected_pin: 140,
     defer_for_chain: 300, block_cycling_priority: 120,
-    value_net_blend: 80, make_mistakes: 0, opening_adherence: 50, loss_exploit: 150,
+    value_net_blend: 80, make_mistakes: 0, opening_adherence: 50, loss_exploit: 150, move_variance_pct: 0,
   },
   // Hunts mills relentlessly; ignores cycling in favour of immediate mill closure.
   aggressive: {
@@ -146,7 +148,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 180, mobility_scale: 50, blocked_scale: 80,
     fork_anticipation: 50, locked_mill_escape: 100, redirected_pin: 80,
     defer_for_chain: 200, block_cycling_priority: 60,
-    value_net_blend: 75, make_mistakes: 0, opening_adherence: 15, loss_exploit: 200,
+    value_net_blend: 75, make_mistakes: 0, opening_adherence: 15, loss_exploit: 200, move_variance_pct: 0,
   },
   // Smothers every opponent threat; wraps opponent mills; builds resilient diamond setups.
   defensive: {
@@ -156,7 +158,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 75, mobility_scale: 200, blocked_scale: 250,
     fork_anticipation: 150, locked_mill_escape: 220, redirected_pin: 200,
     defer_for_chain: 350, block_cycling_priority: 200,
-    value_net_blend: 80, make_mistakes: 0, opening_adherence: 25, loss_exploit: 100,
+    value_net_blend: 80, make_mistakes: 0, opening_adherence: 25, loss_exploit: 100, move_variance_pct: 0,
   },
   // Spreads out, controls cross nodes, builds long-term structures.
   positional: {
@@ -166,7 +168,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 80, mobility_scale: 300, blocked_scale: 150,
     fork_anticipation: 120, locked_mill_escape: 180, redirected_pin: 160,
     defer_for_chain: 320, block_cycling_priority: 180,
-    value_net_blend: 80, make_mistakes: 0, opening_adherence: 40, loss_exploit: 180,
+    value_net_blend: 80, make_mistakes: 0, opening_adherence: 40, loss_exploit: 180, move_variance_pct: 0,
   },
   // Methodical opening, solid diamond structures, strong book adherence.
   scholar: {
@@ -176,7 +178,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 130, mobility_scale: 190, blocked_scale: 125,
     fork_anticipation: 100, locked_mill_escape: 230, redirected_pin: 100,
     defer_for_chain: 475, block_cycling_priority: 160,
-    value_net_blend: 85, make_mistakes: 0, opening_adherence: 90, loss_exploit: 270,
+    value_net_blend: 85, make_mistakes: 0, opening_adherence: 90, loss_exploit: 270, move_variance_pct: 0,
   },
   // Scatters pieces randomly, ignores strategy, makes frequent blunders.
   chaos: {
@@ -186,7 +188,7 @@ const PERSONALITY_PRESETS = {
     mill_count_scale: 50, mobility_scale: 50, blocked_scale: 50,
     fork_anticipation: 20, locked_mill_escape: 50, redirected_pin: 30,
     defer_for_chain: 100, block_cycling_priority: 30,
-    value_net_blend: 30, make_mistakes: 45, opening_adherence: 0, loss_exploit: 50,
+    value_net_blend: 30, make_mistakes: 45, opening_adherence: 0, loss_exploit: 50, move_variance_pct: 25,
   },
 };
 
@@ -1608,7 +1610,61 @@ function handleMessage(msg) {
     case "error":
       addCommentary("Error", msg.message, "ai");
       break;
+
+    case "autosave_available":
+      _showAutosaveBanner(msg);
+      break;
+
+    case "game_restored":
+      _removeAutosaveBanner();
+      break;
   }
+}
+
+function _showAutosaveBanner(data) {
+  _removeAutosaveBanner();
+  const banner = document.createElement("div");
+  banner.id = "autosave-banner";
+  banner.style.cssText = [
+    "position:fixed", "top:0", "left:0", "right:0", "z-index:900",
+    "background:#2a220e", "border-bottom:1px solid #6b5a2a",
+    "padding:10px 16px", "display:flex", "align-items:center",
+    "gap:12px", "font-size:.85rem", "color:#e8d9a0",
+  ].join(";");
+
+  const d = new Date(data.timestamp);
+  const timeStr = isNaN(d) ? "" : ` from ${d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
+  const moveStr = data.moves_count ? ` (${data.moves_count} moves)` : "";
+
+  const label = document.createElement("span");
+  label.textContent = `⏸ Previous game${timeStr}${moveStr} — continue?`;
+  label.style.flex = "1";
+
+  const btnResume = document.createElement("button");
+  btnResume.textContent = "Resume";
+  btnResume.className = "btn-small";
+  btnResume.style.cssText = "background:#4a6741;color:#e8d9a0;border:none;padding:4px 10px;border-radius:3px;cursor:pointer";
+  btnResume.addEventListener("click", () => {
+    if (ws) ws.send(JSON.stringify({ type: "restore_game" }));
+    _removeAutosaveBanner();
+  });
+
+  const btnDiscard = document.createElement("button");
+  btnDiscard.textContent = "Discard";
+  btnDiscard.className = "btn-small";
+  btnDiscard.style.cssText = "background:#4a3030;color:#e8d9a0;border:none;padding:4px 10px;border-radius:3px;cursor:pointer";
+  btnDiscard.addEventListener("click", () => {
+    if (ws) ws.send(JSON.stringify({ type: "clear_autosave" }));
+    _removeAutosaveBanner();
+  });
+
+  banner.append(label, btnResume, btnDiscard);
+  document.body.prepend(banner);
+}
+
+function _removeAutosaveBanner() {
+  const b = document.getElementById("autosave-banner");
+  if (b) b.remove();
 }
 
 // ── Click handling ────────────────────────────────────────────────────────────

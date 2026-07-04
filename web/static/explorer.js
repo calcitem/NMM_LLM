@@ -248,12 +248,35 @@ function rebuildPieces(boardDict) {
 
 // ── Bar rebuild — deduplicated by to_sq ───────────────────────────────────────
 
-const barMeshMap = new Map(); // notation → { mesh, data }
-const MAX_BAR_HEIGHT = 2.0;
+const barMeshMap  = new Map(); // notation → { mesh, data }
+const barGroupMap = new Map(); // toSq → [meshes]  (all segments for a destination)
+const MAX_BAR_HEIGHT = 0.55;
+const BAR_W          = 0.14;
+const BAR_OFFSET_X   = 0.38;  // trajectory bar: beside piece to the right
+const SENT_OFFSET_X  = 0.62;  // sentinel bar: further right
+const SENT_W         = 0.10;
+
+function _addBarMesh(barX, z, segH, yBot, colHex, opacity, rep, mvsForSq, needsCapture, toSq) {
+  const mat  = new THREE.MeshLambertMaterial({ color: colHex, transparent: true, opacity });
+  const geom = new THREE.BoxGeometry(BAR_W, segH, BAR_W);
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.position.set(barX, yBot + segH / 2, z);
+  mesh.castShadow = true;
+  mesh.userData.notation     = rep.notation;
+  mesh.userData.moveData     = rep;
+  mesh.userData.allMoves     = mvsForSq;
+  mesh.userData.needsCapture = needsCapture;
+  mesh.userData.toSq         = toSq;
+  mesh.userData.baseColor    = new THREE.Color(colHex);
+  mesh.userData.baseOpacity  = opacity;
+  barGroup.add(mesh);
+  return mesh;
+}
 
 function rebuildBars(movesArray) {
   barGroup.clear();
   barMeshMap.clear();
+  barGroupMap.clear();
   if (!movesArray || movesArray.length === 0) return;
 
   // Group by to_sq so mill-closing positions show one bar per destination
@@ -272,37 +295,71 @@ function rebuildBars(movesArray) {
   const hRange   = Math.max(1, maxH - minH);
 
   for (const [toSq, mvsForSq] of byToSq) {
-    // Representative move: prefer non-capture variant for display stats
     const rep          = mvsForSq.find(m => !m.capture_sq) || mvsForSq[0];
     const needsCapture = mvsForSq.every(m => m.capture_sq != null);
+    const [x,, z]      = POS_COORDS[toSq];
+    const baseY        = 0.07;
+    const segMeshes    = [];
 
-    let height;
+    // ── Trajectory bar (W/D/L stacked segments, beside piece) ──
+    const barX = x + BAR_OFFSET_X;
     if (rep.has_db_data) {
       const totalForSq = mvsForSq.reduce((s, m) => s + (m.total || 0), 0);
-      height = Math.max(0.12, (totalForSq / maxTotal) * MAX_BAR_HEIGHT);
+      const barH  = Math.max(0.06, (totalForSq / maxTotal) * MAX_BAR_HEIGHT);
+      const wins   = rep.wins   || 0;
+      const draws  = rep.draws  || 0;
+      const losses = rep.losses || 0;
+      const total  = Math.max(1, wins + draws + losses);
+
+      const lossH = barH * (losses / total);
+      const drawH = barH * (draws  / total);
+      const winH  = barH * (wins   / total);
+
+      const segs = [
+        { h: lossH, col: 0xef4444, yBot: baseY },
+        { h: drawH, col: 0xa06040, yBot: baseY + lossH },
+        { h: winH,  col: 0x4ade80, yBot: baseY + lossH + drawH },
+      ];
+      let primaryMesh = null;
+      for (const seg of segs) {
+        if (seg.h < 0.005) continue;
+        const m = _addBarMesh(barX, z, seg.h, seg.yBot, seg.col, 0.88, rep, mvsForSq, needsCapture, toSq);
+        segMeshes.push(m);
+        if (!primaryMesh) primaryMesh = m;
+      }
+      if (primaryMesh) {
+        for (const mv of mvsForSq) barMeshMap.set(mv.notation, { mesh: primaryMesh, data: mv });
+      }
     } else {
-      const norm = (rep.heuristic_score - minH) / hRange;
-      height = 0.12 + norm * (MAX_BAR_HEIGHT * 0.5);
+      const norm  = (rep.heuristic_score - minH) / hRange;
+      const barH  = 0.06 + norm * (MAX_BAR_HEIGHT * 0.5);
+      const m = _addBarMesh(barX, z, barH, baseY, 0x888888, 0.55, rep, mvsForSq, needsCapture, toSq);
+      segMeshes.push(m);
+      for (const mv of mvsForSq) barMeshMap.set(mv.notation, { mesh: m, data: mv });
     }
 
-    const col  = barColor(rep);
-    const mat  = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: rep.has_db_data ? 0.88 : 0.55 });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, height, 0.38), mat);
-    const [x,, z] = POS_COORDS[toSq];
-    mesh.position.set(x, height / 2 + 0.07, z);
-    mesh.castShadow = true;
-    mesh.userData.notation    = rep.notation;
-    mesh.userData.moveData    = rep;
-    mesh.userData.allMoves    = mvsForSq;
-    mesh.userData.needsCapture = needsCapture;
-    mesh.userData.toSq        = toSq;
-    mesh.userData.baseColor   = col.clone();
-    barGroup.add(mesh);
-
-    // Register all capture-variant notations → same mesh (for sidebar hover)
-    for (const mv of mvsForSq) {
-      barMeshMap.set(mv.notation, { mesh, data: mv });
+    // ── Sentinel bar (blue, separate column further right) ──
+    const sentScore = rep.sentinel_score;
+    if (sentScore != null && sentScore > 0.01) {
+      const sentH = Math.max(0.04, sentScore * MAX_BAR_HEIGHT);
+      const sm = new THREE.Mesh(
+        new THREE.BoxGeometry(SENT_W, sentH, SENT_W),
+        new THREE.MeshLambertMaterial({ color: 0x5595d4, transparent: true, opacity: 0.85 }),
+      );
+      sm.position.set(x + SENT_OFFSET_X, baseY + sentH / 2, z);
+      sm.castShadow = true;
+      sm.userData.notation     = rep.notation;
+      sm.userData.moveData     = rep;
+      sm.userData.allMoves     = mvsForSq;
+      sm.userData.needsCapture = needsCapture;
+      sm.userData.toSq         = toSq;
+      sm.userData.baseColor    = new THREE.Color(0x5595d4);
+      sm.userData.baseOpacity  = 0.85;
+      barGroup.add(sm);
+      segMeshes.push(sm);
     }
+
+    barGroupMap.set(toSq, segMeshes);
   }
 }
 
@@ -547,8 +604,10 @@ function onMouseMove(e) {
 
   // ── Bar hover ──
   if (hoveredBar) {
-    hoveredBar.material.color.copy(hoveredBar.userData.baseColor);
-    hoveredBar.material.opacity = hoveredBar.userData.moveData?.has_db_data ? 0.88 : 0.55;
+    for (const m of (barGroupMap.get(hoveredBar.userData.toSq) || [hoveredBar])) {
+      m.material.color.copy(m.userData.baseColor);
+      m.material.opacity = m.userData.baseOpacity ?? (m.userData.moveData?.has_db_data ? 0.88 : 0.55);
+    }
     hoveredBar = null;
     tooltip.style.display = 'none';
   }
@@ -556,8 +615,10 @@ function onMouseMove(e) {
   if (barHits.length > 0) {
     const mesh = barHits[0].object;
     hoveredBar = mesh;
-    mesh.material.color.set(C.barHov);
-    mesh.material.opacity = 1.0;
+    for (const m of (barGroupMap.get(mesh.userData.toSq) || [mesh])) {
+      m.material.color.set(C.barHov);
+      m.material.opacity = 1.0;
+    }
     showTooltip(e.clientX, e.clientY, mesh.userData.moveData);
     document.querySelectorAll('.move-item').forEach(el =>
       el.classList.toggle('highlighted', el.dataset.notation === mesh.userData.notation));
@@ -810,13 +871,19 @@ function updatePanel(data) {
       item.addEventListener('click', () => applyMove(mv.notation));
       item.addEventListener('mouseenter', () => {
         const entry = barMeshMap.get(mv.notation);
-        if (entry) { entry.mesh.material.color.set(C.barHov); entry.mesh.material.opacity = 1; }
+        if (entry) {
+          for (const m of (barGroupMap.get(entry.mesh.userData.toSq) || [entry.mesh])) {
+            m.material.color.set(C.barHov); m.material.opacity = 1;
+          }
+        }
       });
       item.addEventListener('mouseleave', () => {
         const entry = barMeshMap.get(mv.notation);
         if (entry) {
-          entry.mesh.material.color.copy(entry.mesh.userData.baseColor);
-          entry.mesh.material.opacity = mv.has_db_data ? 0.88 : 0.55;
+          for (const m of (barGroupMap.get(entry.mesh.userData.toSq) || [entry.mesh])) {
+            m.material.color.copy(m.userData.baseColor);
+            m.material.opacity = m.userData.baseOpacity ?? (mv.has_db_data ? 0.88 : 0.55);
+          }
         }
       });
       listEl.appendChild(item);

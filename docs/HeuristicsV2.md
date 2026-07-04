@@ -201,7 +201,55 @@ Tournament difficulty mapping (default min=5 / max=16 settings):
 
 ---
 
+## Phase 1 — Mate-Distance Fix
+
+**Change:** Terminal scoring changed from `INF - depth` (remaining depth) to `INF - ply` (ply from root). TT adjustment functions `score_to_tt` / `score_from_tt` added so mate-in-N scores are stored as absolute distances, not search-relative.
+
+**Why it mattered:** `INF - depth` is remaining depth, so a mate-in-3 found at depth 7 scored `INF - 4` and a mate-in-3 found at depth 3 scored `INF - 0`. The search had no preference for the shorter path. With `INF - ply`, mate-in-3 always scores `INF - 3` regardless of where in the tree it was found. The AI now aggressively pursues the fastest win.
+
+**Benchmark — 10-game post-Phase-1 assessment (V2+Phase1 vs V1):**
+
+| | V2+Phase1 wins | Draws | V1 wins |
+|-|----------------|-------|---------|
+| Count | 7 | 1 | 2 |
+| % | 70% | 10% | 20% |
+
+Draw rate dropped from 37% (pre-Phase-1, 100-game run) to 10%. The fix converts middlegame positions that previously drifted into draws into decisive wins by pursuing the shortest forcing sequence.
+
+---
+
+## Phase 2 — Qsearch Forcing Extension
+
+**Change:** Quiescence search extended beyond captures and mill closures to three categories of forcing moves:
+
+1. **Reachable two-config creator** — a move that gives own side a mill threat where the closing square is reachable next move (still has pieces to place, or own piece adjacent and not mill-locked, or ≤3 pieces in fly phase). Opponent is forced to block.
+2. **Forced block** — blocking an opponent's reachable two-config. The search must explore the block because the alternative (opponent closes the mill next move) is already in scope.
+3. **Blocker displacement** — own piece that was blocking an opponent mill moves away, forcing the opponent to respond to the newly opened threat.
+
+Cap: `QS_FORCING_CAP = 6` extra plies on forcing lines. Tactical moves (captures, mill closures) do not count against the cap. The base qsearch tactical extensions are unaffected.
+
+**Concrete depth gain:** At difficulty 3 (ply 8 main search budget), forcing lines search to ply 14. At difficulty 6 (ply 13), forcing lines reach ply 19.
+
+**Implementation:** `creates_reachable_two_config()` in `search.rs`, O(6) per move via `SQUARE_MILLS[to_sq]`. Counter in global `FORCING_EXT_COUNT` (AtomicU64). Test tool: `tools/test_forcing_ext.py`.
+
+**Test — 100 AI-vs-AI games at difficulty 3 (`tools/test_forcing_ext.py --games 100 --diff 3`):**
+
+| | Value |
+|-|-------|
+| Games with ≥1 extension | 100 / 100 (100%) |
+| Total extensions fired | 9,849,060,851 |
+| Average per game | 98.5 million |
+| Range (min / max) | 38.4M / 564.3M |
+
+Extension fires on every game. Variation reflects game length and tactical density — draw games and longer battles fire more than quick decisive games.
+
+*Earlier 20-game run (same conditions): avg 88.6M/game, range 46.8M–311.8M. The 100-game average is a more stable baseline.*
+
+---
+
 ## Benchmark: V2 vs V1 (100 games, July 2026)
+
+*This run was completed before Phase 1 (mate-distance fix). It establishes the baseline. Phase 1 results are in the section above.*
 
 **V2:** Rust search + `evaluate_v2` + `EvalScale` + FGOP  
 **V1:** Python negamax + full `evaluate()` (old heuristics, ~16 terms)  

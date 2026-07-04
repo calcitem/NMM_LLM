@@ -7,15 +7,20 @@
 
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use memmap2::Mmap;
+
+/// Global counter: incremented each time Phase-2 forcing extension fires in qsearch.
+/// Exposed via py_get_forcing_ext_count() / py_reset_forcing_ext_count() FFI.
+pub static FORCING_EXT_COUNT: AtomicU64 = AtomicU64::new(0);
 
 use crate::board::{make_move, terminal_winner, ADJACENCY, get_phase};
 use crate::db_probe;
 use crate::heuristics::{evaluate_v2, EvalScale, INF};
 use crate::hash::{TranspositionTable, TtEntry, Zobrist, EXACT, LOWER_BOUND, UPPER_BOUND};
 use crate::movegen::legal_moves;
-use crate::tactics::move_forms_mill;
+use crate::tactics::{immediate_mill_threats, move_forms_mill};
 use crate::types::{Board, Color, Move, Phase, FULL_MASK};
 
 pub struct SearchResult {
@@ -67,6 +72,39 @@ const LMR_LATE_IDX: usize = 3;
 // FGOP: frequency-gated opponent pruning constants.
 const FGOP_DEPTH: u8  = 5;   // only prune when remaining depth ≤ this
 const FGOP_MARGIN: i64 = 150; // eval margin below best opp move to trigger gate 1
+// Phase 2: max extra plies added by forcing qsearch extension (two-config / forced-block).
+// Tactical moves (captures, mill closures) are always searched and don't count against this.
+const QS_FORCING_CAP: u8 = 6;
+// Mate-score boundary: any |score| above this is a terminal win/loss, not an eval.
+const MATE_THRESHOLD: i64 = INF / 2;
+
+/// Convert a ply-relative mate score to an absolute mate-in-N for TT storage.
+/// Non-mate scores pass through unchanged.
+/// Wins (score > MATE_THRESHOLD): stored as score + ply = INF - (ply_terminal - ply)
+///   which equals INF - mate_in_N (position-independent).
+/// Losses: symmetric.
+#[inline]
+fn score_to_tt(score: i64, ply: u8) -> i64 {
+    if score > MATE_THRESHOLD {
+        score + ply as i64
+    } else if score < -MATE_THRESHOLD {
+        score - ply as i64
+    } else {
+        score
+    }
+}
+
+/// Recover ply-relative mate score from the absolute mate-in-N stored in TT.
+#[inline]
+fn score_from_tt(score: i64, ply: u8) -> i64 {
+    if score > MATE_THRESHOLD {
+        score - ply as i64
+    } else if score < -MATE_THRESHOLD {
+        score + ply as i64
+    } else {
+        score
+    }
+}
 
 /// FGOP Gate 2b: true if `mv` is structurally rare for `color` to play.
 ///
@@ -99,6 +137,54 @@ fn is_structurally_rare(mv: &Move, board: &Board, color: Color) -> bool {
     !SQUARE_MILLS[to_sq]
         .iter()
         .any(|&mi| (own_after & MILL_MASKS[mi as usize]) == MILL_MASKS[mi as usize])
+}
+
+/// Phase 2: true if `mv` for `color` creates a reachable two-config after it lands.
+///
+/// A two-config is 2 own pieces + 1 empty closing square in a mill line.
+/// "Reachable" means the closing square can be occupied by own next turn:
+///   - Placement phase (still pieces to place after this move): any empty closing sq.
+///   - Fly phase (own_after ≤ 3 pieces): any empty closing sq (can jump anywhere).
+///   - Move phase: an own piece not already in the mill line is adjacent to the closing sq.
+///
+/// Only checks SQUARE_MILLS[mv.to] — lines affected by the landing square — which
+/// is exactly where new two-configs can be created by this move. O(2×3) = O(6).
+fn creates_reachable_two_config(board: &Board, color: Color, mv: &Move) -> bool {
+    use crate::mills::{MILL_MASKS, SQUARE_MILLS};
+    let to_sq = mv.to as usize;
+    let from_bit = mv.from.map_or(0u32, |f| 1u32 << f);
+    let to_bit   = 1u32 << to_sq;
+    let own      = board.bits(color);
+    let own_after = (own | to_bit) & !from_bit;
+
+    // Opponent bits after any capture — needed for computing occupied squares.
+    let cap_bit  = mv.capture.map_or(0u32, |c| 1u32 << c);
+    let opp_after = board.bits(color.opponent()) & !cap_bit;
+    let occupied_after = own_after | opp_after;
+
+    // Will we still be in placement phase AFTER this move completes?
+    let placed_after = match color {
+        Color::White => board.white_placed + if mv.from.is_none() { 1 } else { 0 },
+        Color::Black => board.black_placed + if mv.from.is_none() { 1 } else { 0 },
+    };
+    let still_placing = placed_after < 9;
+    // Fly phase: own has ≤ 3 pieces (can jump to any empty square).
+    let fly = own_after.count_ones() <= 3;
+
+    for &mi in &SQUARE_MILLS[to_sq] {
+        let mm = MILL_MASKS[mi as usize];
+        if (own_after & mm).count_ones() == 2 {
+            let closing = mm & !occupied_after;
+            if closing.count_ones() != 1 { continue; }
+            let closing_sq = closing.trailing_zeros() as usize;
+            // Check reachability for the next own move.
+            let reachable = still_placing
+                || fly
+                || (ADJACENCY[closing_sq] & own_after & !mm) != 0;
+            if reachable { return true; }
+        }
+    }
+    false
 }
 
 impl Searcher {
@@ -145,9 +231,19 @@ impl Searcher {
         moves
     }
 
-    // T-B4: Quiescence search — extends depth-0 with captures and mill-forming moves
-    // to avoid horizon-effect blunders at tactical boundaries.
-    fn qsearch(&mut self, board: &Board, mut alpha: i64, beta: i64) -> i64 {
+    // T-B4 / Phase 2: Quiescence search extended with forcing moves.
+    //
+    // Always extends: captures, mill-closing moves (original qsearch).
+    // Phase 2 extension (up to QS_FORCING_CAP extra plies):
+    //   - Reachable two-config creators: mv lands so own now has 2 pieces in a mill
+    //     line with a reachable closing square → threatens a mill next move.
+    //   - Forced blocks: mv.to is a square where the opponent can close a mill
+    //     (pre-computed as opp_threats via immediate_mill_threats). Playing there
+    //     blocks the threat; not playing there would let opp form a mill next move.
+    //
+    // Tactical moves (capture/mill) never count against QS_FORCING_CAP.
+    // Forcing-only moves increment qs_ply → cap fires after 6 forcing extensions.
+    fn qsearch(&mut self, board: &Board, mut alpha: i64, beta: i64, qs_ply: u8) -> i64 {
         if self.aborted { return ABORT_SCORE; }
         self.nodes += 1;
         if self.nodes & 2047 == 0 && Instant::now() >= self.deadline {
@@ -161,12 +257,30 @@ impl Searcher {
         let stand_pat = evaluate_v2(board, color, self.eval_scale);
         if stand_pat >= beta { return beta; }
         if stand_pat > alpha { alpha = stand_pat; }
+
+        // Pre-compute opponent mill threats once — used for forced-block filter.
+        // Only pay this cost when the forcing cap has not been reached.
+        let can_force = qs_ply < QS_FORCING_CAP;
+        let opp_threats: u32 = if can_force { immediate_mill_threats(board) } else { 0 };
+
         for mv in legal_moves(board).iter() {
-            if mv.capture.is_none() && !move_forms_mill(board, color, mv.from, mv.to) {
+            let is_tactical = mv.capture.is_some()
+                || move_forms_mill(board, color, mv.from, mv.to);
+            // Phase 2: also extend reachable two-config creators and forced blocks.
+            let is_forcing = !is_tactical && can_force && (
+                (opp_threats & (1u32 << mv.to)) != 0
+                || creates_reachable_two_config(board, color, mv)
+            );
+            if !is_tactical && !is_forcing {
                 continue;
             }
             let nb = make_move(board, mv);
-            let score = -self.qsearch(&nb, -beta, -alpha);
+            // Tactical moves don't consume the forcing budget; forcing-only moves do.
+            let next_qs = if is_tactical { qs_ply } else {
+                FORCING_EXT_COUNT.fetch_add(1, Ordering::Relaxed);
+                qs_ply + 1
+            };
+            let score = -self.qsearch(&nb, -beta, -alpha, next_qs);
             if self.aborted { return ABORT_SCORE; }
             if score >= beta { return beta; }
             if score > alpha { alpha = score; }
@@ -196,10 +310,12 @@ impl Searcher {
 
         let color = board.side_to_move;
         if let Some(winner) = terminal_winner(board) {
+            // Prefer shorter wins (INF - ply decreases as ply increases) and
+            // delay losses (-(INF - ply) increases as ply increases → less bad).
             return if winner == color {
-                INF - depth as i64
+                INF - ply as i64
             } else {
-                -(INF - depth as i64)
+                -(INF - ply as i64)
             };
         }
 
@@ -244,7 +360,7 @@ impl Searcher {
                 tt_best = Some(e.best_idx);
             }
             if e.depth >= depth {
-                let s = e.score as i64;
+                let s = score_from_tt(e.score as i64, ply);
                 match e.flag {
                     EXACT => return s,
                     LOWER_BOUND if s >= beta => return s,
@@ -254,9 +370,9 @@ impl Searcher {
             }
         }
 
-        // T-B4: quiescence search at horizon.
+        // T-B4: quiescence search at horizon (qs_ply=0 → fresh forcing budget).
         if depth == 0 {
-            return self.qsearch(board, alpha, beta);
+            return self.qsearch(board, alpha, beta, 0);
         }
 
         // T-B5: Null-move pruning (skip in fly phase to avoid zugzwang, and when
@@ -369,7 +485,7 @@ impl Searcher {
         };
         self.tt.store(key, TtEntry {
             depth,
-            score: best_score as i32,
+            score: score_to_tt(best_score, ply) as i32,
             flag,
             best_idx,
         });
@@ -724,7 +840,7 @@ mod tests {
             black_placed: 0,
             side_to_move: Color::White,
         };
-        let r = iterative_deepening_scored(&board, 3, 5000, &[], Arc::new(TranspositionTable::new()), HashSet::new(), None);
+        let r = iterative_deepening_scored(&board, 3, 5000, &[], Arc::new(TranspositionTable::new()), HashSet::new(), None, None, EvalScale::default());
         assert_eq!(r.scored_moves.len(), 24, "expected 24 moves on empty board");
         assert!(r.nodes > 0);
         for rm in &r.scored_moves {
