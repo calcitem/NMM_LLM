@@ -322,10 +322,10 @@
           <select id="sel-difficulty">
             <option value="1">1 — Beginner</option>
             <option value="2">2 — Easy</option>
-            <option value="3" selected>3 — Medium</option>
+            <option value="3">3 — Medium</option>
             <option value="4">4 — Hard</option>
             <option value="5">5 — Strong</option>
-            <option value="6">6 — Expert</option>
+            <option value="6" selected>6 — Expert</option>
             <option value="7">7 — Master</option>
             <option value="8">8 — Grandmaster</option>
             <option value="9">9 — Deep (20 s)</option>
@@ -356,9 +356,9 @@
         <div class="form-row" id="row-sentinel-gap" style="display:none; flex-direction:column; gap:3px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <label for="rng-sentinel-gap" style="font-size:.82rem; color:var(--text-dim);">Intervene when gap &ge;</label>
-            <span id="lbl-sentinel-gap" style="font-size:.82rem; font-weight:600; min-width:2.8em; text-align:right;">10%</span>
+            <span id="lbl-sentinel-gap" style="font-size:.82rem; font-weight:600; min-width:2.8em; text-align:right;">20%</span>
           </div>
-          <input type="range" id="rng-sentinel-gap" min="0" max="50" step="5" value="10" style="width:100%">
+          <input type="range" id="rng-sentinel-gap" min="0" max="50" step="5" value="20" style="width:100%">
           <span style="font-size:.72rem; color:var(--text-dim);">Higher = fewer overrides; 0% = override whenever sentinel prefers a different move</span>
         </div>
 

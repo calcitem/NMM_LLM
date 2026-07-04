@@ -1,6 +1,6 @@
 {
   "think_time_seconds": 6,
-  "difficulty": 4,
+  "difficulty": 6,
   "human_color": "random",
   "ollama_model": "llama3.1:8b",
   "ollama_url": "http://localhost:11434",
@@ -50,7 +50,7 @@
   },
   "search_depth": {
     "min": 3,
-    "max": 13
+    "max": 15
   },
   "search_threads": 2
 }
