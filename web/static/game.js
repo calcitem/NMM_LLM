@@ -275,6 +275,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (selSentinelMode) {
     selSentinelMode.addEventListener("change", _updateSentinelRows);
   }
+  _updateSentinelRows();
 
   const rngSentinelGap = $("rng-sentinel-gap");
   if (rngSentinelGap) {

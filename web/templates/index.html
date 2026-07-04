@@ -339,7 +339,7 @@
         </div>
 
         <div class="form-row" id="row-sentinel" style="flex-direction:row; align-items:center; gap:8px;">
-          <input type="checkbox" id="chk-sentinel">
+          <input type="checkbox" id="chk-sentinel" checked>
           <label for="chk-sentinel" style="color:var(--text); font-size:.9rem;">
             Sentinel guidance
             <span style="font-size:.75rem; color:var(--text-dim);">(requires trained checkpoint)</span>
@@ -348,8 +348,8 @@
         <div class="form-row" id="row-sentinel-mode" style="display:none">
           <label for="sel-sentinel-mode" style="font-size:.85rem;">Sentinel mode</label>
           <select id="sel-sentinel-mode" style="font-size:.85rem;">
-            <option value="advisory" selected>Advisory (log only)</option>
-            <option value="score_adjust">Score adjust</option>
+            <option value="advisory">Advisory (log only)</option>
+            <option value="score_adjust" selected>Score adjust</option>
             <option value="reconsider">Reconsider on critical</option>
           </select>
         </div>
