@@ -27,7 +27,7 @@ from game.rules import get_all_legal_moves, is_terminal
 
 # T-D2: O(1) reverse lookup used by _notation_to_triple and _choose_rust_scored filter.
 _POS_TO_IDX: dict[str, int] = {pos: i for i, pos in enumerate(POSITIONS)}
-from .heuristics import INF, evaluate, clear_eval_cache, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert, _closeable_mills, evaluate_v2
+from .heuristics import INF, evaluate, clear_eval_cache, HeuristicWeights, DEFAULT_WEIGHTS, tactical_move_bonus, _sealed_two_configs, _dual_connected_mill_alert, _closeable_mills, evaluate_v2, _shiftable_two_config_count
 from .transposition_table import TranspositionTable, EXACT, LOWER_BOUND, UPPER_BOUND
 from .board_symmetry import SYM_INVERSE, transform_notation as _transform_notation
 
@@ -444,6 +444,7 @@ class GameAI:
         weights: HeuristicWeights | None = None,
         use_mcts: bool = False,
         value_net=None,
+        gap_net=None,              # ai.value_net.ValueNet trained on blunder gaps | None
         fullgame_db=None,           # ai.fullgame_db.FullGameDB | None
         endgame_solved_db=None,     # ai.endgame_solved_db.EndgameSolvedDB | None
         malom_db=None,              # learned_ai.sentinel.db_teacher.ExternalSolvedDB | None
@@ -462,6 +463,9 @@ class GameAI:
         self._deadline: float = math.inf   # set by _iterative_deepen; checked in _negamax
         self.use_mcts = use_mcts
         self._value_net = value_net
+        self._gap_net = gap_net        # GapNet: blunder-zone exploitation (V3a)
+        self._gap_leaf_cache: dict[int, int] = {}   # cleared per search
+        self.use_gap_net: bool = True
         self._mcts = None
         if use_mcts:
             from .mcts import MCTS
@@ -916,6 +920,7 @@ class GameAI:
         self._force_stop        = False
         self._deadline          = time.time() + time_budget
         self._tt.clear()
+        self._gap_leaf_cache.clear()
         self._killers           = [[None, None] for _ in range(32)]
         self._history           = {}
         self._nodes             = 0
@@ -937,7 +942,7 @@ class GameAI:
                 self._move_path_buf = [self._move_notation(mv)]
                 raw = -self._negamax(
                     nb, depth - 1, -INF, INF, None,
-                    depth // 2, self._opp_plies_budget, 1,
+                    depth, self._opp_plies_budget, 1,
                 )
             except (_SearchAbort, Exception):
                 raw = 0.0
@@ -980,6 +985,7 @@ class GameAI:
             import random as _r
             self._suppress_fork_this_move = _r.random() < 0.5
         self._tt.clear()
+        self._gap_leaf_cache.clear()
         self._killers = [[None, None] for _ in range(32)]
         self._history = {}
         self._trajectory_db = trajectory_db            # SE-11
@@ -1664,7 +1670,7 @@ class GameAI:
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth // 2, self._opp_plies_budget, 1)
+                score_raw = -self._negamax(nb, depth - 1, -beta, -alpha_raw, None, depth, self._opp_plies_budget, 1)
             except _SearchAbort:
                 self._move_path_buf.pop()
                 if not scored_any:
@@ -1793,7 +1799,12 @@ class GameAI:
                     _own_threat = True
                 if _mv.count(_opp8) == 2 and _mv.count("") == 1:
                     _opp_forks += 1
-            if _own_threat or _opp_forks >= 2:
+            # Also extend for own shiftable 2-config: a non-closeable mill where
+            # one piece can shift to the closing square and an approach path exists.
+            # This ensures the engine searches deep enough to find 2-step mill plans.
+            _own_shift = (not _own_threat and _color == self.color
+                          and _shiftable_two_config_count(board, _color) > 0)
+            if _own_threat or _opp_forks >= 2 or _own_shift:
                 depth += 1
                 ext_budget -= 1
 
@@ -1807,12 +1818,26 @@ class GameAI:
                     heur = evaluate_v2(board, board.turn, weights=self._weights, _ply=ply)
                 else:
                     heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
-            # B-73: blend in value network score when loaded and blend > 0
+            # B-73: symmetric value-net blend (currently disabled; kept for future use)
             if self._value_net is not None and self._weights.value_net_blend > 0:
                 vn_raw = self._value_net.predict(board, board.turn)  # (-1, 1)
                 vn_score = int(vn_raw * _VN_SCALE)
                 blend = self._weights.value_net_blend / 100.0
                 return int(blend * vn_score + (1.0 - blend) * heur)
+            # V3a: asymmetric gap_net blunder-zone correction (AI side only)
+            if (self.use_gap_net
+                    and board.turn == self.color
+                    and self._gap_net is not None
+                    and (self._weights.gap_blend_move > 0
+                         or self._weights.gap_blend_place > 0
+                         or self._weights.gap_blend_fly > 0)):
+                _cached = self._gap_leaf_cache.get(board.hash_key)
+                if _cached is not None:
+                    return _cached
+                from .heuristics import human_correction
+                corrected = human_correction(board, board.turn, heur, self._gap_net, self._weights)
+                self._gap_leaf_cache[board.hash_key] = corrected
+                return corrected
             return heur
 
         # ── Transposition table probe ─────────────────────────────────────────
@@ -2093,7 +2118,7 @@ class GameAI:
             _root_mn = self._move_notation(move)
             self._move_path_buf.append(_root_mn)
             try:
-                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth // 2, self._opp_plies_budget, 1)
+                score = -self._negamax(nb, depth - 1, -INF, INF, endgame_state, depth, self._opp_plies_budget, 1)
                 if abs(score) < INF // 2 and not self.use_v2_heuristics:
                     score += tactical_move_bonus(board, nb, self.color, self._active_weights(), self._opp_last_weak)
                 self._move_path_buf.pop()
@@ -2146,6 +2171,7 @@ class GameAI:
         self._force_stop = False
         self._deadline   = time.time() + 20.0
         self._tt.clear()
+        self._gap_leaf_cache.clear()
         self._killers        = [[None, None] for _ in range(32)]
         self._history        = {}
         self._trajectory_db  = None          # skip trajectory during diagnostics

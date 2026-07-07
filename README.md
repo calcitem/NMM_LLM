@@ -105,7 +105,7 @@ See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
 
   - **Placement phase**: piece count, hand pieces remaining, mobility, blocked opponent pieces, closed mills, mill threats, open-mill removal reach, positional value (connectivity bonus)
 
-  - **Movement phase**: piece count, mobility, opponent blocked pieces, closed mills, mill threats, cycling-mill readiness, fork threats (simultaneous 2-config dual-threats), encirclement squeeze, zugzwang bonus when opponent mobility drops below 3
+  - **Movement phase**: piece count, mobility, opponent blocked pieces, closed mills, mill threats, shiftable 2-config bonus (non-closeable mills where a 2-step approach exists), cycling-mill readiness, fork threats (simultaneous 2-config dual-threats), encirclement squeeze, zugzwang bonus when opponent mobility drops below 3
 
   - **Fly phase**: piece count, closed mills, mill threats (weighted ×80), cycling-mill readiness (×80), fork threats (×55), win-configuration detection, surplus-threat dominance
 
@@ -124,6 +124,8 @@ See [Learned (Neural) AI](#learned-neural-ai) for the full training walkthrough.
   - Mill wrapping — occupying exit squares of opponent closed mills
 
   - Controlling cardinal squares; early-game scatter placement
+
+  - **Shiftable 2-config bonus (B-99)**: counteracts the non-closeable 2-config penalty when the formation has a viable 2-step closing plan — one mill piece can shift into the closing square and the vacated square has a free exit (+75 per new shiftable plan; net +15 after the -60 B-98 penalty)
 
   - **Cycling-capture unblock penalty**: penalises captures that leave an own cycling piece about to unblock an opponent mill
 

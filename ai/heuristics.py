@@ -109,6 +109,12 @@ class HeuristicWeights:
                                  # node (2 connections) — opponent is forced to a passive sq
     # ── B-73: Value network blend ────────────────────────────────────────────
     value_net_blend: int = 0     # % of value-network score blended into leaf eval (0 = off)
+    # V3a: gap_net (blunder-zone exploitation) correction caps per phase
+    gap_blend_place: int = 12   # % correction cap in placement phase
+    gap_blend_move:  int = 20   # % correction cap in move phase
+    gap_blend_fly:   int = 5    # % correction cap in fly phase
+    # ── B-99: Shiftable 2-config (two-step mill approach) ───────────────────
+    shiftable_two_config: int = 75  # bonus per new shiftable 2-config gained (move phase)
     # ── B-74: Cross-mill cycling fork ────────────────────────────────────────
     cross_mill_cycling: int = 300  # static bonus per two-mill fork (closed mill + adjacent near-mill closing sq)
     relay_cycling: int = 220        # bonus per two-step relay fork (closed mill → relay piece → near-mill closing sq)
@@ -1656,6 +1662,45 @@ def _closeable_mills(board: BoardState, color: str) -> int:
     return count
 
 
+def _shiftable_two_config_count(board: BoardState, color: str) -> int:
+    """Count non-closeable 2-configs that can become closeable in one internal shift.
+
+    Move phase only.  A 2-config (P1, P2, closing_sq C) is 'shiftable' when:
+    - It is currently non-closeable (no external own piece adjacent to C)
+    - At least one Pi is adjacent to C (Pi can shift into C within the mill)
+    - The square Pi would vacate has at least one free neighbor (an approach path
+      exists so another piece can reach the new closing square in ≤2 moves)
+
+    These represent indirect two-step mill plans that look non-closeable to
+    B-98 but actually have a concrete path to completion.
+    """
+    phase = get_game_phase(board, color)
+    if phase != "move":
+        return 0
+    count = 0
+    for mill in MILLS:
+        vals = [board.positions[p] for p in mill]
+        if vals.count(color) != 2 or vals.count("") != 1:
+            continue
+        closing = next(p for p in mill if board.positions[p] == "")
+        mill_set = set(mill)
+        # Skip if already closeable (external own piece adjacent to closing sq)
+        if any(board.positions[nb] == color
+               for nb in ADJACENCY[closing] if nb not in mill_set):
+            continue
+        # Check if any mill piece P can shift to the closing sq
+        for p in mill:
+            if board.positions[p] != color:
+                continue
+            if closing not in ADJACENCY.get(p, []):
+                continue
+            # P can shift to closing; vacated square needs a free neighbor for approach
+            if any(board.positions[nb] == "" for nb in ADJACENCY[p] if nb != closing):
+                count += 1
+                break  # count each mill once
+    return count
+
+
 def _unguarded_cardinal_mill_alert(board: BoardState, opp: str, own: str) -> list[str]:
     """Return closing squares for opponent cardinal mills (containing b4/d2/d6/f4) where
     the opponent has two pieces in the mill and no own piece is adjacent to any mill square.
@@ -2282,6 +2327,7 @@ def tactical_move_bonus(
     # Symmetric to setup_mill_bonus; sized similarly (~weights.setup_mill).
     dissolution_penalty = 0
     non_closeable_penalty = 0
+    shiftable_bonus = 0
     if before_phase == "move":
         mills_closed_this_move = max(0, _closed_mills(after, color) - _closed_mills(before, color))
         if mills_closed_this_move == 0:
@@ -2295,6 +2341,13 @@ def tactical_move_bonus(
             after_nc  = max(0, own_two_after  - _closeable_a)
             nc_gained = max(0, after_nc - before_nc)
             non_closeable_penalty = 60 * nc_gained
+            # B-99: shiftable 2-config bonus — counteracts B-98 when the non-closeable
+            # 2-config is shiftable (one mill piece can shift to closing sq and the
+            # vacated square has an approach path: a 2-step mill plan exists).
+            shift_before = _shiftable_two_config_count(before, color)
+            shift_after  = _shiftable_two_config_count(after,  color)
+            shift_gained = max(0, shift_after - shift_before)
+            shiftable_bonus = weights.shiftable_two_config * shift_gained
 
     # B-59: root-level bonus for moves that create a new sealed 2-config.
     # Supplements the static eval term so the AI selects sealed-threat-creating
@@ -3254,6 +3307,7 @@ def tactical_move_bonus(
         ("Setup mill (2-config gained)",   setup_mill_bonus),
         ("2-config dissolution (B-97)",    -dissolution_penalty),
         ("Non-closeable 2-config (B-98)", -non_closeable_penalty),
+        ("Shiftable 2-config (B-99)",      shiftable_bonus),
         ("Sealed 2-config bonus (B-59)",   sealed_setup_bonus),
         ("Relay seal bonus (B-92)",        relay_seal_bonus),
         ("Mill opening bonus",             mill_open_bonus),
@@ -3382,12 +3436,13 @@ _V2_PL_BLOCKED =  8
 _V2_PL_MILL    = 30
 _V2_PL_THREAT  = 15
 
-# Movement phase: piece count, mobility, blocked, mills, threats, zugzwang
+# Movement phase: piece count, mobility, blocked, mills, threats, shiftable, zugzwang
 _V2_MV_PIECE   = 12
 _V2_MV_MOB     =  1
 _V2_MV_BLOCKED = 48
 _V2_MV_MILL    = 30
 _V2_MV_THREAT  = 18
+_V2_MV_SHIFT   =  6  # shiftable 2-config (non-closeable but 2-step approach exists)
 _V2_MV_ZUGZ    = 600
 
 # Fly phase: piece count, mills, threats, surplus (unblockable threats)
@@ -3468,7 +3523,7 @@ def evaluate_v2(
             return -(INF - _ply)
 
     # ── Mill pass: O(16) ─────────────────────────────────────────────────────
-    own_mills = opp_mills = own_thr = opp_thr = 0
+    own_mills = opp_mills = own_thr = opp_thr = own_shift = opp_shift = 0
 
     for mill in MILLS:
         p0, p1, p2 = mill
@@ -3482,10 +3537,34 @@ def evaluate_v2(
              (v0 == color and v2 == color and not v1) or \
              (v1 == color and v2 == color and not v0):
             own_thr += 1
+            # Shiftable 2-config (move phase): non-closeable but one mill piece
+            # can shift to closing sq and the vacated sq has a free exit.
+            if phase == "move":
+                _c = p2 if not v2 else (p1 if not v1 else p0)
+                _mill_set = (p0, p1, p2)
+                if not any(pos_vals[_nb] == color
+                           for _nb in ADJACENCY[_c] if _nb not in _mill_set):
+                    for _p in _mill_set:
+                        if pos_vals[_p] == color and _c in ADJACENCY[_p]:
+                            if any(not pos_vals[_nb2]
+                                   for _nb2 in ADJACENCY[_p] if _nb2 != _c):
+                                own_shift += 1
+                                break
         elif (v0 == opp and v1 == opp and not v2) or \
              (v0 == opp and v2 == opp and not v1) or \
              (v1 == opp and v2 == opp and not v0):
             opp_thr += 1
+            if phase == "move":
+                _c = p2 if not v2 else (p1 if not v1 else p0)
+                _mill_set = (p0, p1, p2)
+                if not any(pos_vals[_nb] == opp
+                           for _nb in ADJACENCY[_c] if _nb not in _mill_set):
+                    for _p in _mill_set:
+                        if pos_vals[_p] == opp and _c in ADJACENCY[_p]:
+                            if any(not pos_vals[_nb2]
+                                   for _nb2 in ADJACENCY[_p] if _nb2 != _c):
+                                opp_shift += 1
+                                break
 
     # ── Phase-specific score ──────────────────────────────────────────────────
     if phase == "place":
@@ -3504,6 +3583,7 @@ def evaluate_v2(
             + _V2_MV_BLOCKED * _block_s * opp_blocked
             + _V2_MV_MILL    * _mill_s  * (own_mills  - opp_mills)
             + _V2_MV_THREAT  * _mill_s  * (own_thr    - opp_thr)
+            + _V2_MV_SHIFT              * (own_shift  - opp_shift)
         )
         if opp_mob < 3:
             score += _V2_MV_ZUGZ * (3 - opp_mob)
@@ -3518,3 +3598,49 @@ def evaluate_v2(
             + _V2_FLY_THREAT * _mill_s  * (own_thr    - opp_thr)
             + _V2_FLY_SURP   * (own_surp  - opp_surp)
         )
+
+
+def human_correction(
+    board: "BoardState",
+    color: str,
+    e_v2: int,
+    gap_net,                                  # ValueNet (GapNet) | None
+    weights: "HeuristicWeights | None" = None,
+    *,
+    _profile_cap: float = 1.0,
+) -> int:
+    """Apply additive blunder-zone correction to an already-computed E_v2 score.
+
+    Trained target: gap = best_malom_quality - weighted_human_quality in [0,1].
+    At inference gap_net.predict() ∈ (-1,1), convert: gap = (raw+1)/2.
+    Formula: E_final = E_v2 + int(γ · gap · GAP_SCALE)
+    Only called from _negamax when board.turn == self.color (AI's side).
+    Returns e_v2 unchanged when gap_net is None or all blend caps are 0.
+    """
+    if gap_net is None:
+        return e_v2
+
+    w = weights if weights is not None else DEFAULT_WEIGHTS
+    phase = get_game_phase(board, color)
+
+    _blend_map = {"place": w.gap_blend_place, "move": w.gap_blend_move, "fly": w.gap_blend_fly}
+    cap_pct = _blend_map.get(phase, 0)
+    if cap_pct <= 0:
+        return e_v2
+
+    gamma = min(cap_pct / 100.0, _profile_cap)
+    if gamma <= 0:
+        return e_v2
+
+    raw = gap_net.predict(board, color)   # tanh output in (-1, 1)
+    gap = (raw + 1.0) / 2.0              # blunder density in (0, 1)
+    if gap < 0.02:
+        return e_v2
+
+    _GAP_SCALE = 3000
+    bonus = int(gamma * gap * _GAP_SCALE)
+
+    if phase == "fly":
+        bonus = min(bonus, int(0.3 * gamma * _GAP_SCALE))
+
+    return e_v2 + bonus

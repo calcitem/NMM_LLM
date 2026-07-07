@@ -1,7 +1,7 @@
 # HeuristicsV3a — Exploiting Human Play Patterns
 ## Minimum Viable Implementation Plan
 
-**Status:** Design complete, not yet implemented  
+**Status:** B-99 (shiftable 2-config) + SE-8 extension + evaluate_v2() inline shiftable term + ext_budget doubled; gap_net leaf correction pending  
 **Goal:** Make the AI steer game positions toward squares and formations that human players
 mishandle — not just play objectively well, but play in ways that actively exploit human tendencies
 
@@ -386,3 +386,125 @@ Over time, this should manifest as the AI preferring:
 
 The γ caps (12/20/5%) keep the correction small enough that it never overrides a genuine tactical
 advantage. It's a tiebreaker, not a replacement.
+
+---
+
+## B-99: Shiftable 2-Config Detection (Implemented)
+
+### The Problem
+
+The engine was missing multi-step mill plans where a non-closeable 2-config can become closeable
+by first "shifting" one of its own pieces into the closing square, vacating that piece's old square
+so a different piece can approach and eventually close the mill.
+
+Example: Black has pieces at e3 and c3, forming a 2-config targeting d3 (the middle of the
+c3–d3–e3 mill). No external Black piece is adjacent to d3, so B-98 fires (-60 penalty). But c3
+can shift to d3, vacating c3. A piece at b4 can then reach c4→c3 in two moves, closing the mill.
+Without recognition of this plan, B-98 dominated and the AI chose less promising moves.
+
+### The Detection: `_shiftable_two_config_count(board, color)`
+
+A 2-config is "shiftable" when all three conditions hold (move phase only):
+
+1. **Non-closeable**: no external own piece is adjacent to the closing square
+2. **Piece can shift in**: at least one of the two 2-config pieces is adjacent to the closing
+   square (it can slide into the closing square within the mill)
+3. **Approach path exists**: the square the shifting piece would vacate has at least one free
+   neighbor (other than the closing square) — confirming another piece can reach the new
+   closing square within ≤2 moves
+
+The function returns an integer count of such mills for the given color.
+
+### The Bonus: `shiftable_two_config = 75`
+
+Added to `HeuristicWeights`. Applied in `tactical_move_bonus()` (move phase only, no-mill-close
+moves) when a new shiftable 2-config is created:
+
+```
+shiftable_bonus = weights.shiftable_two_config × shift_gained
+```
+
+At 75 pts, this more than cancels B-98's fixed -60 penalty, giving the engine a net +15 reason
+to prefer moves that set up shiftable plans. Combined with the existing SE-10 fork bonus (+72),
+the example e4→e3 move now scores +87 instead of +12.
+
+### SE-8 Extension for Shiftable 2-Configs
+
+Added to the SE-8 search extension block in `_negamax` (`ai/game_ai.py`):
+
+When the AI's position (AI's turn, `board.turn == self.color`) contains a shiftable 2-config
+and the current node does not already have an immediate threat (`_own_threat == False`), the
+search extends by 1 ply (up to `ext_budget`). This ensures the engine searches deep enough
+to discover the full shift-approach-close sequence rather than abandoning it at the horizon.
+
+The extension is gated by `ext_budget > 0` and cannot cause unbounded search expansion.
+
+The `ext_budget` is now initialised as `depth` (full depth) rather than `depth // 2` at all
+three main search call sites (`_score_move_pairs`, `_iterative_deepen`, `_score_all`). This
+means an extension triggered at the root can fire repeatedly down the same branch, allowing a
+2-step shift-approach-close plan entered at depth N to be explored all the way to depth 2N.
+The IID recursive call (internal iterative deepening) keeps its fixed budget of 0.
+
+---
+
+## V2 Leaf: Inline Shiftable 2-Config Term (Implemented)
+
+### The Gap
+
+B-99 and the SE-8 extension both operate outside `evaluate_v2()`. B-99 only fires at the
+root (via `tactical_move_bonus`, which is suppressed in v2 mode). The extension adds ply but
+the leaf evaluator still assigns no value to *arriving in* a shiftable configuration. So
+positions deep in the tree that have a shiftable plan look identical to positions that don't —
+the search has no gradient to follow toward them.
+
+### The Fix: `_V2_MV_SHIFT = 6` inside the O(16) mill scan
+
+The existing `evaluate_v2()` mill scan loop now also detects shiftable 2-configs inline.
+After classifying each mill as a full mill, opponent mill, own threat, or opponent threat,
+the code runs a lightweight shiftable check (move phase only) on each 2-config found:
+
+1. Identify the closing square `C` (the one empty position in the 2-config)
+2. Check no external own piece is adjacent to `C` (otherwise it's a closeable 2-config, not a shiftable one — already counted in `own_thr`)
+3. Check that at least one of the two own pieces is adjacent to `C` (can shift in)
+4. Check that the piece which would shift has a free neighbour other than `C` (an approach path exists after the shift)
+
+This runs entirely within the mill loop at no extra memory allocation. The result is two
+counters `own_shift` and `opp_shift` added to the move-phase score:
+
+```
+_V2_MV_SHIFT * (own_shift - opp_shift)    # weight = 6
+```
+
+At weight 6, this is a soft gradient — roughly a third of the threat weight (18) — enough to
+distinguish shiftable positions from neutral ones without overriding tactical signals.
+
+### Interaction With B-99 and SE-8
+
+The three layers are complementary:
+
+| Layer | When it fires | What it does |
+|---|---|---|
+| `_V2_MV_SHIFT` in `evaluate_v2()` | Every leaf node in v2 mode | Rewards *arriving in* a shiftable position; provides the gradient the search follows |
+| SE-8 extension | When a shiftable 2-config is present at a node | Adds ply so the full 2-step plan is reachable within the search horizon |
+| B-99 in `tactical_move_bonus()` | Root move selection only (v1 mode) | Confirms the first step of the plan at the move selection level |
+
+In v2 mode (the default), B-99 is inactive but the leaf term + SE-8 together do the job:
+the leaf gradient steers the search toward shiftable positions, and the extension ensures
+those positions are explored deeply enough to evaluate the complete plan.
+
+### Implementation Location
+
+- `ai/heuristics.py`: `_V2_MV_SHIFT = 6` constant (near line ~3445); `own_shift`/`opp_shift`
+  counters and inline shiftable check added to the `for mill in MILLS:` loop in `evaluate_v2()`
+  (near line ~3535); `_V2_MV_SHIFT * (own_shift - opp_shift)` term in move-phase score return
+
+---
+
+### Implementation Location (all B-99 / shiftable changes)
+
+- `ai/heuristics.py`: `_shiftable_two_config_count()` (after `_closeable_mills()`),
+  `shiftable_two_config` field in `HeuristicWeights`, B-99 block in `tactical_move_bonus()`,
+  `_V2_MV_SHIFT` constant, inline shiftable counters in `evaluate_v2()`
+- `ai/game_ai.py`: `_own_shift` condition added to SE-8 extension block (line ~1802);
+  `ext_budget` initialised as `depth` (was `depth // 2`) at three main call sites;
+  `_shiftable_two_config_count` added to heuristics import
