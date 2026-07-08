@@ -318,15 +318,52 @@ Key metrics:
 
 > **Note on Spearman r:** With DB features zeroed at inference, r ≈ 0.10 is expected. The top-1 win rate (76.5% on Stage 4+5) is the more actionable metric for game play.
 
-### Known results
+### Known results — offline metrics
 
-| Checkpoint | win\_acc | loss\_acc | top1\_win\_rate | critical\_miss | spearman\_r |
-| - | - | - | - | - | - |
-| Stage 3 (leaky — do not use) | ~85% | ~65% | ~76% | ~20% | ~0.10 |
-| Stage 4+5 | 41.6% | 64.9% | 76.5% | 20.0% | 0.10 |
-
+| Checkpoint | win\_acc | loss\_acc | top1\_win\_rate | critical\_miss | spearman\_r | Notes |
+| - | - | - | - | - | - | - |
+| Stage 3 (leaky — do not use) | ~85% | ~65% | ~76% | ~20% | ~0.10 | DB feature leakage — do not use |
+| Stage 4+5 | 41.6% | 64.9% | 76.5% | 20.0% | 0.10 | Previous production baseline |
+| v2 | — | — | — | — | — | Not yet run through offline eval; see game-play benchmark below |
 
 Stage 4+5 win\_acc is lower because the model doesn't read feat\[57\] at inference; top-1 win rate is equivalent, meaning game-play quality is unchanged or better.
+
+
+### Game-play benchmark — v2 vs Stage 4+5 (July 2026)
+
+100-game round-robin, diff=4, budget=3.0 s/move. Config names encode the sentinel and `score\_adjust\_scale`:
+`NewS20` = v2 checkpoint, scale=0.20 · `NewS30` = v2 checkpoint, scale=0.30
+`OldS20` = Stage 4+5, scale=0.20 · `OldS30` = Stage 4+5, scale=0.30
+`Base` = no sentinel.
+
+**Final standings (40 games per config):**
+
+| Config | Pts | W | D | L | % |
+| - | - | - | - | - | - |
+| **NewS20** | **22.0** | **11** | **22** | **7** | **55.0%** |
+| OldS30 | 21.5 | 12 | 19 | 9 | 53.8% |
+| OldS20 | 21.0 | 12 | 18 | 10 | 52.5% |
+| Base | 18.5 | 10 | 17 | 13 | 46.2% |
+| NewS30 | 17.0 | 7 | 20 | 13 | 42.5% |
+
+**Head-to-head (row vs col: W D L from row's perspective):**
+
+| | Base | OldS20 | OldS30 | NewS20 | NewS30 |
+| - | - | - | - | - | - |
+| Base | — | 2W 6D 2L | 0W 4D 6L | 3W 3D 4L | 5W 4D 1L |
+| OldS20 | 2W 6D 2L | — | 5W 3D 2L | 2W 5D 3L | 3W 4D 3L |
+| OldS30 | 6W 4D 0L | 2W 3D 5L | — | 2W 7D 1L | 2W 5D 3L |
+| **NewS20** | 4W 3D 3L | 3W 5D 2L | 1W 7D 2L | — | 3W 7D 0L |
+| NewS30 | 1W 4D 5L | 3W 4D 3L | 3W 5D 2L | 0W 7D 3L | — |
+
+**Key findings:**
+
+- **NewS20 is the best overall config** (+8.8 pp over Base). The v2 model at scale=0.20 is the recommended production setting.
+- **NewS30 is overtuned** (42.5%, below Base). The v2 model at scale=0.30 is too aggressive — it overrides good engine choices. Do not use scale=0.30 with v2.
+- v2 at S20 goes 3W 7D 0L against NewS30 — the scale matters more than the checkpoint version for v2.
+- OldS30 and OldS20 both beat Base, confirming the Stage 4+5 sentinel was already net-positive. v2 at S20 improves on both.
+
+**Recommended deployment:** promote `checkpoints/v2/best.pt` to `best.pt` and set `score\_adjust\_scale = 0.20` in `learned\_ai/sentinel/config.py`.
 
 
 ### AIDB Malom WDL accuracy diagnostic

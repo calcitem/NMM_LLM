@@ -39,8 +39,20 @@ rem -- Launch uvicorn via 'python -m uvicorn' so we don't depend on the
 rem -- .exe shim location (more robust when install paths contain spaces) --
 start /B "" "%VENV_PY%" -m uvicorn web.app:app --host %HOST% --port %PORT%
 
-rem -- Wait for server then open browser --
-timeout /t 2 /nobreak >nul
+rem -- Poll /api/ping until the server is ready (up to 60s) --
+echo [NMM] Waiting for server to be ready...
+set /a _tries=0
+:wait_loop
+set /a _tries+=1
+if %_tries% gtr 60 (
+    echo [NMM] Server took too long to respond -- opening browser anyway.
+    goto open_browser
+)
+timeout /t 1 /nobreak >nul
+curl -sf "http://%HOST%:%PORT%/api/ping" >nul 2>&1
+if errorlevel 1 goto wait_loop
+
+:open_browser
 echo [NMM] Opening browser at http://%HOST%:%PORT%
 start "" "http://%HOST%:%PORT%"
 

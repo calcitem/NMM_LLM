@@ -230,10 +230,13 @@ class MemoryManager:
 
     # ── Session narratives ────────────────────────────────────────────────────
 
-    def save_session_narrative(self, text: str) -> None:
+    def save_session_narrative(self, text: str, keep: int = 20) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         fname = self._session_path / f"narrative_{ts}.md"
         fname.write_text(text, encoding="utf-8")
+        old_files = sorted(self._session_path.glob("narrative_*.md"), reverse=True)
+        for f in old_files[keep:]:
+            f.unlink(missing_ok=True)
         entry_id = f"narrative_{ts}"
         self._narratives.add(
             ids=[entry_id],

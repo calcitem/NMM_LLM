@@ -133,11 +133,17 @@ def main() -> int:
                    help="Learning rate for curriculum phase 2 (default 1e-4)")
     p.add_argument("--epochs-phase1", type=int, default=None,
                    help="Epochs for curriculum phase 1 (default = total epochs // 3)")
+    p.add_argument("--out-dir", default=None,
+                   help="Override checkpoint output directory (default: config.checkpoint_dir). "
+                        "Use this to save a new version without clobbering the current best.pt, "
+                        "e.g. --out-dir learned_ai/sentinel/checkpoints/v2")
     args = p.parse_args()
 
     config = load_config(args.config)
     if args.epochs is not None:
         config.epochs = args.epochs
+    if args.out_dir is not None:
+        config.checkpoint_dir = args.out_dir
     _set_seed(config.seed)
     device = torch.device(args.device)
 

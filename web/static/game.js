@@ -194,8 +194,24 @@ const PERSONALITY_PRESETS = {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-document.addEventListener("DOMContentLoaded", () => {
+async function _waitForServer(maxMs = 45000, interval = 800) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch("/api/ping", { cache: "no-store" });
+      if (r.ok) return true;
+    } catch (_) {}
+    setStatus("Connecting to server…");
+    await new Promise(res => setTimeout(res, interval));
+  }
+  setStatus("Server not responding — please refresh the page.");
+  return false;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
   board = new Board($("board-svg"), onNodeClick);
+  const ready = await _waitForServer();
+  if (!ready) return;
 
   // Render AI weight sliders then load saved weights for the active personality.
   _buildWeightSliders();
@@ -264,11 +280,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const gapRow  = $("row-sentinel-gap");
     if (modeRow) modeRow.style.display = checked ? "" : "none";
     if (gapRow)  gapRow.style.display  = (checked && mode !== "advisory") ? "" : "none";
+    const gapNetChecked = $("chk-gap-net") && $("chk-gap-net").checked;
+    const warning = $("row-gap-sentinel-warning");
+    if (warning) warning.style.display = (checked && gapNetChecked) ? "" : "none";
   }
 
   const chkSentinel = $("chk-sentinel");
   if (chkSentinel) {
     chkSentinel.addEventListener("change", _updateSentinelRows);
+  }
+
+  const chkGapNet = $("chk-gap-net");
+  if (chkGapNet) {
+    chkGapNet.addEventListener("change", _updateSentinelRows);
   }
 
   const selSentinelMode = $("sel-sentinel-mode");
@@ -338,8 +362,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function _timeForDepth(d) {
-    const t = Math.min(120, 0.065 * Math.pow(1.66, d));
-    return t < 1 ? t.toFixed(1) + "s" : t < 60 ? Math.round(t) + "s" : (t / 60).toFixed(1) + "m";
+    // Benchmarked on representative NMM positions (move phase = slower bound).
+    const TABLE = {4:2, 5:4, 6:13, 7:15, 8:45, 9:120, 10:300, 11:900, 12:2700, 13:7200, 14:21600, 15:64800, 16:194400};
+    const t = TABLE[d] || Math.round(2 * Math.pow(3, Math.max(0, d - 4)));
+    return t < 60 ? t + "s" : t < 3600 ? (t / 60).toFixed(0) + "m" : (t / 3600).toFixed(0) + "h";
   }
 
   function _currentDifficulty() {
@@ -417,6 +443,68 @@ document.addEventListener("DOMContentLoaded", () => {
     if ($("rng-depth-max")) $("rng-depth-max").value = data.max;
     _updateDepthBar();
   }).catch(() => _updateDepthBar());
+
+  // ── UI preferences persistence ────────────────────────────────────────────
+  const _UI_PREF_IDS = [
+    { id: "sel-opponent",        type: "select" },
+    { id: "sel-human-color",     type: "select" },
+    { id: "sel-game-personality",type: "select" },
+    { id: "sel-difficulty",      type: "select" },
+    { id: "chk-llm",             type: "checkbox" },
+    { id: "chk-sentinel",        type: "checkbox" },
+    { id: "sel-sentinel-mode",   type: "select" },
+    { id: "rng-sentinel-gap",    type: "range" },
+    { id: "chk-gap-net",         type: "checkbox" },
+    { id: "chk-ext-qsearch",     type: "checkbox" },
+    { id: "chk-ngram",           type: "checkbox" },
+    { id: "chk-perfect-db",      type: "checkbox" },
+  ];
+
+  let _uiPrefSaveTimer = null;
+  function _saveUiPrefs() {
+    clearTimeout(_uiPrefSaveTimer);
+    _uiPrefSaveTimer = setTimeout(() => {
+      const prefs = {};
+      for (const { id, type } of _UI_PREF_IDS) {
+        const el = $(id);
+        if (!el) continue;
+        prefs[id] = type === "checkbox" ? el.checked : el.value;
+      }
+      fetch("/api/ui_prefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prefs),
+      }).catch(() => {});
+    }, 400);
+  }
+
+  function _loadUiPrefs() {
+    fetch("/api/ui_prefs").then(r => r.json()).then(prefs => {
+      if (!prefs || !Object.keys(prefs).length) return;
+      for (const { id, type } of _UI_PREF_IDS) {
+        const el = $(id);
+        if (!el || !(id in prefs)) continue;
+        if (type === "checkbox") el.checked = prefs[id];
+        else el.value = prefs[id];
+      }
+      // Re-run derived UI updates after restoring
+      _updateSentinelRows();
+      if (typeof _updatePersonalityRow === "function") _updatePersonalityRow();
+      if (typeof _updateDepthBar === "function") _updateDepthBar();
+      const lbl = $("lbl-sentinel-gap");
+      const rng = $("rng-sentinel-gap");
+      if (lbl && rng) lbl.textContent = rng.value + "%";
+      const hdrP = $("hdr-personality");
+      const sidP = $("sel-game-personality");
+      if (hdrP && sidP) hdrP.value = sidP.value;
+    }).catch(() => {});
+  }
+
+  for (const { id } of _UI_PREF_IDS) {
+    const el = $(id);
+    if (el) el.addEventListener("change", _saveUiPrefs);
+  }
+  _loadUiPrefs();
 
   // Show/hide personality row based on opponent type
   function _updatePersonalityRow() {
@@ -907,6 +995,8 @@ function startNewGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
+      use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
@@ -1198,6 +1288,8 @@ function startSetupGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
+      use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
@@ -1946,6 +2038,12 @@ function setAdaptiveBadge(difficulty, softened) {
     : `Adaptive: Diff ${difficulty}`;
 }
 
+function _fmtSec(s) {
+  if (s < 60)   return s.toFixed(0) + "s";
+  if (s < 3600) return (s / 60).toFixed(1) + "m";
+  return (s / 3600).toFixed(1) + "h";
+}
+
 function startThinkingTimer(color, expectedSec, socket, maxDepth) {
   stopThinkingTimer();
   thinkingStarted  = Date.now();
@@ -1953,8 +2051,10 @@ function startThinkingTimer(color, expectedSec, socket, maxDepth) {
   maxDepthExpected = maxDepth || 0;
   const colorName  = color === "W" ? "White" : "Black";
   let autoFired    = false;
-  const plyEl = $("ply-progress");
+  const plyEl      = $("ply-progress");
+  const timeEl     = $("think-time-info");
   if (plyEl) plyEl.textContent = maxDepth ? `searching… (target depth ${maxDepth})` : "";
+  if (timeEl) timeEl.textContent = expectedSec > 0 ? `0.0s elapsed · ~${_fmtSec(expectedSec)} expected` : "";
 
   // Animate the think-bar: start at 10%, fill to 100% over expectedSec seconds.
   const barWrap = $("think-bar-wrap");
@@ -1970,10 +2070,15 @@ function startThinkingTimer(color, expectedSec, socket, maxDepth) {
 
   function tick() {
     if (!thinkingInterval) return;
-    const elapsed    = (Date.now() - thinkingStarted) / 1000;
-    const remaining  = Math.max(0, expectedSec - elapsed);
+    const elapsed   = (Date.now() - thinkingStarted) / 1000;
+    const remaining = Math.max(0, expectedSec - elapsed);
+    if (timeEl) {
+      timeEl.textContent = expectedSec > 0
+        ? `${elapsed.toFixed(1)}s elapsed · ~${_fmtSec(expectedSec)} expected`
+        : `${elapsed.toFixed(1)}s elapsed`;
+    }
     if (remaining > 0) {
-      setStatus(`AI (${colorName}) thinking… ${elapsed.toFixed(1)}s`);
+      setStatus(`AI (${colorName}) thinking… ${elapsed.toFixed(1)}s / ~${_fmtSec(expectedSec)}`);
     } else {
       setStatus(`AI (${colorName}) finalizing…`);
       if (!autoFired && socket && socket.readyState === WebSocket.OPEN) {
@@ -2793,6 +2898,8 @@ function _handleTournamentNext(msg) {
       use_llm:        $("chk-llm").checked,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
+      use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
       sentinel_gap:   $("rng-sentinel-gap")  ? parseInt($("rng-sentinel-gap").value, 10) / 100 : 0.10,
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,

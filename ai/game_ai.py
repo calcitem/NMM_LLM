@@ -329,32 +329,25 @@ def _order_moves(board: BoardState, moves: list, killers=None, history=None, _is
         p2.sort(key=lambda m: history.get((m.get("from"), m["to"]), 0), reverse=True)
     return p0 + p05 + p1 + pk + p2
 
-# Fixed-depth table for quick levels (1–4): search completes fast so no time cap needed.
-_DEPTH_TABLE = {1: 2, 2: 3, 3: 4, 4: 5}
+# Search is always depth-limited, not time-limited.
+# The first few placement-phase moves use a shallower depth to avoid horizon
+# effects on a near-empty board; depth ramps up to target by move 5.
+# (Time budgets are only used when _override_time_budget is set, e.g. bench/training.)
 
-# Iterative-deepening time budgets.
-# Difficulties 1–4 previously used fixed depth.  SE-8 search extensions and SE-9
-# quiescence can push effective depth 2–4 plies deeper than the nominal depth,
-# turning fixed-depth levels into unbounded searches.  Adding them to _TIME_LIMIT
-# caps the wall-clock cost while letting later iterations go deeper when time allows.
-_TIME_LIMIT = {
-    1: 0.3,    # ~depth 2–3; very fast
-    2: 0.8,    # ~depth 3–4; fast
-    3: 2.5,    # ~depth 4–5; moderate
-    4: 6.0,    # ~depth 5–6; standard
-    5: 15.0,
-    6: 24.0,
-    7: 36.0,
-    8: 60.0,
-    9: 60.0,
-    10: 90.0,
-}
+def _opening_ramp_depth(target: int, total_on_board: int) -> int:
+    """Return the depth to search for early placement moves.
 
-# While fewer than this many pieces are on the board in total, use a short
-# time budget regardless of difficulty — the tree is tiny and deep search wastes time.
-_EARLY_GAME_PIECE_THRESHOLD = 3   # only the first 3 placements total get the short budget
-_EARLY_GAME_TIME            = 2.0  # seconds — SE-8 extensions can push effective depth 2–4 plies
-                                   # deeper than nominal, so the budget must be tighter
+    Turns 1-2 (≤1 piece on board): cap at depth 4 — tree is tiny.
+    Turns 3-4 (2-3 pieces):        55% / 75% of target to avoid horizon effects.
+    Turn 5+ (4+ pieces):           full target depth.
+    """
+    if total_on_board <= 1:
+        return min(4, target)
+    if total_on_board == 2:
+        return max(4, round(target * 0.55))
+    if total_on_board == 3:
+        return max(4, round(target * 0.75))
+    return target
 
 
 def _is_dead_placement(board: BoardState, move: dict) -> bool:
@@ -430,7 +423,7 @@ class GameAI:
         Bad moves are drawn from the bottom quartile of legal-move scores.
     use_mcts : bool
         When True, MCTS replaces negamax for the main move decision.
-        Time budget is taken from _TIME_LIMIT[difficulty] (default 10 s).
+        Time budget for MCTS is fixed at 10 s (MCTS is not used in normal gameplay).
     value_net : ValueNet | None
         Optional trained value network passed to MCTS as the leaf evaluator.
         Loaded automatically from data/value_net.npz by the web app when present.
@@ -448,7 +441,7 @@ class GameAI:
         fullgame_db=None,           # ai.fullgame_db.FullGameDB | None
         endgame_solved_db=None,     # ai.endgame_solved_db.EndgameSolvedDB | None
         malom_db=None,              # learned_ai.sentinel.db_teacher.ExternalSolvedDB | None
-        override_time_budget: float | None = None,  # seconds; overrides _TIME_LIMIT for training
+        override_time_budget: float | None = None,  # seconds; for bench/training callers only
     ) -> None:
         self.color = color
         self.difficulty = max(1, min(10, difficulty))
@@ -466,10 +459,13 @@ class GameAI:
         self._gap_net = gap_net        # GapNet: blunder-zone exploitation (V3a)
         self._gap_leaf_cache: dict[int, int] = {}   # cleared per search
         self.use_gap_net: bool = True
+        self.use_extended_qsearch: bool = True
+        self._ngram_model = None
+        self.use_ngram_search: bool = False
         self._mcts = None
         if use_mcts:
             from .mcts import MCTS
-            time_budget = _TIME_LIMIT.get(self.difficulty, 10.0)
+            time_budget = 10.0
             self._mcts = MCTS(
                 color=color,
                 time_limit=time_budget,
@@ -1054,7 +1050,42 @@ class GameAI:
                     self.last_thinking = "endgame DB (loss/search)"
                     # fall through to heuristic search for most stubborn defence
                 elif _wdl == "D":
-                    self.last_thinking = "endgame DB (draw)"
+                    # Fast path: return any drawing (or winning) move immediately.
+                    for _move in moves:
+                        try:
+                            _succ_wdl = _esdb.query(board.apply_move(_move))
+                        except Exception:
+                            _succ_wdl = None
+                        if _succ_wdl in ("D", "L"):
+                            self.last_was_blunder = False
+                            self.last_thinking = "endgame DB (draw)"
+                            return _move
+                    # No drawing move found — fall through to search
+
+        # ── Malom perfect DB fast path ─────────────────────────────────────
+        # When Malom DB is available, query all moves for WDL+DTM and return
+        # the best one immediately.  Fastest win first (lowest DTM), then draw.
+        # Losses fall through to search for most-stubborn defence.
+        _mdb = self._malom_db
+        if (not fast_early_game
+                and _mdb is not None
+                and _mdb.is_available()
+                and self._db_active_this_move):
+            try:
+                _mdb_results = _mdb.query_all_moves(board, self.color)
+            except Exception:
+                _mdb_results = []
+            if _mdb_results:
+                _wdl_rank = {"win": 0, "draw": 1, "loss": 2, "unknown": 3}
+                _mdb_results.sort(key=lambda r: (
+                    _wdl_rank.get(r["wdl"], 3),
+                    r["dtm"] if r["dtm"] is not None else 9999,
+                ))
+                _best_mdb = _mdb_results[0]
+                if _best_mdb["wdl"] in ("win", "draw"):
+                    self.last_was_blunder = False
+                    self.last_thinking = f"Malom ({_best_mdb['wdl']})"
+                    return _best_mdb["move"]
 
         # ── Optional full-game DB consultation ────────────────────────────
         # Falls back to self._fullgame_db when no explicit parameter passed.
@@ -1288,72 +1319,39 @@ class GameAI:
 
         # MCTS path: delegate to Monte Carlo Tree Search when enabled.
         if self._mcts is not None:
-            time_budget = _TIME_LIMIT.get(self.difficulty, 10.0)
+            # MCTS uses time naturally; keep a generous budget.
+            _mcts_budget = self._override_time_budget if self._override_time_budget is not None else 30.0
             if fast_early_game:
-                time_budget = 2.0
-            deadline = time.time() + time_budget
-            return self._mcts.choose_move(board, deadline=deadline)
+                _mcts_budget = 2.0
+            return self._mcts.choose_move(board, deadline=time.time() + _mcts_budget)
 
-        # Early-game fast path: while few pieces are on the board the tree is
-        # tiny — cap the search to a short budget regardless of difficulty.
-        # Early-game cap: for time-limited difficulties only (5+), use a shorter
-        # budget before enough pieces are placed for the full time budget to be useful.
-        # Fixed-depth difficulties (1–4) don't need this; their tree is already small.
-        # Guard: never apply the early-game cap in fly phase (3v3 endgame also has
-        # < 10 pieces but needs the full time budget to find multi-move fork combinations).
-        total_on_board = sum(board.pieces_on_board.values())
+        # ── Depth-based search (no time limit in normal play) ─────────────────
+        # _override_time_budget is only set by bench/training callers that
+        # explicitly want a time cap for speed.  Normal gameplay always runs to
+        # the full target depth.
+        _time_cap: float = (
+            self._override_time_budget if self._override_time_budget is not None
+            else float("inf")  # no limit — search completes every depth iteration
+        )
+        # Pass None when there is no explicit budget so _choose_rust_scored uses
+        # its own per-depth formula (max_depth² × 300 ms, capped at 300 s).
+        # Only pass a concrete value when the caller has set a real time cap.
+        _time_ms: "int | None" = (
+            int(min(_time_cap, 3600.0) * 1000) if self._override_time_budget is not None
+            else None
+        )
+
+        # Determine search depth: ramp up during the placement phase opening
+        # to avoid horizon effects on a near-empty board.  Skipped in fast
+        # self-play mode and when a time override is active (bench/training).
         _in_placement = get_game_phase(board, board.turn) == "place"
-        if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
-                and _in_placement
-                and not fast_early_game
-                and self.difficulty in _TIME_LIMIT
-                and self._override_time_budget is None):
-            # Cap search depth for the very first placements: on a near-empty board,
-            # deep iterative deepening produces horizon effects where corner-based
-            # mill-fork patterns score artificially high, overriding the structural
-            # preference for high-mobility cardinal/cross nodes.  Depth 6 gives 3 plies
-            # per side — enough for tactical awareness without the distortion.
-            # Skipped when override_time_budget is set (training fast-mode).
-            early_max = 6 if total_on_board < 4 else 19
-            move = self._choose_rust_scored(board, early_max, recognition, trajectory_hints, moves,
-                                            time_limit_ms=int(_EARLY_GAME_TIME * 1000), top_n=top_n) \
-                or self._iterative_deepen(
-                    board, _EARLY_GAME_TIME,
-                    recognition=recognition, trajectory_hints=trajectory_hints,
-                    top_n=top_n, moves=moves,
-                    max_depth=early_max,
-                )
-            move = self._apply_sentinel_intervention(board, move, moves)
-            self._populate_thinking(board, move, _forced_block=bool(threats))
-            return move
-
-        if self.difficulty in _TIME_LIMIT:
-            _base_budget = (
-                self._override_time_budget
-                if self._override_time_budget is not None
-                else (
-                    self.time_budget_override
-                    if self.time_budget_override is not None
-                    else _TIME_LIMIT[self.difficulty]
-                )
-            )
-            time_budget = 2.0 if fast_early_game else _base_budget
-            move = self._choose_rust_scored(board, self.max_search_depth, recognition, trajectory_hints, moves,
-                                            time_limit_ms=int(time_budget * 1000), top_n=top_n) \
-                or self._iterative_deepen(
-                    board, time_budget,
-                    recognition=recognition, trajectory_hints=trajectory_hints,
-                    top_n=top_n, moves=moves,
-                    max_depth=self.max_search_depth,
-                )
-            move = self._apply_sentinel_intervention(board, move, moves)
-            self._populate_thinking(board, move, _forced_block=bool(threats))
-            return move
-
-        depth = _DEPTH_TABLE[self.difficulty]
+        total_on_board = sum(board.pieces_on_board.values())
+        if (_in_placement and not fast_early_game and self._override_time_budget is None):
+            depth = _opening_ramp_depth(self.max_search_depth, total_on_board)
+        else:
+            depth = self.max_search_depth
 
         # Deeper search in endgame for better tactical accuracy.
-        # Skip in fast self-play mode to keep per-move time bounded.
         if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
 
@@ -1390,7 +1388,13 @@ class GameAI:
             self._populate_thinking(board, move, _forced_block=bool(threats))
             return move
 
-        move, _ = self._root_search(board, depth, top_n=top_n, moves=moves)
+        move = (
+            self._choose_rust_scored(board, depth, recognition, trajectory_hints, moves,
+                                     time_limit_ms=_time_ms, top_n=top_n)
+            or self._iterative_deepen(board, _time_cap,
+                                      recognition=recognition, trajectory_hints=trajectory_hints,
+                                      top_n=top_n, moves=moves, max_depth=depth)
+        )
         move = self._apply_sentinel_intervention(board, move, moves)
         self._populate_thinking(board, move, _forced_block=bool(threats))
         return move
@@ -1454,11 +1458,7 @@ class GameAI:
 
         from game.rules import get_game_phase
         total_on_board = sum(board.pieces_on_board.values())
-        if (total_on_board < _EARLY_GAME_PIECE_THRESHOLD
-                and get_game_phase(board, board.turn) == "place"):
-            depth = 3
-        else:
-            depth = max(2, _DEPTH_TABLE.get(self.difficulty, 9) - 1)
+        depth = max(2, _opening_ramp_depth(self.max_search_depth, total_on_board) - 1)
 
         # Hard cap: score_move must finish within _SCORE_TIME seconds.
         self._deadline = time.time() + self._SCORE_TIME
@@ -1937,6 +1937,15 @@ class GameAI:
                 board, min_samples=3
             ) or None
 
+        # NGram opponent model: predict likely human moves at first opponent ply only.
+        _ngram_probs: dict = {}
+        if (is_opp_node and opp_plies_left == self._opp_plies_budget
+                and self.use_ngram_search and self._ngram_model is not None):
+            try:
+                _ngram_probs = self._ngram_model.predict(board.turn, self._move_path_buf) or {}
+            except Exception:
+                _ngram_probs = {}
+
         # SE-14: Promote DB hint to front (done before TT so TT gets final priority).
         if _db14_best_move is not None:
             for i, m in enumerate(moves):
@@ -1994,10 +2003,13 @@ class GameAI:
             _mv_notation = self._move_notation(move)
 
             # SE-11b: extend by 1 for high-frequency opponent moves (first 2 opponent plies).
+            # NGram also contributes: extend if opponent is likely to play this move (≥25% prob).
             _se11_ext = 0
             if is_opp_node and _opp_freq is not None:
                 if _opp_freq.get(_mv_notation, 0.0) >= 0.5:
                     _se11_ext = 1
+            if is_opp_node and not _se11_ext and _ngram_probs.get(_mv_notation, 0.0) >= 0.25:
+                _se11_ext = 1
 
             # SE-11b: push move to shared path buffer so deeper trajectory/VN nodes see full history.
             if _do_path:
@@ -2067,7 +2079,7 @@ class GameAI:
 
     def _qsearch(self, board: BoardState, q_depth: int, alpha: int, beta: int,
                  endgame_state=None, moves: list | None = None) -> int:
-        """SE-9: Quiescence search — extend only capturing moves to resolve tactical noise."""
+        """SE-9: Quiescence search — captures always; mill threats + forced blocks when use_extended_qsearch."""
         self._nodes += 1
         if self._nodes & 0xFFF == 0 and time.time() >= self._deadline:
             raise _SearchAbort()
@@ -2089,9 +2101,46 @@ class GameAI:
 
         if moves is None:
             moves = get_all_legal_moves(board)
+
+        mover = board.turn
+        opp = "B" if mover == "W" else "W"
+
         for move in moves:
-            if not move.get("capture"):
+            if move.get("capture"):
+                pass  # always search captures
+            elif self.use_extended_qsearch:
+                to = move.get("to")
+                if to is None:
+                    continue
+                from_pos = move.get("from")
+                tactical = False
+                for _ml in MILLS:
+                    if to not in _ml:
+                        continue
+                    # Forced block: opponent has 2 in this line, 'to' is the empty completer
+                    if (board.positions[to] == ""
+                            and sum(1 for p in _ml if board.positions[p] == opp) == 2):
+                        tactical = True
+                        break
+                    # Mill threat: after the move, mover has 2 in line + 1 empty
+                    cnt_m = cnt_e = 0
+                    for p in _ml:
+                        if p == to:
+                            cnt_m += 1
+                        elif from_pos and p == from_pos:
+                            cnt_e += 1
+                        elif board.positions[p] == mover:
+                            cnt_m += 1
+                        elif board.positions[p] == "":
+                            cnt_e += 1
+                    if cnt_m == 2 and cnt_e == 1:
+                        tactical = True
+                        break
+                if not tactical:
+                    continue
+            else:
                 continue
+
             nb = board.apply_move(move)
             score = -self._qsearch(nb, q_depth - 1, -beta, -alpha, endgame_state)
             if score >= beta:

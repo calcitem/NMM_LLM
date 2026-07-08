@@ -50,10 +50,12 @@ cd "$NMM_DIR"
 "$VENV_UV" web.app:app --host "$HOST" --port "$PORT" --reload &
 SERVER_PID=$!
 
-# Wait for the server to be ready
-for i in $(seq 1 20); do
+# Wait for the server to be ready (poll /api/ping; -f fails on HTTP error codes)
+info "Waiting for server to be ready..."
+for i in $(seq 1 60); do
     sleep 0.5
-    curl -s "$URL" &>/dev/null && break
+    curl -sf "$URL/api/ping" &>/dev/null && break
+    [ "$i" -eq 60 ] && warn "Server took too long to respond — opening browser anyway."
 done
 
 # ── Open browser ──────────────────────────────────────────────────────────────

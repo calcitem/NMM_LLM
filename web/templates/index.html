@@ -168,6 +168,7 @@
         <div id="think-bar-fill"></div>
       </div>
       <div id="ply-progress" style="font-size:.75rem;color:#888;text-align:center;min-height:1.2em;margin-top:2px"></div>
+      <div id="think-time-info" style="font-size:.8rem;color:#aaa;text-align:center;min-height:1.3em;margin-top:1px;font-variant-numeric:tabular-nums"></div>
     </div>
 
     <!-- Right column: moves list, status badge, game info, settings -->
@@ -369,6 +370,25 @@
             <span style="font-size:.75rem; color:var(--text-dim);">(exploit human blunder patterns)</span>
           </label>
         </div>
+        <div id="row-gap-sentinel-warning" style="display:none; font-size:.75rem; color:#c8883a; padding:3px 0 2px 2px;">
+          &#9888; Sentinel + Gap exploitation together can degrade play at lower difficulties — consider disabling one.
+        </div>
+
+        <div class="form-row" id="row-ext-qsearch" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-ext-qsearch" checked>
+          <label for="chk-ext-qsearch" style="color:var(--text); font-size:.9rem;">
+            Extended tactical search
+            <span style="font-size:.75rem; color:var(--text-dim);">(mill threats + forced blocks at leaf nodes)</span>
+          </label>
+        </div>
+
+        <div class="form-row" id="row-ngram" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-ngram">
+          <label for="chk-ngram" style="color:var(--text); font-size:.9rem;">
+            NGram opponent model
+            <span style="font-size:.75rem; color:var(--text-dim);">(search likely human responses deeper)</span>
+          </label>
+        </div>
 
         <div class="form-row" id="row-overseer" style="flex-direction:row; align-items:center; gap:8px; display:none">
           <input type="checkbox" id="chk-overseer" disabled>
@@ -414,7 +434,7 @@
             <button id="btn-save-search-depth" class="btn-small" style="font-size:.75rem;">Save</button>
           </div>
           <div style="font-size:.75rem; color:var(--text-dim); margin-bottom:2px;">
-            Controls max search depth for difficulty levels 1–8. Levels 9–10 use extended time budgets.
+            Controls max search depth for difficulty levels 1–8. All levels run to full depth — lower difficulty for faster games.
           </div>
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1; display:flex; flex-direction:column; gap:2px;">

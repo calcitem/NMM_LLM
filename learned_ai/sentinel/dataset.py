@@ -83,18 +83,19 @@ def _enumerate_legal_moves(board: BoardState, player: str) -> List[Dict[str, Any
 def _heuristic_scores(board: BoardState, moves: List[Dict[str, Any]], player: str) -> List[float]:
     """Heuristic score (mover's perspective) of the board after each move.
 
-    Falls back to a flat 0.0 list when the heuristic is unavailable so the
-    dataset still builds (weak labels then default to 0.5).
+    Uses evaluate_v2 (the current fast leaf evaluator). Returns raw integer
+    scores; _normalise_scores() does min-max across candidates so scale is
+    irrelevant. Falls back to a flat 0.0 list when the heuristic is unavailable.
     """
     try:
-        from ai.heuristics import evaluate
+        from ai.heuristics import evaluate_v2
     except Exception:
         return [0.0] * len(moves)
     scores: List[float] = []
     for mv in moves:
         try:
             after = board.apply_move(mv)
-            scores.append(float(evaluate(after, player, strength_mode=True)))
+            scores.append(float(evaluate_v2(after, player)))
         except Exception:
             scores.append(0.0)
     return scores

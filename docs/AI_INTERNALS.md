@@ -1064,14 +1064,15 @@ Live assessment of how often the sentinel would have intervened against itself:
 | `critical_miss` | % of positions (win available) where sentinel ranks a loss #1 | < 15% |
 | `spearman_r` | Move ranking correlation with DTM quality | limited by features |
 
-**Current Stage 4+5 results:**
+**Known results:**
 
-| Checkpoint | win_acc | loss_acc | top1_win_rate | critical_miss | spearman_r |
-|------------|---------|----------|---------------|---------------|------------|
-| Stage 3 (leaky — do not use) | ~85% | ~65% | ~76% | ~20% | ~0.10 |
-| Stage 4+5 | 41.6% | 64.9% | 76.5% | 20.0% | 0.10 |
+| Checkpoint | win_acc | loss_acc | top1_win_rate | critical_miss | spearman_r | Notes |
+|------------|---------|----------|---------------|---------------|------------|-------|
+| Stage 3 (leaky — do not use) | ~85% | ~65% | ~76% | ~20% | ~0.10 | DB feature leakage — do not use |
+| Stage 4+5 | 41.6% | 64.9% | 76.5% | 20.0% | 0.10 | Previous production baseline |
+| **v2 (current best)** | — | — | — | — | — | **Trained July 2026. Game-play benchmark (100 games, diff=4): v2 at scale=0.20 scored 55.0% vs 53.8%/52.5% for old at scale=0.30/0.20 and 46.2% for Base. Use scale=0.20 — scale=0.30 is overtuned (42.5%, below Base).** |
 
-win_acc is lower than the leaky model because the network no longer reads feat[57] (the training label) at inference. top1_win_rate — the actionable game-play metric — is equivalent.
+win_acc is lower than the leaky model because the network no longer reads feat[57] (the training label) at inference. top1_win_rate — the actionable game-play metric — is equivalent. The v2 model outperforms Stage 4+5 at `score_adjust_scale=0.20`; see `sentinel_overview.md` for the full tournament table and deployment instructions.
 
 **Game-play benchmark:**
 
@@ -1111,6 +1112,65 @@ Restart the Flask server to pick up the new checkpoint (loaded once at startup).
 ### Graceful degradation
 
 If `best.pt` is missing or PyTorch is not installed, the sentinel silently disables itself at startup. The game runs identically.
+
+---
+
+## 9. GapNet — Blunder-Zone Leaf Correction (V3a)
+
+GapNet is an asymmetric leaf-score correction applied inside `_negamax` at depth==0, exclusively on the AI's own nodes. It uses the same `ValueNet` architecture (`data/gap_net.npz`) but is trained on a different target signal: the **opportunity gap** — the difference between the best available move quality (from the Malom DB) and the weighted quality of human moves actually played. A high GapNet output means the current position is one where humans systematically err.
+
+### How it works
+
+At every leaf node where `board.turn == self.color`, `human_correction()` in `ai/heuristics.py` adds a bonus to the heuristic score:
+
+```
+gap   = (gap_net.predict(board, color) + 1) / 2     # tanh → (0, 1)
+bonus = γ × gap × GAP_SCALE                         # GAP_SCALE = 3000
+E_final = E_v2 + bonus
+```
+
+`γ` is a per-phase cap from `HeuristicWeights` (placement 12%, move 20%, fly 5%). The correction is suppressed when `gap < 0.02` (near-neutral positions) and fly-phase bonuses are additionally capped at `0.3 × γ × GAP_SCALE`.
+
+The asymmetry is intentional: opponent nodes use the unmodified `E_v2`. This gives the AI a preference for positions where the opponent is statistically likely to make errors, without distorting the opponent's half of the search tree — the same pattern used by Stockfish's optimism term.
+
+### Files
+
+| File | Role |
+|------|------|
+| `data/gap_net.npz` | Trained GapNet weights (ValueNet architecture) |
+| `ai/heuristics.py` | `human_correction()` function |
+| `ai/game_ai.py` | `self._gap_net`, `self.use_gap_net`, leaf correction call (~line 1828) |
+| `web/app.py` | Loads from `data/gap_net.npz` at startup, passed to every `GameAI` constructor |
+| `tools/train_gap_net.py` | Training script |
+
+### Benchmark results (July 2026)
+
+50-game round-robin at d2, 3 s budget. `@20%` means `gap_blend_move=20` (the default). Sentinel@20% uses the v2 sentinel at `score_adjust_scale=0.20`.
+
+| Config | W | L | D | Win% |
+|--------|---|---|---|------|
+| **GapNet** | **91** | **38** | **10** | **65.5%** |
+| Baseline | 78 | 46 | 13 | 56.9% |
+| Sentinel@20% | 24 | 63 | 31 | 20.3% |
+| Sen+Gap@20% | 16 | 62 | 36 | 14.0% |
+
+**Head-to-head (row beats col, out of 50 games):**
+
+| | Baseline | Sentinel@20% | GapNet | Sen+Gap@20% |
+|---|---|---|---|---|
+| Baseline | — | 31 | 19 | 28 |
+| Sentinel@20% | 11 | — | 13 | 0 |
+| **GapNet** | **25** | **32** | — | **34** |
+| Sen+Gap@20% | 10 | 0 | 6 | — |
+
+**Key findings:**
+
+- **GapNet alone is the strongest config at d2** (+8.6 pp over baseline). It consistently beats both sentinel configurations and baseline.
+- **Sentinel@20% is harmful at d2** (20.3%, far below baseline). At shallow depth the sentinel's move overrides often contradict sound engine play — the sentinel was calibrated at d4 where the engine's base choices are already stronger.
+- **Sen+Gap combination is the worst config** — the two corrections compound each other's errors at this depth. Do not combine at d2.
+- The depth-sensitivity contrast with the sentinel benchmark (where NewS20 won at d4) suggests GapNet is more robust at lower depths while the sentinel needs sufficient engine depth to be net-positive.
+
+**Recommended usage:** GapNet on by default (it is). Sentinel in `score_adjust` mode at scale=0.20 for d4+ only. Neither correction should be stacked at d2.
 
 ---
 

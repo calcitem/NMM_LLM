@@ -783,6 +783,21 @@ async def _startup_malom_deferred():
     _threading.Thread(target=_init_and_prewarm, daemon=True).start()
 
 
+_server_ready = False
+
+@app.on_event("startup")
+async def _mark_server_ready():
+    global _server_ready
+    _server_ready = True
+
+@app.get("/api/ping")
+async def ping():
+    """Health-check — returns 200 only after all startup tasks have run."""
+    from fastapi.responses import JSONResponse
+    if not _server_ready:
+        return JSONResponse({"ok": False}, status_code=503)
+    return JSONResponse({"ok": True})
+
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {"v": _static_ver()})
@@ -822,14 +837,13 @@ def _time_budget_for_depth(d: int) -> float:
     return min(120.0, 0.065 * (1.66 ** d))
 
 def _apply_search_depth(game_ai) -> None:
-    """Set game_ai.max_search_depth and time_budget_override from settings.json."""
+    """Set game_ai.max_search_depth from settings.json. No time limit — search runs to full depth."""
     settings = _load_settings()
     sd = settings.get("search_depth", _SEARCH_DEPTH_DEFAULTS)
     min_d = int(sd.get("min", _SEARCH_DEPTH_DEFAULTS["min"]))
     max_d = int(sd.get("max", _SEARCH_DEPTH_DEFAULTS["max"]))
     max_depth = _compute_search_depth_for_level(game_ai.difficulty, min_d, max_d)
     game_ai.max_search_depth = max_depth
-    game_ai.time_budget_override = _time_budget_for_depth(max_depth)
     game_ai.search_threads = max(1, int(settings.get("search_threads", 1)))
 
 @app.get("/api/search_depth")
@@ -853,6 +867,21 @@ async def save_search_depth(request: Request):
     settings["search_depth"] = {"min": min_d, "max": max_d}
     _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
     return JSONResponse({"ok": True, "min": min_d, "max": max_d})
+
+
+@app.get("/api/ui_prefs")
+async def get_ui_prefs():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(_load_settings().get("ui_prefs", {}))
+
+@app.post("/api/ui_prefs")
+async def save_ui_prefs(request: Request):
+    from fastapi.responses import JSONResponse
+    body = await request.json()
+    settings = _load_settings()
+    settings["ui_prefs"] = body
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/vn_status")
@@ -2641,22 +2670,22 @@ async def _run_ai_vs_ai_loop(ws: WebSocket, session: Session) -> None:
 
 
 def _expected_think_seconds(difficulty: int, total_pieces: int) -> float:
-    if total_pieces < 3:
-        return 4.0
-    # Time-limited levels: return the actual budget so the UI countdown matches.
-    budgets = {5: 12, 6: 18, 7: 20, 8: 30, 9: 40, 10: 60}
-    if difficulty in budgets:
-        return float(budgets[difficulty])
-    # Fixed-depth levels (1–4): generous estimate so force_move doesn't fire mid-search.
-    estimates = {1: 3, 2: 3, 3: 6, 4: 9}
-    return float(estimates.get(difficulty, 5))
+    """Estimate search time based on configured depth for this difficulty level."""
+    settings = _load_settings()
+    sd = settings.get("search_depth", _SEARCH_DEPTH_DEFAULTS)
+    min_d = int(sd.get("min", _SEARCH_DEPTH_DEFAULTS["min"]))
+    max_d = int(sd.get("max", _SEARCH_DEPTH_DEFAULTS["max"]))
+    depth = _compute_search_depth_for_level(difficulty, min_d, max_d)
+    # Benchmarked on representative positions (move phase = slower bound).
+    _DEPTH_TIMES = {
+        4: 2, 5: 4, 6: 13, 7: 15, 8: 45, 9: 120, 10: 300,
+        11: 900, 12: 2700, 13: 7200, 14: 21600, 15: 64800, 16: 194400,
+    }
+    return float(_DEPTH_TIMES.get(depth, 60))
 
 
 # Typical max search depth reachable at each time-limited difficulty.
 # Used to compute the ply-progress percentage shown in the UI.
-_EXPECTED_MAX_DEPTH = {5: 8, 6: 9, 7: 9, 8: 10, 9: 11, 10: 12}
-
-
 def _nollm_choose_move(session: Session, board: BoardState) -> dict:
     """Choose a move on the no-LLM path with opening + trajectory guidance (B-65)."""
     game_ai = session.game_ai
@@ -2772,24 +2801,17 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     diff  = session.game_ai.difficulty if session.game_ai else 3
     total = sum(board.pieces_on_board.values())
 
-    # Graduated time budget: turn 3 = 50%, turn 4 = 75%, turn 5+ = 100%.
     _moves_played = len(session.engine.game_record.get("moves", []))
     _turn_num = _moves_played + 1
-    _budget_frac = 0.5 if _turn_num == 3 else (0.75 if _turn_num == 4 else 1.0)
-
-    # Early-game depth cap: AI's own turn number (1-indexed).
-    # AI is Black (human W first): ai_turn = (moves_played+1)//2
-    # AI is White (AI goes first):  ai_turn = moves_played//2 + 1
     _ai_turn_num = (
         (_moves_played + 1) // 2 if session.human_color == "W"
         else _moves_played // 2 + 1
     )
-    _depth_cap = 9 if _ai_turn_num <= 3 else (11 if _ai_turn_num == 4 else None)
 
-    exp   = _expected_think_seconds(diff, total) * _budget_frac
+    exp   = _expected_think_seconds(diff, total)
     max_depth_exp = getattr(session.game_ai, "max_search_depth", 0) if session.game_ai else 0
-    log.info("AI turn start  color=%s diff=%s total_pieces=%s turn=%d ai_turn=%d depth_cap=%s",
-             board.turn, diff, total, _turn_num, _ai_turn_num, _depth_cap)
+    log.info("AI turn start  color=%s diff=%s total_pieces=%s turn=%d ai_turn=%d",
+             board.turn, diff, total, _turn_num, _ai_turn_num)
     await _send(ws, {
         "type":              "thinking",
         "color":             board.turn,
@@ -2810,23 +2832,6 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         if _ponder_result is not None:
             _ponder_hit, _ponder_ai_done = _ponder_result
 
-    # Apply fractional budget and early-game depth cap; both restored in finally.
-    _orig_budget = None
-    _orig_depth  = None
-    if session.game_ai:
-        if _depth_cap is not None:
-            _orig_depth = session.game_ai.max_search_depth
-            if _orig_depth > _depth_cap:
-                session.game_ai.max_search_depth = _depth_cap
-                # Also tighten the time budget to match the shallower depth.
-                session.game_ai.time_budget_override = (
-                    _time_budget_for_depth(_depth_cap) * _budget_frac
-                )
-                _orig_budget = None  # already baked budget_frac in above
-        if _orig_depth is None and _budget_frac < 1.0 and session.game_ai.time_budget_override is not None:
-            _orig_budget = session.game_ai.time_budget_override
-            session.game_ai.time_budget_override = _orig_budget * _budget_frac
-
     t0 = _time.time()
     try:
         if _ponder_hit is not None:
@@ -2834,9 +2839,8 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
                 # B-94: deepen on pre-warmed TT from completed ponder search.
                 _ponder_ai_done._force_stop = False
                 _ponder_ai_done._deadline   = float("inf")
-                _deepen_budget = min(3.0, exp * 0.3)
                 move = await asyncio.to_thread(
-                    _ponder_ai_done._iterative_deepen, board, _deepen_budget
+                    _ponder_ai_done._iterative_deepen, board, 30.0
                 )
             else:
                 move = _ponder_hit
@@ -2850,14 +2854,6 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
     except Exception as exc:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
-    finally:
-        if session.game_ai:
-            if _orig_depth is not None:
-                session.game_ai.max_search_depth = _orig_depth
-                # Restore original time budget (depth-derived, pre-cap).
-                session.game_ai.time_budget_override = _time_budget_for_depth(_orig_depth)
-            elif _orig_budget is not None:
-                session.game_ai.time_budget_override = _orig_budget
 
     # Overseer player mode: replace engine's choice with policy-network argmax.
     if session.use_overseer_player and _overseer_advisor is not None and _overseer_advisor.is_loaded():
@@ -3177,6 +3173,8 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))  # min opportunity gap to intercede
                 use_gap_net    = bool(msg.get("use_gap_net", True))
+                use_extended_qsearch = bool(msg.get("use_extended_qsearch", True))
+                use_ngram_search = bool(msg.get("use_ngram_search", False))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
                 use_overseer_player = bool(msg.get("use_overseer_player", False))
@@ -3253,6 +3251,9 @@ async def ws_endpoint(websocket: WebSocket):
                         game_ai._sentinel_reconsider_threshold = sentinel_gap
                         log.info("Sentinel attached (diff=%d, mode=%s, gap≥%.0f%%)", eff_diff, sentinel_mode, sentinel_gap * 100)
                     game_ai.use_gap_net = use_gap_net and _gap_net is not None
+                    game_ai.use_extended_qsearch = use_extended_qsearch
+                    game_ai.use_ngram_search = use_ngram_search
+                    game_ai._ngram_model = _ngram_model if use_ngram_search else None
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")
@@ -3322,6 +3323,8 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))
                 use_gap_net    = bool(msg.get("use_gap_net", True))
+                use_extended_qsearch = bool(msg.get("use_extended_qsearch", True))
+                use_ngram_search = bool(msg.get("use_ngram_search", False))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
                 use_overseer_player = bool(msg.get("use_overseer_player", False))
@@ -3399,6 +3402,9 @@ async def ws_endpoint(websocket: WebSocket):
                         game_ai._sentinel_reconsider_threshold = sentinel_gap
                         log.info("Sentinel attached (diff=%d, mode=%s, gap≥%.0f%%)", diff, sentinel_mode, sentinel_gap * 100)
                     game_ai.use_gap_net = use_gap_net and _gap_net is not None
+                    game_ai.use_extended_qsearch = use_extended_qsearch
+                    game_ai.use_ngram_search = use_ngram_search
+                    game_ai._ngram_model = _ngram_model if use_ngram_search else None
 
                     if use_llm:
                         url   = settings.get("ollama_url",   "http://localhost:11434")
