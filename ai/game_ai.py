@@ -1505,6 +1505,12 @@ class GameAI:
             adjusted.append((move, raw + bonus))
         return adjusted
 
+    def _vn_active(self, board: "BoardState") -> bool:
+        """Value net is suppressed during early placement (< 10 pieces on board)."""
+        return (self._value_net is not None
+                and self._weights.value_net_blend > 0
+                and sum(board.pieces_on_board.values()) >= 10)
+
     def _apply_vn_blend(
         self,
         scored: list[tuple[dict, int]],
@@ -1516,6 +1522,8 @@ class GameAI:
         (~5–25 calls × 13µs = <1ms). Terminal scores (|s| >= INF/2) are
         preserved unchanged so mate distances aren't distorted.
         """
+        if not self._vn_active(board):
+            return scored
         blend = self._weights.value_net_blend / 100.0
         adjusted = []
         for move, raw in scored:
@@ -1811,7 +1819,7 @@ class GameAI:
                 else:
                     heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
             # B-73: symmetric value-net blend (currently disabled; kept for future use)
-            if self._value_net is not None and self._weights.value_net_blend > 0:
+            if self._vn_active(board):
                 vn_raw = self._value_net.predict(board, board.turn)  # (-1, 1)
                 vn_score = int(vn_raw * _VN_SCALE)
                 blend = self._weights.value_net_blend / 100.0
@@ -1962,7 +1970,7 @@ class GameAI:
         # so LMR reduces the moves the opponent is least likely to play strongly.
         # Gated to first opponent ply only (opp_plies_left == self._opp_plies_budget) to contain overhead.
         if (is_opp_node and opp_plies_left == self._opp_plies_budget
-                and self._value_net is not None and depth >= 3 and len(moves) > 2):
+                and self._vn_active(board) and depth >= 3 and len(moves) > 2):
             _vn_n = len(moves)
             _vn_lmr_s = _vn_n - int(_vn_n * 0.6)
             if _vn_n - _vn_lmr_s > 1:
@@ -2270,7 +2278,7 @@ class GameAI:
         )
 
         prev_score: int | None = None
-        _vn_blend_active = self._value_net is not None and self._weights.value_net_blend > 0
+        _vn_blend_active = self._vn_active(board)
         use_adjustments = use_adjustments or _vn_blend_active
 
         last_completed_depth = 1
