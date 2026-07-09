@@ -3762,7 +3762,7 @@ async def ws_endpoint(websocket: WebSocket):
                                         {"from": None, "to": None, "capture": cap_pos})
                                     res_ml = _malom_db.query(after_ml)
                                     if res_ml:
-                                        eg_flags[cap_pos] = _flip.get(res_ml)
+                                        eg_flags[cap_pos] = _flip.get(res_ml["outcome"])
                                 except Exception:
                                     pass
                     else:
@@ -3778,7 +3778,7 @@ async def ws_endpoint(websocket: WebSocket):
                                 after_ml = diag_board.apply_move(mv_ml)
                                 res_ml = _malom_db.query(after_ml)
                                 if res_ml:
-                                    eg_flags[ntn_ml] = _flip.get(res_ml)
+                                    eg_flags[ntn_ml] = _flip.get(res_ml["outcome"])
                             except Exception:
                                 pass
 
