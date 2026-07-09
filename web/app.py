@@ -57,7 +57,7 @@ from ai.ngram_opponent_model import NGramOpponentModel
 from ai.endgame_db import EndgameDB
 from ai.fullgame_db import FullGameDB
 from ai.endgame_solved_db import EndgameSolvedDB
-from ai.value_net import ValueNet
+from ai.value_net import ValueNet, PhaseValueNet
 from ai.starting_play import combined_family_summary
 from ai.ponder import PonderManager
 from ai.player_profile import PlayerProfile, load_profile, save_profile, is_valid_name
@@ -229,13 +229,21 @@ else:
     log.info("EndgameSolvedDB: not found at %s", _esdb_dir)
 
 # Load value network — optional; has no effect unless value_net_blend > 0 in weights.
+# Prefer PhaseValueNet (data/value_net_phase_{place,move,fly}.npz) if all three exist;
+# fall back to single ValueNet (data/value_net.npz).
+_phase_vn_base = _ROOT / "data" / "value_net_phase"
 _value_net_path = _ROOT / "data" / "value_net.npz"
-_value_net: "ValueNet | None" = ValueNet.load_if_exists(_value_net_path)
-if _value_net is not None:
+_value_net: "PhaseValueNet | ValueNet | None" = (
+    PhaseValueNet.load_if_exists(_phase_vn_base)
+    or ValueNet.load_if_exists(_value_net_path)
+)
+if isinstance(_value_net, PhaseValueNet):
+    log.info("ValueNet: loaded PhaseValueNet from %s_{place,move,fly}.npz", _phase_vn_base)
+elif _value_net is not None:
     _vn_size_kb = round(_value_net_path.stat().st_size / 1024, 1)
     log.info("ValueNet: loaded from %s (%s KB)", _value_net_path, _vn_size_kb)
 else:
-    log.info("ValueNet: not found at %s", _value_net_path)
+    log.info("ValueNet: not found at %s or %s_*.npz", _value_net_path, _phase_vn_base)
 
 # Load gap network — blunder-zone exploitation (V3a). Optional.
 from ai.value_net import ValueNet as _GapNetCls
@@ -3173,6 +3181,7 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")  # "advisory"|"score_adjust"|"reconsider"
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))  # min opportunity gap to intercede
                 use_gap_net    = bool(msg.get("use_gap_net", True))
+                gap_net_blend  = max(0, min(100, int(msg.get("gap_net_blend", 100))))
                 use_extended_qsearch = bool(msg.get("use_extended_qsearch", True))
                 use_ngram_search = bool(msg.get("use_ngram_search", False))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
@@ -3196,6 +3205,7 @@ async def ws_endpoint(websocket: WebSocket):
                         _aw = {**_evolved_weights, **_p_w, **settings.get("ai_weights", {}),
                                **(msg.get("ai_weights") or {})}
                     def _w(key, default): return int(_aw.get(key, default))
+                    _gap_scale = gap_net_blend / 100.0
                     _hw      = HeuristicWeights(
                         close_mill=_w("close_mill", 500),
                         cycling_mill=_w("cycling_mill", 300),
@@ -3215,6 +3225,9 @@ async def ws_endpoint(websocket: WebSocket):
                         opening_adherence=_w("opening_adherence", 50),
                         value_net_blend=_w("value_net_blend", 80),
                         cross_mill_cycling=_w("cross_mill_cycling", 300),
+                        gap_blend_place=round(12 * _gap_scale),
+                        gap_blend_move=round(20 * _gap_scale),
+                        gap_blend_fly=round(5 * _gap_scale),
                     )
                     base_blunder = _hw.make_mistakes / 100.0
                     game_ai  = GameAI(
@@ -3323,6 +3336,7 @@ async def ws_endpoint(websocket: WebSocket):
                 sentinel_mode  = msg.get("sentinel_mode", "advisory")
                 sentinel_gap   = float(msg.get("sentinel_gap", 0.10))
                 use_gap_net    = bool(msg.get("use_gap_net", True))
+                gap_net_blend  = max(0, min(100, int(msg.get("gap_net_blend", 100))))
                 use_extended_qsearch = bool(msg.get("use_extended_qsearch", True))
                 use_ngram_search = bool(msg.get("use_ngram_search", False))
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
@@ -3352,6 +3366,7 @@ async def ws_endpoint(websocket: WebSocket):
                     ai_color = "B" if hc == "W" else "W"
                     _aw = msg.get("ai_weights") or {}
                     def _w(key, default): return int(_aw.get(key, default))
+                    _gap_scale = gap_net_blend / 100.0
                     _hw = HeuristicWeights(
                         close_mill=_w("close_mill", 500),
                         cycling_mill=_w("cycling_mill", 300),
@@ -3371,6 +3386,9 @@ async def ws_endpoint(websocket: WebSocket):
                         opening_adherence=_w("opening_adherence", 50),
                         value_net_blend=_w("value_net_blend", 80),
                         cross_mill_cycling=_w("cross_mill_cycling", 300),
+                        gap_blend_place=round(12 * _gap_scale),
+                        gap_blend_move=round(20 * _gap_scale),
+                        gap_blend_fly=round(5 * _gap_scale),
                     )
                     game_ai = GameAI(
                         color=ai_color, difficulty=diff, weights=_hw,

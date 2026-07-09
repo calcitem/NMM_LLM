@@ -370,8 +370,30 @@
             <span style="font-size:.75rem; color:var(--text-dim);">(exploit human blunder patterns)</span>
           </label>
         </div>
+        <div id="row-gap-net-blend" style="display:flex; flex-direction:column; gap:3px; padding-left:24px; margin-bottom:2px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="rng-gap-net-blend" style="font-size:.82rem; color:var(--text-dim);">Strength %</label>
+            <span id="lbl-gap-net-blend" style="font-size:.82rem; font-weight:600; min-width:2.8em; text-align:right;">100%</span>
+          </div>
+          <input type="range" id="rng-gap-net-blend" min="0" max="100" step="5" value="100" style="width:100%">
+        </div>
         <div id="row-gap-sentinel-warning" style="display:none; font-size:.75rem; color:#c8883a; padding:3px 0 2px 2px;">
           &#9888; Sentinel + Gap exploitation together can degrade play at lower difficulties — consider disabling one.
+        </div>
+
+        <div class="form-row" id="row-value-net" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-value-net" checked>
+          <label for="chk-value-net" style="color:var(--text); font-size:.9rem;">
+            Value network
+            <span style="font-size:.75rem; color:var(--text-dim);">(trained position evaluator)</span>
+          </label>
+        </div>
+        <div id="row-value-net-blend" style="display:flex; flex-direction:column; gap:3px; padding-left:24px; margin-bottom:2px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="rng-value-net-blend" style="font-size:.82rem; color:var(--text-dim);">Blend %</label>
+            <span id="lbl-value-net-blend" style="font-size:.82rem; font-weight:600; min-width:2.8em; text-align:right;">80%</span>
+          </div>
+          <input type="range" id="rng-value-net-blend" min="0" max="100" step="5" value="80" style="width:100%">
         </div>
 
         <div class="form-row" id="row-ext-qsearch" style="flex-direction:row; align-items:center; gap:8px;">

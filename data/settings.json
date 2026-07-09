@@ -50,7 +50,21 @@
   },
   "search_depth": {
     "min": 3,
-    "max": 15
+    "max": 17
   },
-  "search_threads": 2
+  "search_threads": 2,
+  "ui_prefs": {
+    "sel-opponent": "ai",
+    "sel-human-color": "R",
+    "sel-game-personality": "balanced",
+    "sel-difficulty": "6",
+    "chk-llm": false,
+    "chk-sentinel": true,
+    "sel-sentinel-mode": "score_adjust",
+    "rng-sentinel-gap": "20",
+    "chk-gap-net": true,
+    "chk-ext-qsearch": false,
+    "chk-ngram": true,
+    "chk-perfect-db": false
+  }
 }

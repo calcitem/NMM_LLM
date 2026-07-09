@@ -5,6 +5,10 @@ Predicts a win-probability-style value for a board state from a given color's
 perspective.  Uses numpy only — no deep-learning framework required.
 
 Architecture: 79-input → 128 ReLU → 64 ReLU → 1 tanh
+
+PhaseValueNet wraps three ValueNet instances (one per game phase) and dispatches
+predict() calls based on get_game_phase(board, color).  Files are stored as:
+  {base}_place.npz, {base}_move.npz, {base}_fly.npz
 """
 
 from __future__ import annotations
@@ -183,3 +187,58 @@ class ValueNet:
         if p.exists():
             return cls.load(p)
         return None
+
+
+_PHASES = ("place", "move", "fly")
+
+
+class PhaseValueNet:
+    """Three phase-specific ValueNets dispatched at inference by game phase.
+
+    Files: {base}_place.npz, {base}_move.npz, {base}_fly.npz
+    Drop-in replacement for ValueNet anywhere predict(board, color) is called.
+    """
+
+    def __init__(self, place_net: ValueNet, move_net: ValueNet, fly_net: ValueNet) -> None:
+        self._nets: dict[str, ValueNet] = {
+            "place": place_net,
+            "move":  move_net,
+            "fly":   fly_net,
+        }
+
+    def _net_for(self, board: BoardState, color: str) -> ValueNet:
+        from game.rules import get_game_phase
+        phase = get_game_phase(board, color)
+        return self._nets.get(phase, self._nets["move"])
+
+    def predict(self, board: BoardState, color: str) -> float:
+        return self._net_for(board, color).predict(board, color)
+
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Offline eval only — uses move-phase net (features have no phase marker)."""
+        return self._nets["move"].predict_batch(X)
+
+    def save(self, base: str | Path) -> None:
+        """Save all three phase nets.  base should not have an extension."""
+        b = Path(base)
+        for phase, net in self._nets.items():
+            net.save(b.parent / f"{b.stem}_{phase}.npz")
+
+    @classmethod
+    def load(cls, base: str | Path) -> "PhaseValueNet":
+        b = Path(base)
+        nets = {phase: ValueNet.load(b.parent / f"{b.stem}_{phase}.npz")
+                for phase in _PHASES}
+        return cls(nets["place"], nets["move"], nets["fly"])
+
+    @classmethod
+    def load_if_exists(cls, base: str | Path) -> Optional["PhaseValueNet"]:
+        """Return a PhaseValueNet only if ALL three phase files exist."""
+        b = Path(base)
+        paths = [b.parent / f"{b.stem}_{phase}.npz" for phase in _PHASES]
+        if not all(p.exists() for p in paths):
+            return None
+        try:
+            return cls.load(b)
+        except Exception:
+            return None

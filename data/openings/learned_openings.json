@@ -8013,5 +8013,269 @@
     "source_reference": "",
     "needs_llm_name": true,
     "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-7cbbd65f",
+    "name": "Novel — d1-d6-f4 Var. d1-d6-f4",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d1",
+      "d6",
+      "f4",
+      "b4",
+      "d3",
+      "d2",
+      "f6",
+      "f2",
+      "b2",
+      "g4",
+      "d7",
+      "g7",
+      "g1",
+      "a1",
+      "c4",
+      "e5",
+      "c5",
+      "c3"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".....W...B.W...B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".....W...B.W.B.B.....W..|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".....W...BWWBB.B.....W..|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "...B.W...BWWBBWB.....W..|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-17270422",
+    "name": "Novel — d6-b6-f2 Var. d6-b6-f2",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "b6",
+      "f2",
+      "d7",
+      "c3",
+      "d1",
+      "a4",
+      "f4",
+      "c4",
+      "b4",
+      "b2",
+      "c5",
+      "e3",
+      "d2",
+      "d3",
+      "b4",
+      "g4",
+      "e4"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".B......BW..W...........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".B...B..BW..W.........W.|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".B...B.WBW.BW.........W.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".B...B.WBW.BW..B......WW|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-9e6509ac",
+    "name": "Novel — f4-b4-d7 Var. f4-b4-d7",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "f4",
+      "b4",
+      "d7",
+      "d2",
+      "b6",
+      "f6",
+      "e4",
+      "g4",
+      "d5",
+      "d6",
+      "d3",
+      "c3",
+      "c4",
+      "a1",
+      "a7",
+      "g7",
+      "g1",
+      "f2"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": ".W.........W.B.B........|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": ".W......W.BW.B.B........|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": ".W.B....W.BW.B.B...W....|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": ".W.B....WBBW.B.B.W.W....|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 1,
+      "B": 0,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
+  },
+  {
+    "opening_id": "novel-7b9949e9",
+    "name": "Novel — d6-b6-c3 Var. d6-b6-c3",
+    "aliases": [],
+    "family": "novel",
+    "side": "both",
+    "seed_source": "learned",
+    "line_moves": [
+      "d6",
+      "b6",
+      "c3",
+      "a7",
+      "a4",
+      "g1",
+      "d1",
+      "b4",
+      "c5",
+      "b2",
+      "d2",
+      "c4",
+      "d1",
+      "d3",
+      "f4",
+      "g7",
+      "g4",
+      "d7"
+    ],
+    "branch_moves": [],
+    "opening_fen_signatures": [
+      {
+        "ply": 4,
+        "fen": "B.......BW............W.|W|2|2"
+      },
+      {
+        "ply": 6,
+        "fen": "B...B..WBW............W.|W|3|3"
+      },
+      {
+        "ply": 8,
+        "fen": "B...BW.WBW.....B......W.|W|4|4"
+      },
+      {
+        "ply": 10,
+        "fen": "B...BW.WBW....BBW.....W.|W|5|5"
+      }
+    ],
+    "strategic_notes": "",
+    "common_blunders": [],
+    "recommended_responses": {
+      "W": [],
+      "B": []
+    },
+    "outcome_stats": {
+      "W": 0,
+      "B": 1,
+      "D": 0
+    },
+    "confidence": 0.3,
+    "tags": [
+      "novel",
+      "learned"
+    ],
+    "source_reference": "",
+    "needs_llm_name": true,
+    "favored_side": "unknown"
   }
 ]

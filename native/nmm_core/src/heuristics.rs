@@ -435,6 +435,7 @@ pub fn evaluate_v2(board: &Board, color: Color, scale: EvalScale) -> i64 {
             _ => {}
         }
     }
+
     // Pre-scale the three personality-controlled components (integer %, default 100).
     let mill_w  = scale.mill  as i64;
     let mob_w   = scale.mob   as i64;

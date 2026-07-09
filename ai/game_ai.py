@@ -1325,27 +1325,30 @@ class GameAI:
                 _mcts_budget = 2.0
             return self._mcts.choose_move(board, deadline=time.time() + _mcts_budget)
 
-        # ── Depth-based search (no time limit in normal play) ─────────────────
-        # _override_time_budget is only set by bench/training callers that
-        # explicitly want a time cap for speed.  Normal gameplay always runs to
-        # the full target depth.
-        _time_cap: float = (
-            self._override_time_budget if self._override_time_budget is not None
-            else float("inf")  # no limit — search completes every depth iteration
-        )
-        # Pass None when there is no explicit budget so _choose_rust_scored uses
-        # its own per-depth formula (max_depth² × 300 ms, capped at 300 s).
-        # Only pass a concrete value when the caller has set a real time cap.
-        _time_ms: "int | None" = (
-            int(min(_time_cap, 3600.0) * 1000) if self._override_time_budget is not None
-            else None
-        )
-
-        # Determine search depth: ramp up during the placement phase opening
-        # to avoid horizon effects on a near-empty board.  Skipped in fast
-        # self-play mode and when a time override is active (bench/training).
+        # ── Depth-based search ────────────────────────────────────────────────
+        # Priority: bench/training override → ponder's own budget → GUI caps.
+        # GUI caps ramp up from fast early-game limits to per-difficulty maxima.
+        # _choose_rust_scored also respects time_budget_override directly so
+        # ponder's short budget is always enforced even when _time_ms is set.
         _in_placement = get_game_phase(board, board.turn) == "place"
         total_on_board = sum(board.pieces_on_board.values())
+        if self._override_time_budget is not None:
+            _time_cap: float = self._override_time_budget
+        elif self.time_budget_override is not None:
+            _time_cap = self.time_budget_override          # ponder's own short budget
+        elif total_on_board <= 1:
+            _time_cap = 3.0                                # first two turns: very fast
+        elif total_on_board <= 4:
+            _time_cap = 10.0                               # early placement ramp
+        elif self.difficulty >= 8:
+            _time_cap = 60.0
+        elif self.difficulty == 7:
+            _time_cap = 45.0
+        elif self.difficulty == 6:
+            _time_cap = 30.0
+        else:
+            _time_cap = 15.0
+        _time_ms: int = int(min(_time_cap, 3600.0) * 1000)
         if (_in_placement and not fast_early_game and self._override_time_budget is None):
             depth = _opening_ramp_depth(self.max_search_depth, total_on_board)
         else:
@@ -1354,39 +1357,6 @@ class GameAI:
         # Deeper search in endgame for better tactical accuracy.
         if endgame_state is not None and endgame_state.active and not fast_early_game:
             depth += 2 if endgame_state.deep else 1
-
-        _vn_blend_active = self._value_net is not None and self._weights.value_net_blend > 0
-        use_adjustments = (
-            (recognition is not None and recognition.status not in ("novel", "inactive"))
-            or (bool(trajectory_hints) and self._weights.opening_adherence > 0)
-            or _vn_blend_active
-        )
-        if use_adjustments:
-            scored = self._score_all(board, moves, depth, endgame_state=endgame_state)
-            if recognition is not None:
-                scored = self._apply_opening_adjustments(scored, recognition, board)
-            if trajectory_hints:
-                scored = self._apply_trajectory_hints(scored, trajectory_hints)
-            if _vn_blend_active:
-                scored = self._apply_vn_blend(scored, board)
-            _var_pct = (self._weights.move_variance_pct if self._weights else 0)
-            if _var_pct > 0 and scored:
-                _best_sc = max(sc for _, sc in scored)
-                if abs(_best_sc) < INF // 2:
-                    _spread = _best_sc - min(sc for _, sc in scored)
-                    _threshold = _best_sc - (_var_pct / 100.0) * max(1, _spread)
-                    _candidates = [mv for mv, sc in scored if sc >= _threshold]
-                    move = random.choice(_candidates)
-                else:
-                    move = max(scored, key=lambda x: x[1])[0]
-            elif top_n > 1:
-                scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
-                move = random.choice(scored_sorted[:top_n])[0]
-            else:
-                move = max(scored, key=lambda x: x[1])[0]
-            move = self._apply_sentinel_intervention(board, move, moves)
-            self._populate_thinking(board, move, _forced_block=bool(threats))
-            return move
 
         move = (
             self._choose_rust_scored(board, depth, recognition, trajectory_hints, moves,
@@ -2365,11 +2335,11 @@ class GameAI:
                 return None
             import nmm_core as _rc
             white, black, wp, bp, stm = _nc.board_to_bits(board)
-            if time_limit_ms is None:
-                if self.time_budget_override is not None:
-                    time_limit_ms = min(300_000, int(self.time_budget_override * 1000))
-                else:
-                    time_limit_ms = min(300_000, max_depth * max_depth * 300)
+            # Ponder's own budget always takes precedence over caller-supplied limit.
+            if self.time_budget_override is not None:
+                time_limit_ms = min(300_000, int(self.time_budget_override * 1000))
+            elif time_limit_ms is None:
+                time_limit_ms = min(300_000, max_depth * max_depth * 300)
 
             # T-C4: lazy-init persistent Rust TT handle (reused across turns; cleared on new game).
             if self._rust_tt_handle is None:
@@ -2477,7 +2447,17 @@ class GameAI:
                 scored = self._apply_vn_blend(scored, board)
                 n_bonuses += 1
 
-            if top_n > 1:
+            _var_pct = self._weights.move_variance_pct if self._weights else 0
+            if _var_pct > 0 and scored:
+                _best_sc = max(sc for _, sc in scored)
+                if abs(_best_sc) < INF // 2:
+                    _spread = _best_sc - min(sc for _, sc in scored)
+                    _threshold = _best_sc - (_var_pct / 100.0) * max(1, _spread)
+                    _candidates = [mv for mv, sc in scored if sc >= _threshold]
+                    best_move = random.choice(_candidates)
+                else:
+                    best_move = max(scored, key=lambda x: x[1])[0]
+            elif top_n > 1:
                 best_move = random.choice(sorted(scored, key=lambda x: x[1], reverse=True)[:top_n])[0]
             else:
                 best_move = max(scored, key=lambda x: x[1])[0]

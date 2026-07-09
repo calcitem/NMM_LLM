@@ -405,11 +405,11 @@ If the Python fallback performance becomes critical, the correct fix is to ensur
 | Item | Priority | Effort | Benefit | Status |
 |------|----------|--------|---------|--------|
 | V4-A: `_time_ms` fix | Critical | Done | Restores correct Rust depth | **Deployed** |
-| V4-B: MTD(f) in Rust | High | Medium (Rust) | 15–35% node reduction in iterative deepen | Planned |
-| V4-C: Star square ordering | Medium | Low (Rust) | Better placement-phase pruning | Planned |
+| V4-B: MTD(f) in Rust | High | Medium (Rust) | 15–35% node reduction in iterative deepen | **Done** |
+| V4-C: Star square ordering | Medium | Low (Rust) | Better placement-phase pruning | **Done** |
 | V4-D: Rust `legal_moves` in fallback | Medium | Low (Python) | 17% faster Python fallback | Planned |
 | V4-E: Rust `evaluate_base` in fallback | Medium | Low (Python) | 23% faster Python fallback | Planned |
-| V4-F: `_V2_MV_SHIFT` in Rust heuristics | Low | Low (Rust) | Evaluator consistency | Planned |
+| V4-F: `_V2_MV_SHIFT` in Rust heuristics | Low | Low (Rust) | Evaluator consistency | **Removed** — 25% overhead for weight-6 term |
 | V4-G: TT prefetching | Low | Low (Rust) | 2–5% cache improvement | Deferred |
 | V4-H: Bitboard threading in fallback | Low | High (Rust + Python) | Faster Python fallback | Deferred |
 

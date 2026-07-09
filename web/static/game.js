@@ -107,8 +107,6 @@ const WEIGHT_DEFAULTS = [
   { key: "block_cycling_priority", group: "Positional", label: "Block cycling fork arm",   def: 120, min: 0,   max: 300,  step: 10,
     tip: "Bonus for blocking the fork arm with higher cycling freedom — surrendering the arm the opponent cannot easily exploit" },
   // ── Behaviour ─────────────────────────────────────────────────────────
-  { key: "value_net_blend",      group: "Behaviour",  label: "Value network blend %",       def: 80,  min: 0,   max: 100,  step: 5,
-    tip: "How much the trained value network influences leaf evaluation (0 = heuristic only, 100 = value net only). Requires data/value_net.npz to be present." },
   { key: "move_variance_pct",    group: "Behaviour",  label: "Move variance %",             def: 0,   min: 0,   max: 50,   step: 5,
     tip: "Pick randomly from moves within the top N% of the score range (0 = always best move, 50 = consider any move within the top half of scored moves). Only affects the bare heuristic model; no effect when forced wins/losses are on the board." },
   { key: "make_mistakes",        group: "Behaviour",  label: "Make mistakes %",             def: 0,   min: 0,   max: 100,  step: 5,
@@ -292,7 +290,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const chkGapNet = $("chk-gap-net");
   if (chkGapNet) {
-    chkGapNet.addEventListener("change", _updateSentinelRows);
+    chkGapNet.addEventListener("change", () => {
+      _updateSentinelRows();
+      const blendRow = $("row-gap-net-blend");
+      if (blendRow) blendRow.style.display = chkGapNet.checked ? "flex" : "none";
+    });
   }
 
   const selSentinelMode = $("sel-sentinel-mode");
@@ -306,6 +308,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     rngSentinelGap.addEventListener("input", () => {
       const lbl = $("lbl-sentinel-gap");
       if (lbl) lbl.textContent = rngSentinelGap.value + "%";
+    });
+  }
+
+  const rngGapNetBlend = $("rng-gap-net-blend");
+  if (rngGapNetBlend) {
+    rngGapNetBlend.addEventListener("input", () => {
+      const lbl = $("lbl-gap-net-blend");
+      if (lbl) lbl.textContent = rngGapNetBlend.value + "%";
+    });
+  }
+
+  const chkValueNet = $("chk-value-net");
+  const rngValueNetBlend = $("rng-value-net-blend");
+  if (chkValueNet) {
+    chkValueNet.addEventListener("change", () => {
+      const blendRow = $("row-value-net-blend");
+      if (blendRow) blendRow.style.display = chkValueNet.checked ? "flex" : "none";
+    });
+  }
+  if (rngValueNetBlend) {
+    rngValueNetBlend.addEventListener("input", () => {
+      const lbl = $("lbl-value-net-blend");
+      if (lbl) lbl.textContent = rngValueNetBlend.value + "%";
     });
   }
 
@@ -995,6 +1020,7 @@ function startNewGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      gap_net_blend:  $("rng-gap-net-blend") ? parseInt($("rng-gap-net-blend").value) : 100,
       use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
       use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
@@ -1288,6 +1314,7 @@ function startSetupGame() {
       use_llm:      useLlm,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      gap_net_blend:  $("rng-gap-net-blend") ? parseInt($("rng-gap-net-blend").value) : 100,
       use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
       use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",
@@ -2839,6 +2866,12 @@ function _getWeights() {
     const el = $(`slider-${w.key}`);
     weights[w.key] = el ? parseInt(el.value) : w.def;
   });
+  // Settings panel overrides value_net_blend (checkbox + slider take precedence)
+  const chkVn = $("chk-value-net");
+  const rngVn = $("rng-value-net-blend");
+  if (chkVn !== null) {
+    weights.value_net_blend = (chkVn.checked && rngVn) ? parseInt(rngVn.value) : 0;
+  }
   return weights;
 }
 
@@ -2898,6 +2931,7 @@ function _handleTournamentNext(msg) {
       use_llm:        $("chk-llm").checked,
       use_sentinel:   $("chk-sentinel")  ? $("chk-sentinel").checked  : false,
       use_gap_net:    $("chk-gap-net")   ? $("chk-gap-net").checked   : true,
+      gap_net_blend:  $("rng-gap-net-blend") ? parseInt($("rng-gap-net-blend").value) : 100,
       use_extended_qsearch: $("chk-ext-qsearch") ? $("chk-ext-qsearch").checked : true,
       use_ngram_search: $("chk-ngram") ? $("chk-ngram").checked : false,
       sentinel_mode:  $("sel-sentinel-mode") ? $("sel-sentinel-mode").value : "advisory",

@@ -66,7 +66,6 @@ struct Searcher {
 
 const ABORT_SCORE: i64 = i64::MIN + 1;
 const MAX_PLY: usize = 64;
-const ASP_MARGIN: i64 = 50;
 // LMR fires for move index >= this (same threshold as the lmr condition below).
 const LMR_LATE_IDX: usize = 3;
 // FGOP: frequency-gated opponent pruning constants.
@@ -77,6 +76,11 @@ const FGOP_MARGIN: i64 = 150; // eval margin below best opp move to trigger gate
 const QS_FORCING_CAP: u8 = 6;
 // Mate-score boundary: any |score| above this is a terminal win/loss, not an eval.
 const MATE_THRESHOLD: i64 = INF / 2;
+// V4-C: star squares — the 12 nodes at odd indices (2 mill memberships each).
+const STAR_SQUARES: u32 =
+    (1 << 1) | (1 << 3) | (1 << 5) | (1 << 7)
+    | (1 << 9) | (1 << 11) | (1 << 13) | (1 << 15)
+    | (1 << 17) | (1 << 19) | (1 << 21) | (1 << 23);
 
 /// Convert a ply-relative mate score to an absolute mate-in-N for TT storage.
 /// Non-mate scores pass through unchanged.
@@ -210,6 +214,11 @@ impl Searcher {
             let mut s = 0i64;
             if mv.capture.is_some() { s -= 2000; }
             if move_forms_mill(board, color, mv.from, mv.to) { s -= 1000; }
+            // V4-C: star square placement bonus (non-mill placements only).
+            if mv.from.is_none()
+                && !move_forms_mill(board, color, mv.from, mv.to)
+                && (STAR_SQUARES & (1u32 << mv.to)) != 0
+            { s -= 300; }
             // T-B3: killer moves after captures/mills.
             if k[0] == Some(*mv) { s -= 600; }
             else if k[1] == Some(*mv) { s -= 500; }
@@ -502,6 +511,7 @@ impl Searcher {
         let mut alpha = alpha_init;
         let beta = beta_init;
         let mut best_move = Some(moves[0]);
+        let mut best_score = -INF * 4;
         for mv in moves.iter() {
             let nb = make_move(board, mv);
             // B-64: dead/near-dead placement penalty (mirrors Python tactical_move_bonus).
@@ -527,12 +537,38 @@ impl Searcher {
             if self.aborted {
                 break;
             }
-            if score > alpha {
-                alpha = score;
+            if score > best_score {
+                best_score = score;
                 best_move = Some(*mv);
             }
+            if score > alpha {
+                alpha = score;
+            }
+            if alpha >= beta {
+                break;
+            }
         }
-        (best_move, alpha)
+        (best_move, best_score)
+    }
+
+    // V4-B: MTD(f) — Memory-enhanced Test Driver with zero-window passes.
+    // Requires root() to be fail-soft (returns best_score, not clamped to beta).
+    fn mtdf(&mut self, board: &Board, depth: u8, f: i64) -> (Option<Move>, i64) {
+        let mut lower = -INF * 4;
+        let mut upper =  INF * 4;
+        let mut best_mv: Option<Move> = None;
+        let mut score = f;
+        while lower < upper {
+            let beta = if score == lower { score + 1 } else { score };
+            let (mv, s) = self.root(board, depth, beta - 1, beta);
+            if self.aborted {
+                return (mv, s);
+            }
+            best_mv = mv;
+            score = s;
+            if score < beta { upper = score; } else { lower = score; }
+        }
+        (best_mv, score)
     }
 
     /// Full-window root search: every move gets an independent (-INF, INF) window
@@ -611,26 +647,11 @@ pub fn iterative_deepening(board: &Board, max_depth: u8, time_limit_ms: u64) -> 
     let cap = max_depth.max(1);
     let mut last_score = 0i64;
     for d in 1..=cap {
-        // T-B2: aspiration windows after depth 1.
-        let (a_init, b_init) = if d > 1 {
-            (last_score - ASP_MARGIN, last_score + ASP_MARGIN)
+        // V4-B: MTD(f) after depth 1; seed from previous iteration's score.
+        let (mv, score) = if d > 1 {
+            searcher.mtdf(board, d, last_score)
         } else {
-            (-INF * 4, INF * 4)
-        };
-        let (mv, score) = searcher.root(board, d, a_init, b_init);
-        if searcher.aborted {
-            if best.best_move.is_none() {
-                best.best_move = mv;
-                best.score = score;
-                best.depth_reached = d;
-            }
-            break;
-        }
-        // Re-search with full window on aspiration fail.
-        let (mv, score) = if score <= a_init || score >= b_init {
             searcher.root(board, d, -INF * 4, INF * 4)
-        } else {
-            (mv, score)
         };
         if searcher.aborted {
             if best.best_move.is_none() {
