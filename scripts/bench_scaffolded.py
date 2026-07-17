@@ -318,6 +318,9 @@ def main() -> int:
     p.add_argument("--malom-path",      default=_MALOM_DEFAULT,
                    help=f"Malom perfect DB dir (default {_MALOM_DEFAULT}).")
     p.add_argument("--out-dir",         default=str(_ROOT / "data" / "bench"))
+    p.add_argument("--router-difficulty", type=int, default=7,
+                   help="Difficulty for the router's own GameAI (alpha-beta move ordering). "
+                        "Default 7 — gives solid top-K ordering without heavy search cost.")
     p.add_argument("--quiet",           action="store_true",
                    help="Suppress per-game progress dots.")
     args = p.parse_args()
@@ -356,6 +359,18 @@ def main() -> int:
           f"mid={'OK' if router._spec_mid else 'missing'}  "
           f"end={'OK' if router._spec_end else 'missing'}  "
           f"ply_depth={args.specialist_ply_depth}")
+
+    # Give the router a dedicated GameAI for alpha-beta move ordering (encode_top_k_candidates).
+    # Without this the router falls back to the 122-feat path which mismatches 126-dim checkpoints.
+    from ai.game_ai import GameAI as _GameAI
+    _router_gameai = _GameAI(
+        color="W",                # router handles both colors; color here only affects book lookup
+        difficulty=args.router_difficulty,
+        value_net=value_net,
+        malom_db=malom_db,
+    )
+    router.set_gameai(_router_gameai)
+    print(f"  router GameAI: diff={args.router_difficulty} (for top-K move ordering)")
     print()
 
     # ── plan ──────────────────────────────────────────────────────────────────

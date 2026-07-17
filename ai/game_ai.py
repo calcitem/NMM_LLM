@@ -469,11 +469,11 @@ class GameAI:
         self._gap_leaf_cache: dict[int, int] = {}   # cleared per search
         self.use_gap_net: bool = True
         # Which side's leaves get the gap-net blunder-zone correction.
-        # "ai_side"  = current default (bonus only when it's the AI's turn to move — historical)
+        # "ai_side"  = bonus only when it's the AI's turn to move
         # "opp_side" = "set traps" — bonus when it's the opponent's turn (they blunder)
         # "both"     = additive on both sides
         # "off"      = disable regardless of use_gap_net (for ablation)
-        self.gap_net_leaf_mode: str = "ai_side"
+        self.gap_net_leaf_mode: str = "opp_side"
         self.use_extended_qsearch: bool = True
         self._ngram_model = None
         self.use_ngram_search: bool = False
