@@ -1430,8 +1430,11 @@ def run(args: argparse.Namespace) -> None:
                             model.load_state_dict(ckpt_r["model"])
                         except RuntimeError:
                             pol_state = {k: v for k, v in ckpt_r["model"].items() if k.startswith("policy_mlp")}
-                            model.load_state_dict(pol_state, strict=False)
-                            print(f"[s_open_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
+                            try:
+                                model.load_state_dict(pol_state, strict=False)
+                                print(f"[s_open_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
+                            except RuntimeError:
+                                print(f"[s_open_v2] Recovery: checkpoint shape incompatible (old feat_dim) — keeping current weights")
                         model.to(device)
                         opt = torch.optim.Adam(model.parameters(), lr=args.lr)
                         frozen_opp.refresh(model)
@@ -1536,8 +1539,11 @@ def run(args: argparse.Namespace) -> None:
                             model.load_state_dict(ckpt_prev["model"])
                         except RuntimeError:
                             pol_state = {k: v for k, v in ckpt_prev["model"].items() if k.startswith("policy_mlp")}
-                            model.load_state_dict(pol_state, strict=False)
-                            print(f"[s_open_v2] Advance-load: value_mlp shape mismatch — policy weights loaded, value head kept")
+                            try:
+                                model.load_state_dict(pol_state, strict=False)
+                                print(f"[s_open_v2] Advance-load: value_mlp shape mismatch — policy weights loaded, value head kept")
+                            except RuntimeError:
+                                print(f"[s_open_v2] Advance-load: checkpoint shape incompatible (old feat_dim) — keeping current weights")
                         model.to(device)
                         print(f"[s_open_v2] Loaded best{prev_diff}.pt as starting point for diff {difficulty}")
 
