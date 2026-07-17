@@ -1481,25 +1481,37 @@ def run(args: argparse.Namespace) -> None:
 
                 if (len(win_history_heuristic) >= RECOVERY_MIN_GAMES
                         and win_rate < RECOVERY_THRESHOLD):
-                    best_ckpt = out_dir / f"best{difficulty}.pt"
-                    if best_ckpt.exists():
-                        ckpt_r = torch.load(str(best_ckpt), map_location=device, weights_only=False)
-                        try:
-                            model.load_state_dict(ckpt_r["model"])
-                        except RuntimeError:
-                            pol_state = {k: v for k, v in ckpt_r["model"].items() if k.startswith("policy_mlp")}
+                    _h_list = list(win_history_heuristic)
+                    _mid    = len(_h_list) // 2
+                    _first_wr  = sum(1.0 if x == 1.0 else 0.0 for x in _h_list[:_mid]) / max(_mid, 1)
+                    _second_wr = sum(1.0 if x == 1.0 else 0.0 for x in _h_list[_mid:]) / max(len(_h_list) - _mid, 1)
+                    _is_improving = _second_wr > _first_wr + 0.02
+                    if _is_improving:
+                        print(f"[s_end_v2] Recovery skipped: AI is improving ({_first_wr:.3f} → {_second_wr:.3f})")
+                    else:
+                        best_ckpt = out_dir / f"best{difficulty}.pt"
+                        if best_ckpt.exists():
+                            ckpt_r = torch.load(str(best_ckpt), map_location=device, weights_only=False)
+                            _loaded_recovery = False
                             try:
-                                model.load_state_dict(pol_state, strict=False)
-                                print(f"[s_end_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
+                                model.load_state_dict(ckpt_r["model"])
+                                _loaded_recovery = True
                             except RuntimeError:
-                                print(f"[s_end_v2] Recovery: checkpoint shape incompatible (old feat_dim) — keeping current weights")
-                        model.to(device)
-                        opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-                        frozen_opp.refresh(model)
-                        win_history.clear()
-                        win_history_heuristic.clear()
-                        temperature = TEMP_START
-                        print(f"[s_end_v2] Recovery: reloaded best{difficulty}.pt (win rate was {win_rate:.2f})")
+                                pol_state = {k: v for k, v in ckpt_r["model"].items() if k.startswith("policy_mlp")}
+                                try:
+                                    model.load_state_dict(pol_state, strict=False)
+                                    _loaded_recovery = True
+                                    print(f"[s_end_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
+                                except RuntimeError:
+                                    print(f"[s_end_v2] Recovery: checkpoint shape incompatible (old feat_dim) — keeping current weights")
+                            if _loaded_recovery:
+                                model.to(device)
+                                opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+                                frozen_opp.refresh(model)
+                                win_history.clear()
+                                win_history_heuristic.clear()
+                                temperature = TEMP_START
+                                print(f"[s_end_v2] Recovery: reloaded best{difficulty}.pt (win rate was {win_rate:.2f})")
 
                 main_diags   = [d for d in diag_buffer if not d.is_branch]
                 branch_diags = [d for d in diag_buffer if d.is_branch]
