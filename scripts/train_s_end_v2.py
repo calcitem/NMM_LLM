@@ -193,7 +193,7 @@ TEMP_START    = 0.50
 TEMP_MAX      = 0.90
 ENTROPY_COEF  = 0.01
 UPDATE_EVERY  = 16
-ROLLING_WIN   = 50
+ROLLING_WIN   = 100
 DIFF_START    = 1   # start at diff 1 (was 3) — per 2026-07-16 request; ramp handles competence
 DIFF_MAX      = 20
 

@@ -119,7 +119,7 @@ def advance_target(level: int,
 # ── Advance / recovery checks ─────────────────────────────────────────────────
 
 MIN_GAMES_FOR_ADVANCE  = 20   # window size floor for a decision
-DEFAULT_PROB_THRESHOLD = 0.95   # confidence gate
+DEFAULT_PROB_THRESHOLD = 0.70   # confidence gate
 
 
 @dataclass
