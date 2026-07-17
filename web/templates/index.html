@@ -329,9 +329,15 @@
             <option value="6" selected>6 — Expert</option>
             <option value="7">7 — Master</option>
             <option value="8">8 — Grandmaster</option>
-            <option value="9">9 — Deep (20 s)</option>
-            <option value="10">10 — Maximum (45 s)</option>
+            <option value="9">9 — Specialist AI (30 s)</option>
+            <option value="10">10 — Specialist AI (60 s)</option>
           </select>
+          <div style="font-size:.72rem; color:var(--text-dim); margin-top:4px;">
+            Diff 1-8: classical heuristic with your selected blends (VN / gap net / sentinel).
+            Diff 9-10: phase-routed specialist AI — the classical engine's 30 s / 60 s
+            search feeds the top-K candidates to the specialist, which re-ranks them
+            using its own sentinel + gap + VN + trajectory + human-frequency features.
+          </div>
         </div>
 
         <div class="form-row" style="flex-direction:row; align-items:center; gap:8px;">
@@ -431,8 +437,8 @@
         <div class="form-row" id="row-overseer-player" style="flex-direction:row; align-items:center; gap:8px; display:none">
           <input type="checkbox" id="chk-overseer-player" disabled>
           <label for="chk-overseer-player" style="color:#f5a623; font-size:.9rem;">
-            Overseer as player
-            <span style="font-size:.75rem; color:var(--text-dim);">(policy net drives every AI move — testing only)</span>
+            Specialist AI (test hook)
+            <span style="font-size:.75rem; color:var(--text-dim);">(force phase-routed specialists even below diff 9 — diff 9/10 auto-enable this)</span>
           </label>
         </div>
 
@@ -464,7 +470,8 @@
             <button id="btn-save-search-depth" class="btn-small" style="font-size:.75rem;">Save</button>
           </div>
           <div style="font-size:.75rem; color:var(--text-dim); margin-bottom:2px;">
-            Controls max search depth for difficulty levels 1–8. All levels run to full depth — lower difficulty for faster games.
+            Controls max search depth for difficulty levels 1–8 (classical heuristic).
+            Difficulty 9-10 are specialist-AI modes with fixed 30 s / 60 s heuristic search feeding the specialists — this depth control does not apply to them.
           </div>
           <div style="display:flex; gap:10px; align-items:flex-end;">
             <div style="flex:1; display:flex; flex-direction:column; gap:2px;">

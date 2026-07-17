@@ -468,6 +468,12 @@ class GameAI:
         self._gap_net = gap_net        # GapNet: blunder-zone exploitation (V3a)
         self._gap_leaf_cache: dict[int, int] = {}   # cleared per search
         self.use_gap_net: bool = True
+        # Which side's leaves get the gap-net blunder-zone correction.
+        # "ai_side"  = current default (bonus only when it's the AI's turn to move — historical)
+        # "opp_side" = "set traps" — bonus when it's the opponent's turn (they blunder)
+        # "both"     = additive on both sides
+        # "off"      = disable regardless of use_gap_net (for ablation)
+        self.gap_net_leaf_mode: str = "ai_side"
         self.use_extended_qsearch: bool = True
         self._ngram_model = None
         self.use_ngram_search: bool = False
@@ -911,6 +917,7 @@ class GameAI:
         board: BoardState,
         depth: int = 3,
         time_budget: float = 2.0,
+        preserve_tt: bool = False,
     ) -> list:
         """Score all legal moves with alpha-beta search at `depth`.
 
@@ -919,6 +926,12 @@ class GameAI:
         at the root.  Intended as per-move feature input for the Overseer;
         no book, trajectory, or blunder logic is applied.
         Returns [] when there are no legal moves.
+
+        ``preserve_tt=True`` skips clearing the transposition table, killers,
+        history heuristic, and gap-leaf cache — used at inference by the
+        SpecialistRouter to reuse the state populated by the coordinator's
+        just-completed search.  With warm TT most probes hit and the ordering
+        pass finishes near-instantly.
         """
         moves = get_all_legal_moves(board)
         if not moves:
@@ -927,10 +940,11 @@ class GameAI:
         # Minimal state setup — mirrors choose_move preamble
         self._force_stop        = False
         self._deadline          = time.time() + time_budget
-        self._tt.clear()
-        self._gap_leaf_cache.clear()
-        self._killers           = [[None, None] for _ in range(32)]
-        self._history           = {}
+        if not preserve_tt:
+            self._tt.clear()
+            self._gap_leaf_cache.clear()
+            self._killers       = [[None, None] for _ in range(32)]
+            self._history       = {}
         self._nodes             = 0
         self._trajectory_db     = None
         self._game_notations    = []
@@ -1362,7 +1376,11 @@ class GameAI:
             _time_cap = 3.0                                # first two turns: very fast
         elif total_on_board <= 4:
             _time_cap = 10.0                               # early placement ramp
-        elif self.difficulty >= 8:
+        elif self.difficulty == 10:
+            _time_cap = 60.0   # specialist mode: 60 s heuristic search, specialist re-ranks
+        elif self.difficulty == 9:
+            _time_cap = 30.0   # specialist mode: 30 s heuristic search, specialist re-ranks
+        elif self.difficulty == 8:
             _time_cap = 60.0
         elif self.difficulty == 7:
             _time_cap = 45.0
@@ -1818,15 +1836,29 @@ class GameAI:
                     heur = evaluate_v2(board, board.turn, weights=self._weights, _ply=ply)
                 else:
                     heur = evaluate(board, board.turn, endgame_state, self.force_aggressive, self._weights)
-            # B-73: symmetric value-net blend (currently disabled; kept for future use)
+            # B-73: symmetric value-net blend — applied BEFORE gap correction
+            # so both signals compose (was a mutually-exclusive short-circuit).
             if self._vn_active(board):
                 vn_raw = self._value_net.predict(board, board.turn)  # (-1, 1)
                 vn_score = int(vn_raw * _VN_SCALE)
                 blend = self._weights.value_net_blend / 100.0
-                return int(blend * vn_score + (1.0 - blend) * heur)
-            # V3a: asymmetric gap_net blunder-zone correction (AI side only)
+                base = int(blend * vn_score + (1.0 - blend) * heur)
+            else:
+                base = heur
+            # V3a: gap-net blunder-zone correction — leaf-side determined by mode.
+            _gap_mode = getattr(self, "gap_net_leaf_mode", "ai_side")
+            if _gap_mode == "off":
+                _gap_applies = False
+            elif _gap_mode == "ai_side":
+                _gap_applies = (board.turn == self.color)
+            elif _gap_mode == "opp_side":
+                _gap_applies = (board.turn != self.color)
+            elif _gap_mode == "both":
+                _gap_applies = True
+            else:
+                _gap_applies = (board.turn == self.color)  # sane fallback
             if (self.use_gap_net
-                    and board.turn == self.color
+                    and _gap_applies
                     and self._gap_net is not None
                     and (self._weights.gap_blend_move > 0
                          or self._weights.gap_blend_place > 0
@@ -1835,10 +1867,10 @@ class GameAI:
                 if _cached is not None:
                     return _cached
                 from .heuristics import human_correction
-                corrected = human_correction(board, board.turn, heur, self._gap_net, self._weights)
+                corrected = human_correction(board, board.turn, base, self._gap_net, self._weights)
                 self._gap_leaf_cache[board.hash_key] = corrected
                 return corrected
-            return heur
+            return base
 
         # ── Transposition table probe ─────────────────────────────────────────
         alpha_orig = alpha
@@ -2266,7 +2298,6 @@ class GameAI:
         self._deadline = time.time() + time_limit
         clear_eval_cache()  # SE-12: fresh cache per depth iteration
         _p_t0 = time.perf_counter()
-        print(f"P:START budget={time_limit:.1f}s max_depth={max_depth}", flush=True)
         if moves is None:
             moves = get_all_legal_moves(board)
         best_move     = moves[0]
@@ -2337,7 +2368,6 @@ class GameAI:
         self._deadline = math.inf
         self.last_depth_reached = last_completed_depth
         _p_dt = time.perf_counter() - _p_t0
-        print(f"P:END depth={last_completed_depth} t={_p_dt:.2f}s", flush=True)
         return best_move
 
     def _choose_rust_scored(
@@ -2434,7 +2464,6 @@ class GameAI:
             )
             _dt = time.perf_counter() - _t0
             if not raw_moves:
-                print(f"{self._search_label}:NO-MOVE depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
                 return None
 
             # T-D2: filter raw index tuples before allocating move dicts.
@@ -2450,7 +2479,6 @@ class GameAI:
                 raw_moves = [(frm, to, cap, s) for frm, to, cap, s in raw_moves
                              if (frm, to, cap) in allowed_idx]
                 if not raw_moves:
-                    print(f"{self._search_label}:FILTERED-OUT depth={depth} nodes={_nodes} t={_dt:.2f}s (falling back to Python)", flush=True)
                     return None
 
             # Convert surviving Rust (from_idx, to_idx, cap_idx, score) tuples to (move_dict, score).
@@ -2494,10 +2522,6 @@ class GameAI:
                 best_move = max(scored, key=lambda x: x[1])[0]
             self.last_depth_reached = depth
             self._nodes = _nodes  # expose Rust node count to test observers
-            _cap_str = f" cap={best_move['capture']}" if best_move.get("capture") else ""
-            print(f"{self._search_label}:OK depth={depth} nodes={_nodes} t={_dt:.2f}s "
-                  f"to={best_move['to']}{_cap_str} adjusted={n_bonuses}",
-                  flush=True)
             return best_move
         except Exception:
             _dt = time.perf_counter() - _t0

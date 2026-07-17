@@ -420,6 +420,16 @@ export class Board {
       if (pct < 1) return null;
       return `O:${pct}%`;
     };
+    // Helper: moves-to-mate label ("M#5"). Suppressed unless DB overlay is on.
+    // dtw is the absolute depth-to-mate returned by Malom perfect DB.
+    const dtwLabel = (dtw) => {
+      if (!showDB || dtw == null || dtw <= 0) return null;
+      return `M#${dtw}`;
+    };
+    // Helper: pick display color that ALWAYS returns something when DB Lines is on
+    // and a piece is selected — grey ("#888") as a fallback so every legal move
+    // of the selected piece gets an arrow.
+    const dbColorOrGrey = (delta, egFlag) => dbColor(delta, egFlag) || "#888";
     if (phase === "place" || phase === "capture") {
       // Halos on destination squares — no arrows needed (no source)
       for (const mv of moves) {
@@ -430,13 +440,14 @@ export class Board {
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
         const slbl = sentinelLabel(mv.sentinel_score);
         const olbl = overseerLabel(mv.overseer_prob);
+        const dlbl = dtwLabel(mv.eg_dtw);
 
         if (col) {
           const [x, y] = nodeXY(pos);
           this._dbGroup.appendChild(_el("circle", { cx:x, cy:y, r: PIECE_R + 9,
             fill: "none", stroke: col, "stroke-width": 2.5, opacity: 0.7 }));
         }
-        if (slbl || olbl || freq > 0) {
+        if (slbl || olbl || dlbl || freq > 0) {
           const [x, y] = nodeXY(pos);
           const hasPiece = !!this.grid[pos];
           let ty = hasPiece ? y - PIECE_R - 5 : y - NODE_R - 5;
@@ -446,6 +457,17 @@ export class Board {
               stroke:"white", "stroke-width":"2.5", "stroke-linejoin":"round",
               "paint-order":"stroke" });
             t.textContent = `T:${Math.round(freq * 100)}%`;
+            this._dbGroup.appendChild(t);
+            ty -= 11;
+          }
+          if (dlbl) {
+            // Match arrow/halo color so the label reinforces the WDL judgment
+            const dtwCol = col || "#888";
+            const t = _el("text", { x, y: ty, "font-size":"9", "font-weight":"bold",
+              fill: dtwCol, "text-anchor":"middle", "font-family":"monospace",
+              stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = dlbl;
             this._dbGroup.appendChild(t);
             ty -= 11;
           }
@@ -479,11 +501,16 @@ export class Board {
       for (const mv of toRender) {
         if (visFrac < 1.0 && (_mvHash(mv) % 100) >= Math.round(visFrac * 100)) continue;
         if (!mv.from || !mv.to) continue;
-        const col  = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
+        let col   = dbColor(showDB ? mv.db_delta : null, showDB ? mv.eg_flag : null);
+        // When a piece is selected AND DB Lines is on, guarantee an arrow for
+        // every legal move of that piece — grey for neutral/no-DB, so the
+        // player can visually see winning / losing / neutral options.
+        if (!col && selSrc && showDB) col = "#888";
         const freq = showTraj ? (mv.traj_freq || 0) : 0;
         const slbl = selSrc ? sentinelLabel(mv.sentinel_score) : null;
         const olbl = selSrc ? overseerLabel(mv.overseer_prob)  : null;
-        if (!col && freq === 0 && !slbl && !olbl) continue;
+        const dlbl = selSrc ? dtwLabel(mv.eg_dtw) : null;
+        if (!col && freq === 0 && !slbl && !olbl && !dlbl) continue;
 
         const [x1, y1] = nodeXY(mv.from);
         const [x2, y2] = nodeXY(mv.to);
@@ -506,7 +533,7 @@ export class Board {
             }));
           }
         }
-        if (slbl || olbl || freq > 0) {
+        if (slbl || olbl || dlbl || freq > 0) {
           const [x, y] = nodeXY(mv.to);
           let ty = y - PIECE_R - 4;
           if (freq > 0 && (!selSrc || mv.from === selSrc)) {
@@ -517,6 +544,16 @@ export class Board {
             t.textContent = `T:${Math.round(freq * 100)}%`;
             this._dbGroup.appendChild(t);
             ty -= 10;
+          }
+          if (dlbl) {
+            const dtwCol = col || "#888";
+            const t = _el("text", { x: x + 1, y: ty, "font-size":"9", "font-weight":"bold",
+              fill: dtwCol, "text-anchor":"middle", "font-family":"monospace",
+              stroke:"#1a1208", "stroke-width":"3", "stroke-linejoin":"round",
+              "paint-order":"stroke" });
+            t.textContent = dlbl;
+            this._dbGroup.appendChild(t);
+            ty -= 11;
           }
           if (slbl) {
             const sentCol = (mv.sentinel_score >= 0.55) ? "#66bb6a"

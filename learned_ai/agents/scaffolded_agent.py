@@ -23,12 +23,25 @@ import torch
 import torch.nn.functional as F
 
 from game.board import BoardState
-from game.rules import get_all_legal_moves
+from game.rules import get_all_legal_moves, get_game_phase
 from learned_ai.agents.heuristic_agent import get_heuristic_evaluate as _get_heuristic_evaluate
 from learned_ai.models.lookahead_advisor import LookaheadAdvisor
 from learned_ai.models.overseer_extras import build_overseer_extras
 from learned_ai.models.scaffolded_encoder import encode_position_with_lookahead
 from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
+
+
+SENTINEL_LOOKAHEAD_S_EST = 0.5   # rough estimate of 15-ply lookahead cost per position
+
+def specialist_target_time_s(heuristic_time_s: float,
+                             sentinel_lookahead_s: float = SENTINEL_LOOKAHEAD_S_EST) -> float:
+    """Target per-move wall time for a specialist AI.
+
+    Rule: specialist_time >= max(2 * heuristic_time, 1 s + sentinel_lookahead).
+    The specialist's actual forward pass is instant; its cost is dominated by the
+    15-ply sentinel lookahead inside encode_position_with_lookahead().  Callers
+    should size the heuristic opponent so this ratio holds."""
+    return max(2.0 * heuristic_time_s, 1.0 + sentinel_lookahead_s)
 
 
 @dataclass
@@ -60,6 +73,7 @@ class ScaffoldedAgent:
         sentinel_advisor=None,
         db=None,
         value_net=None,
+        gap_net=None,
         lookahead_advisor=None,
         # Overseer-only params (ignored for specialist agents)
         is_overseer: bool = False,
@@ -78,6 +92,7 @@ class ScaffoldedAgent:
         self.sentinel_advisor = sentinel_advisor
         self.db = db
         self.value_net = value_net
+        self.gap_net = gap_net
         self.mode = mode
         self.temperature = max(float(temperature), 1e-6)
         self.last_was_blunder = False
@@ -118,7 +133,9 @@ class ScaffoldedAgent:
                 sentinel=sentinel_advisor,
                 value_net=value_net,
                 evaluate_fn=_evaluate_fn,
+                gap_net=gap_net,
                 use_sentinel=True,
+                ply_depth=15,
             )
 
         self.last_decision: Optional[ScaffoldedDecision] = None
@@ -209,3 +226,29 @@ class ScaffoldedAgent:
             probs = probs / probs.sum().clamp(min=1e-9)
         idx = int(torch.multinomial(probs.cpu(), 1, generator=self._gen).item())
         return idx, float(log_probs[idx].item())
+
+    # ── phase-routing inference (v2 three-specialist) ──────────────────────────
+
+    def choose_move_for_phase(
+        self,
+        board: BoardState,
+        spec_open: "ScaffoldedAgent",
+        spec_mid: "ScaffoldedAgent",
+        spec_end: "ScaffoldedAgent",
+    ) -> dict:
+        """Route to the correct specialist based on game phase and piece counts.
+
+        Routing:
+          place phase                         → spec_open
+          move/fly + either side ≤ 5 pieces  → spec_end
+          otherwise                           → spec_mid
+        """
+        phase = get_game_phase(board, board.turn)
+        if phase == "place":
+            return spec_open.choose_move(board)
+        own = board.pieces_on_board.get(board.turn, 0)
+        opp_color = "B" if board.turn == "W" else "W"
+        opp = board.pieces_on_board.get(opp_color, 0)
+        if own <= 5 or opp <= 5:
+            return spec_end.choose_move(board)
+        return spec_mid.choose_move(board)

@@ -71,8 +71,8 @@ class ScaffoldedPolicyNet(nn.Module):
         self,
         move_feat_dim: int = MOVE_FEAT_DIM,
         value_input_dim: int = VALUE_INPUT_DIM,
-        policy_hidden: Sequence[int] = (128, 64),
-        value_hidden: Sequence[int] = (64, 32),
+        policy_hidden: Sequence[int] = (512, 256, 128),
+        value_hidden: Sequence[int] = (256, 128, 64),
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -180,7 +180,7 @@ class ScaffoldedPolicyNet(nn.Module):
         return cls(
             move_feat_dim=cfg.get("move_feat_dim", MOVE_FEAT_DIM),
             value_input_dim=cfg.get("value_input_dim", VALUE_INPUT_DIM),
-            policy_hidden=tuple(cfg.get("policy_hidden", (128, 64))),
-            value_hidden=tuple(cfg.get("value_hidden", (64, 32))),
+            policy_hidden=tuple(cfg.get("policy_hidden", (512, 256, 128))),
+            value_hidden=tuple(cfg.get("value_hidden", (256, 128, 64))),
             dropout=float(cfg.get("dropout", 0.0)),
         )

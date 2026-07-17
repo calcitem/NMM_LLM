@@ -3,36 +3,34 @@
 ## Board Layout
 
 ```
-a7───────────d7───────────g7  
-│            │            │  
-│   b6───────d6──────f6  │  
-│   │         │         │  │  
-│   │   c5───d5───e5   │  │  
-│   │   │           │  │  │  
-a4──b4──c4       e4──f4───g4  
-│   │   │           │  │  │  
-│   │   c3───d3───e3   │  │  
-│   │         │         │  │  
-│   b2───────d2──────f2  │  
-│            │            │  
+a7───────────d7───────────g7
+│            │            │
+│   b6───────d6──────f6  │
+│   │         │         │  │
+│   │   c5───d5───e5   │  │
+│   │   │           │  │  │
+a4──b4──c4       e4──f4───g4
+│   │   │           │  │  │
+│   │   c3───d3───e3   │  │
+│   │         │         │  │
+│   b2───────d2──────f2  │
+│            │            │
 a1───────────d1───────────g1
 ```
-
 
 ## Rebuild Rust Engine
 
 ```
-bash scripts/build\_rust.sh
+bash scripts/build_rust.sh
 ```
 
-Run whenever `native/nmm\_core/src/` files change.
-
+Run whenever `native/nmm_core/src/` files change.
 
 ## Self-Play Game Generation
 
 ```
-python tools/self\_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4 \\  
-  --game-dir data/games/self\_play --random-difficulty
+python tools/self_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4  \
+  --game-dir data/games/self_play --random-difficulty
 ```
 
 | Flag | Default | Description |
@@ -54,13 +52,12 @@ python tools/self\_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4
 | `--verbose` | off | Per-game status lines |
 
 
-
-## Value Net — Basic Training (train\_value\_net.py)
+## Value Net — Basic Training (train_value_net.py)
 
 ```
-.venv/bin/python tools/train\_value\_net.py \\  
-  --games-dir data/games --games-dir data/human\_games \\  
-  --decisive-only --epochs 30 --output data/value\_net.npz
+.venv/bin/python tools/train_value_net.py  \
+  --games-dir data/games --games-dir data/human_games  \
+  --decisive-only --epochs 30 --output data/value_net.npz
 ```
 
 | Flag | Default | Description |
@@ -73,16 +70,15 @@ python tools/self\_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4
 | `--decisive-only` | off | Skip drawn games |
 
 
-
-## Value Net — Human-Filtered V3 (train\_value\_net\_filtered.py)
+## Value Net — Human-Filtered V3 (train_value_net_filtered.py)
 
 ```
-.venv/bin/python tools/train\_value\_net\_filtered.py
+.venv/bin/python tools/train_value_net_filtered.py
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--games-dir PATH` | `data/human\_games` | Source game directory |
+| `--games-dir PATH` | `data/human_games` | Source game directory |
 | `--output PATH` | auto | Output .npz path |
 | `--epochs N` | 100 | Training epochs |
 | `--lr F` | 3e-4 | Learning rate |
@@ -99,10 +95,10 @@ python tools/self\_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4
 **Benchmark all nets once V3 is trained:**
 
 ```
-.venv/bin/python tools/bench\_vn\_filtered.py --diff 4 --budget 3.0 --games-per-pair 10  
-  
-\# Longer run (200 games)  
-.venv/bin/python tools/bench\_vn\_filtered.py --diff 5 --budget 3.0 --games-per-pair 20
+.venv/bin/python tools/bench_vn_filtered.py --diff 4 --budget 3.0 --games-per-pair 10
+
+# Longer run (200 games)
+.venv/bin/python tools/bench_vn_filtered.py --diff 5 --budget 3.0 --games-per-pair 20
 ```
 
 | Flag | Default | Description |
@@ -113,20 +109,16 @@ python tools/self\_play.py --games 500 --no-llm --white 7 --black 3 --parallel 4
 | `--out PATH` | — | JSON results output path |
 
 
+## Value Net — Phase Trajectory Training (train_vn_trajectory.py)
 
-## Value Net — Phase Trajectory Training (train\_vn\_trajectory.py)
-
-Trains THREE phase-specific value nets (placement / movement / fly) saved as
-`data/value\_net\_phase\_place.npz`, `data/value\_net\_phase\_move.npz`, `data/value\_net\_phase\_fly.npz`.
-At inference the web app loads all three as a `PhaseValueNet` and dispatches
-`predict()` to the correct sub-net based on the game phase.
+Trains THREE phase-specific value nets (placement / movement / fly) saved as `data/value_net_phase_place.npz`, `data/value_net_phase_move.npz`, `data/value_net_phase_fly.npz`. At inference the web app loads all three as a `PhaseValueNet` and dispatches `predict()` to the correct sub-net based on the game phase.
 
 Reward per position: `malom_sign × best_composite_quality` where composite = 0.6 × sentinel + 0.4 × heuristic (same signals as GAP net, computed live per trajectory position). Winner moves are randomly sampled from ALL winning successors (not just best DTW).
 
 **Full training run — all three phases (default settings):**
 
 ```
-.venv/bin/python scripts/train\_vn\_trajectory.py
+.venv/bin/python scripts/train_vn_trajectory.py
 ```
 
 Defaults: 5000 starts · 40 epochs · traj depth 40 · sentinel loaded automatically · bench 2000 accuracy.
@@ -134,38 +126,38 @@ Defaults: 5000 starts · 40 epochs · traj depth 40 · sentinel loaded automatic
 **Train only one phase:**
 
 ```
-.venv/bin/python scripts/train\_vn\_trajectory.py --phase move
+.venv/bin/python scripts/train_vn_trajectory.py --phase move
 ```
 
 **Smaller run to check quality first:**
 
 ```
-.venv/bin/python scripts/train\_vn\_trajectory.py --n-starts 500 --epochs 20
+.venv/bin/python scripts/train_vn_trajectory.py --n-starts 500 --epochs 20
 ```
 
 **Fine-tune from existing phase nets:**
 
 ```
-.venv/bin/python scripts/train\_vn\_trajectory.py \
-  --continue-from data/value\_net\_phase \
+.venv/bin/python scripts/train_vn_trajectory.py  \
+  --continue-from data/value_net_phase  \
   --n-starts 2000 --epochs 20
 ```
 
 **Benchmark only (no training):**
 
 ```
-.venv/bin/python scripts/train\_vn\_trajectory.py \
+.venv/bin/python scripts/train_vn_trajectory.py  \
   --epochs 0 --bench-accuracy 2000 --bench-traj 300 --bench-games 50
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--db PATH` | `data/human\_db.sqlite` | Human DB for starting positions |
-| `--malom-db PATH` | `.../Std\_DD\_89adjusted` | Malom DB directory |
-| `--sentinel PATH` | `learned\_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint for composite quality (falls back to heuristic-only if missing) |
-| `--out PATH` | `data/value\_net\_phase` | Base output path (no extension); creates \_place/\_move/\_fly.npz |
+| `--db PATH` | `data/human_db.sqlite` | Human DB for starting positions |
+| `--malom-db PATH` | `.../Std_DD_89adjusted` | Malom DB directory |
+| `--sentinel PATH` | `learned_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint for composite quality (falls back to heuristic-only if missing) |
+| `--out PATH` | `data/value_net_phase` | Base output path (no extension); creates _place/_move/_fly.npz |
 | `--phase PHASE` | all | Which phase(s) to train: `place`, `move`, `fly`, or `all` |
-| `--n-starts N` | 5000 | Starting positions to sample from human\_db |
+| `--n-starts N` | 5000 | Starting positions to sample from human_db |
 | `--traj-depth N` | 40 | Max plies per trajectory |
 | `--min-placed N` | 7 | Min total pieces placed in start position |
 | `--bucket-cap N` | none | Max starts per placement-stage bucket |
@@ -186,21 +178,24 @@ Defaults: 5000 starts · 40 epochs · traj depth 40 · sentinel loaded automatic
 | `--time-budget F` | 0.5 | Per-move budget for full-game benchmark |
 
 
-## Trajectory Value Net — Round-Robin Benchmark (bench\_trajectory\_value\_net.py)
+## Trajectory Value Net — Round-Robin Benchmark (bench_trajectory_value_net.py)
 
 Tests five configs against each other: Baseline, TrajVN at 10/30/60% blend, and GapNet.
 
 **Full round-robin (10 pairs):**
+
 ```
 .venv/bin/python scripts/bench_trajectory_value_net.py --games 20 --difficulty 4
 ```
 
 **Single matchup:**
+
 ```
 .venv/bin/python scripts/bench_trajectory_value_net.py --matchup TrajVN-30% Baseline --games 40
 ```
 
 **Custom blend percentages:**
+
 ```
 .venv/bin/python scripts/bench_trajectory_value_net.py --blends 20 40 80 --games 20
 ```
@@ -215,6 +210,7 @@ Tests five configs against each other: Baseline, TrajVN at 10/30/60% blend, and 
 | `--blends PCT…` | `10 30 60` | Value-net blend percentages to test |
 | `--matchup A B` | — | Single matchup between two named configs instead of round-robin |
 
+
 Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 
 ## GAP Net — Build Dataset + Train
@@ -222,15 +218,15 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 **Step 1 — Build training dataset:**
 
 ```
-.venv/bin/python scripts/build\_gap\_dataset.py
+.venv/bin/python scripts/build_gap_dataset.py
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--db PATH` | `data/human\_db.sqlite` | Human DB source |
-| `--sentinel PATH` | `learned\_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint |
-| `--value-net PATH` | `data/value\_net.npz` | Value net checkpoint |
-| `--out PATH` | `data/gap\_net\_training.npz` | Output training data |
+| `--db PATH` | `data/human_db.sqlite` | Human DB source |
+| `--sentinel PATH` | `learned_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint |
+| `--value-net PATH` | `data/value_net.npz` | Value net checkpoint |
+| `--out PATH` | `data/gap_net_training.npz` | Output training data |
 | `--samples-per-category N` | 15000 | Samples per WDL category |
 | `--dtw-threshold N` | 15 | DTW threshold for gap labelling |
 
@@ -238,16 +234,15 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 **Step 2 — Train the GAP net:**
 
 ```
-.venv/bin/python tools/train\_gap\_net.py --epochs 80
+.venv/bin/python tools/train_gap_net.py --epochs 80
 ```
 
 | Flag | Default | Description |
 | - | - | - |
 | `--epochs N` | 80 | Training epochs |
 | `--lr F` | 0.001 | Learning rate |
-| `--data PATH` | `data/gap\_net\_training.npz` | Training data |
-| `--out PATH` | `data/gap\_net.npz` | Output net |
-
+| `--data PATH` | `data/gap_net_training.npz` | Training data |
+| `--out PATH` | `data/gap_net.npz` | Output net |
 
 
 ## Benchmarking — Sentinel / GAP Net / Tournament
@@ -255,34 +250,34 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 **Base vs base (sanity check):**
 
 ```
-.venv/bin/python scripts/bench\_sentinel.py --games 200 --difficulty 4
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4
 ```
 
 **Sentinel (20% gap) vs base:**
 
 ```
-.venv/bin/python scripts/bench\_sentinel.py --games 200 --difficulty 4 \\  
-  --white-sentinel score\_adjust
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4  \
+  --white-sentinel score_adjust
 ```
 
 **GAP net vs base:**
 
 ```
-.venv/bin/python scripts/bench\_sentinel.py --games 200 --difficulty 4 --white-gap-net
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4 --white-gap-net
 ```
 
 **Sentinel + GAP net vs base:**
 
 ```
-.venv/bin/python scripts/bench\_sentinel.py --games 200 --difficulty 4 \\  
-  --white-sentinel score\_adjust --white-gap-net
+.venv/bin/python scripts/bench_sentinel.py --games 200 --difficulty 4  \
+  --white-sentinel score_adjust --white-gap-net
 ```
 
 | Flag | Default | Description |
 | - | - | - |
 | `--games N` | 4 | Number of games |
 | `--difficulty D` | 4 | AI difficulty (1–10) |
-| `--white-sentinel MODE` | — | Sentinel mode for White: `score\_adjust` etc. |
+| `--white-sentinel MODE` | — | Sentinel mode for White: `score_adjust` etc. |
 | `--black-sentinel MODE` | — | Sentinel mode for Black |
 | `--sentinel-path PATH` | best.pt | Sentinel checkpoint |
 | `--sentinel-scale F` | 0.20 | Min gap fraction for sentinel intervention |
@@ -299,7 +294,7 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 **Full round-robin tournament (S0/S10/S20/S30 + VN blends):**
 
 ```
-.venv/bin/python tools/bench\_tournament.py --diff 4 --budget 3.0 --games-per-pair 10
+.venv/bin/python tools/bench_tournament.py --diff 4 --budget 3.0 --games-per-pair 10
 ```
 
 | Flag | Default | Description |
@@ -307,13 +302,13 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 | `--diff D` | 4 | AI difficulty |
 | `--budget F` | 3.0 | Per-move time budget (seconds) |
 | `--games-per-pair N` | 10 | Games per config pair (must be even) |
-| `--out PATH` | `eval\_results.json` | JSON results output |
+| `--out PATH` | `eval_results.json` | JSON results output |
 
 
 **Sentinel v2 benchmark (after training v2/best.pt):**
 
 ```
-.venv/bin/python tools/bench\_sentinel\_v2.py --diff 4 --budget 3.0 --games-per-pair 10 --gap 20
+.venv/bin/python tools/bench_sentinel_v2.py --diff 4 --budget 3.0 --games-per-pair 10 --gap 20
 ```
 
 | Flag | Default | Description |
@@ -326,11 +321,10 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 | `--out PATH` | — | JSON results output |
 
 
-
 ## Opening Audit
 
 ```
-.venv/bin/python scripts/audit\_openings.py --games 5 --diff 4
+.venv/bin/python scripts/audit_openings.py --games 5 --diff 4
 ```
 
 | Flag | Default | Description |
@@ -344,42 +338,40 @@ Configs: `Baseline`, `TrajVN-10%`, `TrajVN-30%`, `TrajVN-60%`, `GapNet`
 | `--seed N` | 42 | Random seed |
 
 
-
 ## Human DB — Import PlayOK Games
 
 ```
-python tools/import\_playok.py \\  
-  --archive ~/playok\_archive/games \\  
-  --output data/human\_games
+python tools/import_playok.py  \
+  --archive ~/playok_archive/games  \
+  --output data/human_games
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--archive PATH` | `~/playok\_archive/games` | Input archive directory |
-| `--output PATH` | `data/human\_games` | Output directory for JSONL files |
+| `--archive PATH` | `~/playok_archive/games` | Input archive directory |
+| `--output PATH` | `data/human_games` | Output directory for JSONL files |
 | `--dry-run` | off | Count games without writing |
 | `--validate-only` | off | Check legality without writing |
 | `--limit N` | — | Stop after N new games |
 | `--verbose` | off | Per-game status lines |
 
 
-
 ## Human DB — Rebuild from Scratch
 
 ```
-.venv/bin/python tools/build\_human\_db.py \\  
-  --games-dir data/human\_games \\  
-  --extra-dirs data/games \\  
-  --malom-db /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted \\  
-  --output data/human\_db.sqlite \\  
+.venv/bin/python tools/build_human_db.py  \
+  --games-dir data/human_games  \
+  --extra-dirs data/games  \
+  --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted  \
+  --output data/human_db.sqlite  \
   --rebuild
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--games-dir PATH` | `data/human\_games` | Primary game directory |
+| `--games-dir PATH` | `data/human_games` | Primary game directory |
 | `--extra-dirs PATH…` | — | Additional directories |
-| `--output PATH` | `data/human\_db.sqlite` | Output SQLite path |
+| `--output PATH` | `data/human_db.sqlite` | Output SQLite path |
 | `--malom-db PATH` | — | Malom DB directory for WDL annotation |
 | `--no-malom` | off | Skip Malom annotation |
 | `--rebuild` | off | Clear DB and reprocess everything from scratch |
@@ -388,39 +380,37 @@ python tools/import\_playok.py \\
 
 > **Note:** Do not use both `--rebuild` and `--update`. Use neither to append without checking.
 
-
 ## Human DB — Incremental Update (SHA-tracked)
 
 ```
-.venv/bin/python tools/build\_human\_db\_sha.py \\  
-  --update \\  
-  --games-dir data/human\_games \\  
-  --output data/human\_db.sqlite \\  
-  --malom-db /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted
+.venv/bin/python tools/build_human_db_sha.py  \
+  --update  \
+  --games-dir data/human_games  \
+  --output data/human_db.sqlite  \
+  --malom-db /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--games-dir PATH` | `data/human\_games` | Primary game directory |
+| `--games-dir PATH` | `data/human_games` | Primary game directory |
 | `--extra-dirs PATH…` | — | Additional directories |
-| `--output PATH` | `data/human\_db.sqlite` | Output SQLite path |
+| `--output PATH` | `data/human_db.sqlite` | Output SQLite path |
 | `--malom-db PATH` | — | Malom DB directory |
 | `--no-malom` | off | Skip Malom annotation |
 | `--update` | off | Only process files whose SHA-256 changed |
 | `--rebuild` | off | Clear DB and reprocess from scratch |
 
 
-
 ## Full Game DB — Build
 
 ```
-python tools/build\_fullgame\_db.py \\  
-  --expand-from-games data/games \\  
-  --min-seed-frequency 3 \\  
-  --early-expand-depth 4 \\  
-  --expand-depth 6 \\  
-  --output /mnt/windows/NMM\_DB/fullgame.bin \\  
-  --temp-db /mnt/windows/NMM\_DB/ \\  
+python tools/build_fullgame_db.py  \
+  --expand-from-games data/games  \
+  --min-seed-frequency 3  \
+  --early-expand-depth 4  \
+  --expand-depth 6  \
+  --output /mnt/windows/NMM_DB/fullgame.bin  \
+  --temp-db /mnt/windows/NMM_DB/  \
   --max-db-gb 40
 ```
 
@@ -428,7 +418,7 @@ python tools/build\_fullgame\_db.py \\
 | - | - | - |
 | `--expand-from-games DIR` | `data/games` | Human game records to seed from |
 | `--output PATH` | `data/fullgame.bin` | Output binary file |
-| `--db-dir DIR` | — | Shorthand for `--output \<dir\>/fullgame.bin` |
+| `--db-dir DIR` | — | Shorthand for `--output <dir>/fullgame.bin` |
 | `--temp-db PATH` | alongside output | Temporary SQLite build DB (use large drive) |
 | `--max-db-gb GB` | 10.0 | Stop BFS when temp DB exceeds this size |
 | `--max-gb GB` | 6.0 | Abort when process RSS exceeds this (GB) |
@@ -441,17 +431,16 @@ python tools/build\_fullgame\_db.py \\
 | `--quiet` | off | Suppress progress logging |
 
 
-
 ## Endgame DB — Build
 
 ```
-python tools/build\_endgame\_db.py --build-all --skip-existing \\  
-  --out-dir /mnt/windows/NMM\_DB
+python tools/build_endgame_db.py --build-all --skip-existing  \
+  --out-dir /mnt/windows/NMM_DB
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--out-dir PATH` | `data/endgame` | Directory for `endgame\_\*.wdl` files |
+| `--out-dir PATH` | `data/endgame` | Directory for `endgame_*.wdl` files |
 | `--build-all` | off | Build all tables in dependency order |
 | `--max-sum N` | 11 | Max nW+nB when using `--build-all` |
 | `--nW N` | — | White piece count (single table build) |
@@ -460,22 +449,21 @@ python tools/build\_endgame\_db.py --build-all --skip-existing \\
 | `--quiet` | off | Suppress per-pass logging |
 
 
-
 ## Sentinel v2 — Train
 
 ```
-.venv/bin/python scripts/train\_sentinel.py \\  
-  --game-dir data/games \\  
-  --human-game-dir data/human\_games \\  
-  --ai-game-dir data/ai\_games \\  
-  --db-path /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted \\  
-  --drop-db-features \\  
-  --aux-wdl --lambda-wdl 0.4 \\  
-  --contrastive --lambda-contrastive 0.4 \\  
-  --curriculum \\  
-  --epochs 50 --epochs-phase1 10 \\  
-  --lr-phase1 5e-3 --lr-phase2 5e-3 \\  
-  --out-dir learned\_ai/sentinel/checkpoints/v2 \\  
+.venv/bin/python scripts/train_sentinel.py  \
+  --game-dir data/games  \
+  --human-game-dir data/human_games  \
+  --ai-game-dir data/ai_games  \
+  --db-path /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted  \
+  --drop-db-features  \
+  --aux-wdl --lambda-wdl 0.4  \
+  --contrastive --lambda-contrastive 0.4  \
+  --curriculum  \
+  --epochs 50 --epochs-phase1 10  \
+  --lr-phase1 5e-3 --lr-phase2 5e-3  \
+  --out-dir learned_ai/sentinel/checkpoints/v2  \
   --device cuda
 ```
 
@@ -505,7 +493,6 @@ python tools/build\_endgame\_db.py --build-all --skip-existing \\
 | `--config PATH` | — | JSON config file (overrides flags) |
 
 
-
 ## Learned AI — Imitation Data Generation
 
 Run these before training specialist networks.
@@ -513,9 +500,9 @@ Run these before training specialist networks.
 **Step 1 — AI self-play imitation data (~10h):**
 
 ```
-.venv/bin/python scripts/gen\_imitation\_data.py \\  
-  --games 1000 --diff 7 \\  
-  --sentinel learned\_ai/sentinel/checkpoints/best.pt
+.venv/bin/python scripts/gen_imitation_data.py  \
+  --games 1000 --diff 7  \
+  --sentinel learned_ai/sentinel/checkpoints/best.pt
 ```
 
 | Flag | Default | Description |
@@ -524,134 +511,218 @@ Run these before training specialist networks.
 | `--diff D` | 3 | AI difficulty |
 | `--sentinel PATH` | — | Sentinel checkpoint |
 | `--malom PATH` | — | Malom DB path |
-| `--value-net PATH` | `data/value\_net.npz` | Value net checkpoint |
+| `--value-net PATH` | `data/value_net.npz` | Value net checkpoint |
 | `--out PATH` | auto | Output .npz |
 | `--max-ply N` | 300 | Max plies per game |
 | `--seed N` | 42 | Random seed |
 
 
-**Step 2 — Human game imitation data (~45s, run after or in parallel):**
+**Step 2 — Human game imitation data (62-float, legacy):**
 
 ```
-.venv/bin/python scripts/gen\_human\_imitation\_data.py
+.venv/bin/python scripts/gen_human_imitation_data.py
 ```
 
 | Flag | Default | Description |
 | - | - | - |
 | `--games-dir PATH` | `data/games` | Source game directory |
-| `--out PATH` | `learned\_ai/data/human\_imitation.npz` | Output .npz |
-| `--sentinel PATH` | `learned\_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint |
+| `--out PATH` | `learned_ai/data/human_imitation.npz` | Output .npz |
+| `--sentinel PATH` | `learned_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint |
 | `--malom PATH` | — | Malom DB path |
-| `--value-net PATH` | `data/value\_net.npz` | Value net |
+| `--value-net PATH` | `data/value_net.npz` | Value net |
 | `--won-weight F` | 1.0 | Sample weight for winner positions |
 | `--draw-weight F` | 0.3 | Sample weight for draw positions |
 | `--loser-weight F` | 0.5 | Sample weight for loser positions from human-won games |
 
 
+**Step 2b — Human game imitation data v2 (122-float, for v2 specialists; ~6–8h with sentinel):**
 
-## Learned AI — Specialist Training (Opening / Midgame / Endgame)
-
-Run all three in parallel (independent networks).
-
-**Opening specialist:**
+Uses `encode_position_with_lookahead` with 15-ply LookaheadAdvisor + GapNet. Cap `--max-moves 120` prevents stalling on very long game files.
 
 ```
-.venv/bin/python scripts/train\_scaffolded\_opening.py \\  
-  --max-games 10000 --max-ply 140 \\  
-  --malom /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted
+.venv/bin/python scripts/gen_human_imitation_data_v2.py  \
+  --gap-net data/gap_net.npz --max-moves 120
 ```
 
-**Midgame specialist:**
-
-```
-.venv/bin/python scripts/train\_scaffolded\_midgame.py \\  
-  --max-games 10000 --max-ply 140 \\  
-  --malom /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted
-```
-
-**Endgame specialist:**
-
-```
-.venv/bin/python scripts/train\_scaffolded\_endgame.py \\  
-  --max-games 10000 --max-ply 140 \\  
-  --malom /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted
-```
-
-Common flags (all three specialists):
+Output: `learned_ai/data/human_imitation2.npz` — 13,040 positions, 122-float features.
 
 | Flag | Default | Description |
 | - | - | - |
-| `--malom PATH` | — | Malom DB directory |
+| `--games-dir PATH` | `data/human_games` | Source game directory |
+| `--out PATH` | `learned_ai/data/human_imitation2.npz` | Output .npz |
 | `--sentinel PATH` | `best.pt` | Sentinel checkpoint |
-| `--value-net PATH` | `data/value\_net.npz` | Value net |
-| `--out-dir PATH` | `learned\_ai/checkpoints/scaffolded/s\_\*` | Checkpoint output |
+| `--value-net PATH` | `data/value_net.npz` | Value net |
+| `--gap-net PATH` | `data/gap_net.npz` | GapNet (blunder density) |
+| `--max-moves N` | 120 | Cap moves per game to avoid stalls |
+
+
+## Learned AI — Specialist Training v2 (Opening / Midgame / Endgame)
+
+Three independent networks, each acting directly for its own phase. No overseer. Features: 122-float move features (62-float base + 15-ply × 4-signal lookahead block). Value head input: 32 floats (23-float base + 9-float history: last 3 moves × from/to/capture). Reward: sentinel delta + heuristic delta + mill bonus (Malom zeroed for opening specialist). Difficulty: 20 levels, log-scale time budget (L1≈0.01 s → L10≈0.6 s → L20=60 s). Advancement: win/(win+loss) ≥ 51% (level 1) → 60% (level 20), min 20 decisive games.
+
+**Prerequisite: generate `human_imitation2.npz` first (s1a warm-start data):**
+
+```
+.venv/bin/python scripts/gen_human_imitation_data_v2.py  \
+  --gap-net data/gap_net.npz --max-moves 120
+```
+
+**Opening specialist (v2) — fresh start:**
+
+```
+.venv/bin/python scripts/train_s_open_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+```
+
+**Opening specialist (v2) — resume:**
+
+```
+.venv/bin/python scripts/train_s_open_v2.py --auto-resume-best --max-games 10000
+```
+
+**Opening specialist (v2) — parallel (2 games per iteration):**
+
+```
+.venv/bin/python scripts/train_s_open_v2.py --max-games 10000 --batch-games 2
+```
+
+**Midgame specialist (v2):**
+
+```
+.venv/bin/python scripts/train_s_mid_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+```
+
+**Endgame specialist (v2):**
+
+```
+.venv/bin/python scripts/train_s_end_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+```
+
+**Smoke test (5 games, no warm-start):**
+
+```
+.venv/bin/python scripts/train_s_open_v2.py --max-games 5 --no-s1a-warmstart
+.venv/bin/python scripts/train_s_mid_v2.py  --max-games 5 --no-s1a-warmstart
+.venv/bin/python scripts/train_s_end_v2.py  --max-games 5 --no-s1a-warmstart
+```
+
+Common flags (all three v2 specialists):
+
+| Flag | Default | Description |
+| - | - | - |
+| `--sentinel PATH` | `best.pt` | Sentinel checkpoint |
+| `--value-net PATH` | `data/value_net.npz` | Trajectory value net |
+| `--gap-net PATH` | `data/gap_net.npz` | Gap net (blunder density) |
+| `--out-dir PATH` | `learned_ai/checkpoints/scaffolded/s_*_v2` | Checkpoint output |
+| `--s1a-data PATH` | `human_imitation2.npz` | Pre-RL imitation warm-start data |
+| `--no-s1a-warmstart` | off | Skip s1a imitation warm-start (run from scratch) |
+| `--batch-games N` | 1 | Parallel primary rollouts via ThreadPoolExecutor (2 recommended) |
 | `--max-games N` | 5000 | Training games |
-| `--max-ply N` | auto | Max plies per game |
-| `--lr F` | auto | Learning rate |
-| `--entropy-coef F` | auto | Entropy regularisation coefficient |
-| `--update-every N` | auto | Policy update interval (games) |
-| `--rolling-win N` | auto | Rolling window for win-rate tracking |
+| `--diff-max N` | 20 | Maximum difficulty level |
+| `--time-budget F` | -1 (auto) | Override time budget per move (≤0 = formula) |
+| `--lr F` | 1e-4 | Learning rate |
+| `--entropy-coef F` | 0.01 | Entropy regularisation coefficient |
+| `--update-every N` | 16 | Policy update interval (steps) |
+| `--rolling-win N` | 50 | Rolling window for win-rate tracking |
 | `--resume PATH` | — | Explicit checkpoint to resume from |
-| `--auto-resume-best` | off | Auto-resume from `s\_\*/best.pt` |
+| `--auto-resume-best` | off | Auto-resume from `s_*_v2/best.pt` |
 | `--ppo` | off | Use PPO instead of A2C |
 | `--seed N` | 42 | Random seed |
 
 
+## Learned AI — Specialist Benchmark (bench_scaffolded.py)
 
-## Learned AI — Overseer Training
+Runs the **v2 SpecialistRouter** (opening + midgame + endgame specialists routed by phase) as one player, versus a matrix of heuristic-opponent configurations at multiple difficulties. Colours alternate every game. Streams results to `data/bench/scaffolded_v2_<timestamp>.jsonl` (one row per matchup) — safe for overnight runs.
 
-Run after all three specialists converge.
+**Opponent configurations** (all share `value_net_blend=20`, sentinel `_sentinel_activation_prob=0.20`):
+
+| Config | Description |
+| --- | --- |
+| `raw` | GameAI only (no sentinel / vn / gap) |
+| `sentinel` | GameAI + sentinel score_adjust (20% intervention) |
+| `vn` | GameAI + value_net (blend 20%) |
+| `gap` | GameAI + gap_net (blunder-zone exploitation) |
+| `sv` | GameAI + sentinel + value_net |
+| `full` | GameAI + sentinel + value_net + gap_net |
+| `deep` | Full stack + max_search_depth=25 (extended tactical search) |
+
+**Heuristic time budget**: by default (`--time-budget -1`), each opponent move uses the SAME per-difficulty cap the game applies in real play:
+
+| Diff | Cap | Notes |
+| --- | --- | --- |
+| 1–5 | 15 s | Reduced to 3 s (first 2 moves) / 10 s (≤4 pieces on board) automatically |
+| 6 | 30 s | Same early-placement reductions |
+| 7 | 45 s | Same early-placement reductions |
+| 8–10 | 60 s | Same early-placement reductions |
+
+Pass `--time-budget SECONDS` (positive value) to override with a flat cap — useful for fast smoke tests since the game-native caps are slow (they mirror real interactive play).
+
+**Quick smoke test (10 games, diff 5, two configs, capped at 2 s/move):**
 
 ```
-.venv/bin/python scripts/train\_scaffolded\_overseer\_parallel.py \\  
-  --midgame-ckpt  learned\_ai/checkpoints/scaffolded/s\_mid/best.pt \\  
-  --endgame-ckpt  learned\_ai/checkpoints/scaffolded/s\_end/best.pt \\  
-  --opening-ckpt  learned\_ai/checkpoints/scaffolded/s\_open/best.pt \\  
-  --max-games 10000 --max-ply 140 \\  
-  --malom /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted \\  
-  --workers 8
+.venv/bin/python scripts/bench_scaffolded.py --games 10 --difficulties 5 \
+    --opponents raw,full --time-budget 2.0
 ```
 
-**With self-play and auto-resume (post game 150):**
+**Overnight sweep at game-native per-difficulty budgets:**
 
 ```
-.venv/bin/python scripts/train\_scaffolded\_overseer\_parallel.py \\  
-  --midgame-ckpt  learned\_ai/checkpoints/scaffolded/s\_mid/best.pt \\  
-  --endgame-ckpt  learned\_ai/checkpoints/scaffolded/s\_end/best.pt \\  
-  --opening-ckpt  learned\_ai/checkpoints/scaffolded/s\_open/best.pt \\  
-  --max-games 10000 --max-ply 140 \\  
-  --malom /mnt/windows/NMM\_DB/Malom\_Standard\_Ultra-strong\_1.1.0/Std\_DD\_89adjusted \\  
-  --workers 8 --self-play-ratio 0.1 --max-branches-per-game 0 --auto-resume-best
+.venv/bin/python scripts/bench_scaffolded.py --games 40 --difficulties 3,5,7,9
+```
+
+**Deeper specialist lookahead (25 plies) at game-native budgets:**
+
+```
+.venv/bin/python scripts/bench_scaffolded.py --games 40 --difficulties 5,7,9 \
+    --specialist-ply-depth 25
 ```
 
 | Flag | Default | Description |
-| - | - | - |
-| `--opening-ckpt PATH` | — | Opening specialist checkpoint |
-| `--midgame-ckpt PATH` | — | Midgame specialist checkpoint |
-| `--endgame-ckpt PATH` | — | Endgame specialist checkpoint |
-| `--malom PATH` | — | Malom DB directory |
-| `--workers N` | 4 | Parallel worker processes |
-| `--max-games N` | 5000 | Training games |
-| `--max-ply N` | auto | Max plies per game |
-| `--max-ply-branch N` | auto | Max plies for branch games |
-| `--self-play-ratio F` | auto | Fraction of games using self-play |
-| `--max-branches-per-game N` | 0 | Branch games per main game |
-| `--auto-resume-best` | off | Auto-resume from `s\_over/best.pt` |
-| `--resume PATH` | — | Explicit checkpoint to resume |
-| `--scratch` | off | Start from scratch (ignore existing ckpt) |
-| `--out-dir PATH` | `s\_over/` | Checkpoint output directory |
-| `--s1b-data PATH` | `learned\_ai/data/human\_imitation.npz` | Human imitation data for refresher |
-| `--s1b-refresher-epochs N` | auto | Epochs per refresher cycle |
-| `--no-s1b-refresher` | off | Disable human imitation refresher |
-| `--gameai-depth N` | 7 | Depth for in-loop heuristic AI opponent |
-| `--human-db PATH` | — | Human DB path |
-| `--no-lookahead` | off | Disable lookahead in policy |
-| `--sentinel PATH` | `best.pt` | Sentinel checkpoint |
-| `--value-net PATH` | `data/value\_net.npz` | Value net |
-| `--lr F` | auto | Learning rate |
-| `--seed N` | 42 | Random seed |
+| --- | --- | --- |
+| `--games N` | 40 | Games per matchup (alternating colours) |
+| `--difficulties LIST` | `3,5,7,9` | Comma-separated GameAI difficulties (1–10) |
+| `--opponents LIST` | `raw,sentinel,vn,gap,sv,full,deep` | Which configs to test (comma-separated) |
+| `--time-budget F` | `-1` (game-native) | Per-move heuristic budget. ≤ 0 → use game's per-difficulty caps (15/30/45/60 s + early reductions). Positive → flat override. |
+| `--specialist-ply-depth N` | 15 | LookaheadAdvisor ply depth used by the specialists |
+| `--max-plies N` | 400 | Max plies per game before draw |
+| `--sentinel-path PATH` | `learned_ai/sentinel/checkpoints/best.pt` | Sentinel checkpoint |
+| `--value-net-path PATH` | `data/value_net.npz` | Value net checkpoint |
+| `--gap-net-path PATH` | `data/gap_net.npz` | Gap net checkpoint |
+| `--malom-path PATH` | `/mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted` | Malom perfect DB directory |
+| `--out-dir PATH` | `data/bench` | Output directory for the JSONL stream |
+| `--quiet` | off | Suppress per-game outcome dots |
+
+**Output**: `data/bench/scaffolded_v2_<YYYYMMDD_HHMMSS>.jsonl`, one row per matchup with fields `config, difficulty, games, wins, draws, losses, win_rate, draw_rate, score, elapsed_s, avg_s_per_game, time_budget_s, time_budget_mode, specialist_ply_depth, timestamp`. `time_budget_mode` records whether that row used `game_native_per_diff` or `flat_override`. Score = `(wins + 0.5 × draws) / games`. A final markdown table is printed to stdout.
+
+**Prerequisite**: v2 specialist checkpoints must exist at `learned_ai/checkpoints/scaffolded/{s_open_v2,s_mid_v2,s_end_v2}/best.pt`.
 
 
+## Learned AI — Extended Tactical Search Benchmark
+
+Head-to-head: extended tactical search (fast_eval=False) vs no-extended (fast_eval=True).
+
+**100-game result at 1s/move (completed 2026-07-10):** Extended 51 — No-Extended 10 — Draws 39 (51% vs 10%, 39% draws). Extended wins 5:1. Result is decisive.
+
+**Run this bench yourself:**
+
+```
+.venv/bin/python /tmp/bench_ext_vs_noext.py
+```
+
+Variables at top of script: `BUDGET` (seconds/move), `N_GAMES` (total games).
+
+## Learned AI — Overseer Training (RETIRED)
+
+The overseer meta-layer has been removed. Specialists now act directly for their own phase (place → opening, move ≥6 pieces → midgame, move/fly ≤5 pieces → endgame). The scripts below still exist but are not used in the v2 pipeline.
+
+```
+.venv/bin/python scripts/train_scaffolded_overseer_parallel.py  \
+  --midgame-ckpt  learned_ai/checkpoints/scaffolded/s_mid/best.pt  \
+  --endgame-ckpt  learned_ai/checkpoints/scaffolded/s_end/best.pt  \
+  --opening-ckpt  learned_ai/checkpoints/scaffolded/s_open/best.pt  \
+  --max-games 10000 --max-ply 140  \
+  --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted  \
+  --workers 8
+```
 
 ## Puzzle Generators
 
@@ -660,14 +731,14 @@ Run after all three specialists converge.
 Uses Malom DB path from `data/settings.json`.
 
 ```
-.venv/bin/python tools/placement\_puzzle\_generator.py \\  
+.venv/bin/python tools/placement_puzzle_generator.py  \
   --depth random --max-winning-moves 2 --side random
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--side W\\|B\\|random` | random | Which side has the winning move |
-| `--depth 0\\|4\\|5\\|6\\|7` | 0 | Target win depth in winner moves (0 = random) |
+| `--side W\|B\|random` | random | Which side has the winning move |
+| `--depth 0\|4\|5\|6\|7` | 0 | Target win depth in winner moves (0 = random) |
 | `--max-winning-moves N` | 2 | Reject positions with more than N winning first moves |
 | `--count N` | 0 | Puzzles to generate (0 = run forever) |
 | `--attempts N` | 3000 | Positions sampled per puzzle attempt |
@@ -678,15 +749,15 @@ Uses Malom DB path from `data/settings.json`.
 ### Midgame Puzzles (Malom DB)
 
 ```
-.venv/bin/python tools/malom\_puzzle\_generator.py \\  
-  --depth 6 --max-winning-moves 2 --side random \\  
+.venv/bin/python tools/malom_puzzle_generator.py  \
+  --depth 6 --max-winning-moves 2 --side random  \
   --min-pieces 4 --max-pieces 16
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--side W\\|B\\|random` | random | Which side has the winning move |
-| `--depth 0\\|4\\|5\\|6\\|7` | 0 | Target win depth (0 = random) |
+| `--side W\|B\|random` | random | Which side has the winning move |
+| `--depth 0\|4\|5\|6\|7` | 0 | Target win depth (0 = random) |
 | `--max-winning-moves N` | 2 | Reject positions with more than N winning first moves |
 | `--min-pieces N` | 4 | Minimum pieces per side |
 | `--max-pieces N` | 7 | Maximum pieces per side (raise for richer midgame) |
@@ -699,16 +770,16 @@ Uses Malom DB path from `data/settings.json`.
 ### Endgame Puzzles (Retrograde DB)
 
 ```
-.venv/bin/python tools/puzzle\_generator.py \\  
+.venv/bin/python tools/puzzle_generator.py  \
   --depth random --max-winning-moves 2 --side random --random-db
 ```
 
 | Flag | Default | Description |
 | - | - | - |
-| `--side W\\|B\\|random` | random | Which side has the winning move |
-| `--depth 3\\|4\\|5\\|6\\|7\\|random` | random | Target win depth in winner moves |
+| `--side W\|B\|random` | random | Which side has the winning move |
+| `--depth 3\|4\|5\|6\|7\|random` | random | Target win depth in winner moves |
 | `--max-winning-moves N` | 2 | Reject positions with more than N winning first moves |
-| `--db FILE\\|random` | random | Specific endgame .wdl file from `data/endgame/` |
+| `--db FILE\|random` | random | Specific endgame .wdl file from `data/endgame/` |
 | `--random-db` | off | Pick a new random DB file for every attempt (cross-table) |
 | `--count N` | 0 | Puzzles to generate (0 = run forever) |
 | `--attempts N` | 5000 | Positions sampled per puzzle attempt |

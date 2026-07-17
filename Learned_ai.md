@@ -558,6 +558,15 @@ search doesn't block training.
 
 ## Advancement Criteria
 
+### v2 Specialists (train_s_open_v2 / train_s_mid_v2 / train_s_end_v2)
+
+Advancement fires when **win/(win+loss) ≥ threshold**, ignoring draws entirely.
+Requires a minimum of **20 decisive games** in the rolling window.
+Threshold ramps linearly: **51% at level 1 → 60% at level 20** (20 levels total).
+Time budget scales logarithmically: L1≈0.01 s → L10≈0.6 s → L20=60 s.
+
+### v1 Specialists (legacy)
+
 | Specialist | Advance condition | Window |
 |-|-|-|
 | Opening | `(wr ≥ 30% AND dr ≥ 30%) OR wr ≥ 50%` | 50-game rolling, full-difficulty heuristic games only |
@@ -656,9 +665,9 @@ forward pass, extending the 77-float base to 85 floats.
 
 | File | Purpose |
 |-|-|
-| `learned_ai/models/scaffolded_encoder.py` | `encode_position()` + `encode_position_with_lookahead()` — builds (k,62) or (k,77) feat matrix |
+| `learned_ai/models/scaffolded_encoder.py` | `encode_position()` + `encode_position_with_lookahead()` — builds (k,62) base or (k,122) with 15-ply lookahead; `VALUE_INPUT_DIM=23` |
 | `learned_ai/models/scaffolded_net.py` | `ScaffoldedPolicyNet` — policy (dim→128→64→1) + value head |
-| `learned_ai/models/lookahead_advisor.py` | `LookaheadAdvisor` — 5-ply forward simulation, all models |
+| `learned_ai/models/lookahead_advisor.py` | `LookaheadAdvisor` — 15-ply forward simulation (4 signals × 15 = 60-float block) |
 | `learned_ai/models/overseer_extras.py` | `build_overseer_extras()` — 77→85 float extension for Overseer |
 | `learned_ai/training/scaffolded_a2c.py` | `ScaffoldedStep`, `scaffolded_a2c_update()`, `scaffolded_ppo_update()` |
 | `learned_ai/training/position_pool.py` | `load_position_pool()` — midgame turn-10 and endgame <12-piece pools |
@@ -667,11 +676,15 @@ forward pass, extending the 77-float base to 85 floats.
 | `ai/human_db.py` | `HumanDB` — 22,895 human game SQLite; `query_moves()` for Overseer features |
 | `scripts/gen_imitation_data.py` | Stage 1 supervised dataset (heuristic self-play, Malom soft labels) |
 | `scripts/train_scaffolded_s1.py` | Stage 1: imitation training |
-| `scripts/gen_human_imitation_data.py` | Stage 1b supervised dataset (human games) |
+| `scripts/gen_human_imitation_data.py` | Stage 1b supervised dataset (human games, 62-float legacy) |
+| `scripts/gen_human_imitation_data_v2.py` | Stage 1a warm-start data (human games, 122-float with 15-ply lookahead + GapNet) |
 | `scripts/train_scaffolded_s1b.py` | Stage 1b: human-game fine-tune (policy head only) |
-| `scripts/train_scaffolded_opening.py` | Stage 2: Opening Specialist |
-| `scripts/train_scaffolded_midgame.py` | Stage 3: Midgame Specialist |
-| `scripts/train_scaffolded_endgame.py` | Stage 4: Endgame Specialist |
+| `scripts/train_scaffolded_opening.py` | Stage 2: Opening Specialist (v1, retired) |
+| `scripts/train_scaffolded_midgame.py` | Stage 3: Midgame Specialist (v1, retired) |
+| `scripts/train_scaffolded_endgame.py` | Stage 4: Endgame Specialist (v1, retired) |
+| `scripts/train_s_open_v2.py` | Opening Specialist v2: 15-ply lookahead, 20-level, s1a warmstart, history features, parallel batch |
+| `scripts/train_s_mid_v2.py` | Midgame Specialist v2 |
+| `scripts/train_s_end_v2.py` | Endgame Specialist v2 |
 | `scripts/train_scaffolded_overseer.py` | Stage 5: Overseer (serial, single process) |
 | `scripts/train_scaffolded_overseer_parallel.py` | Stage 5: Overseer (parallel, N workers via ProcessPoolExecutor) |
 | `scripts/bench_scaffolded.py` | Headless benchmark vs heuristic configs |

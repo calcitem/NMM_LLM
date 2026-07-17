@@ -297,17 +297,32 @@ except Exception as _le:
 
 # ── Overseer (ScaffoldedPolicyNet) — advisory pick-probability overlay ───────
 _overseer_advisor = None
+# Prefer v2 SpecialistRouter (three phase specialists) — falls back to legacy Overseer.
 try:
-    from learned_ai.models.overseer import load_overseer as _load_overseer
-    _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor,
-                                        value_net=_value_net,
-                                        human_db=_human_db)
+    from learned_ai.agents.specialist_router import load_specialist_router as _load_specialist_router
+    _overseer_advisor = _load_specialist_router(
+        sentinel_advisor=_sentinel_advisor,
+        value_net=_value_net,
+        gap_net=_gap_net,
+        human_db=_human_db,
+    )
     if _overseer_advisor is not None:
-        log.info("Overseer advisor loaded")
-    else:
-        log.info("Overseer advisor: no checkpoint found — overlay disabled")
-except Exception as _oe:
-    log.warning("Overseer advisor unavailable: %s", _oe)
+        log.info("SpecialistRouter (v2 three-specialist) loaded — using in place of Overseer")
+except Exception as _sre:
+    log.warning("SpecialistRouter load failed (%s) — falling back to Overseer", _sre)
+
+if _overseer_advisor is None:
+    try:
+        from learned_ai.models.overseer import load_overseer as _load_overseer
+        _overseer_advisor = _load_overseer(sentinel_advisor=_sentinel_advisor,
+                                            value_net=_value_net,
+                                            human_db=_human_db)
+        if _overseer_advisor is not None:
+            log.info("Overseer advisor loaded (legacy path)")
+        else:
+            log.info("Overseer advisor: no checkpoint found — overlay disabled")
+    except Exception as _oe:
+        log.warning("Overseer advisor unavailable: %s", _oe)
 
 # ── Malom perfect DB (ExternalSolvedDB) — used for DB Lines overlay and DB fallback ──
 # Path is read from settings.json "malom_db_path" (user-configurable via Tools page);
@@ -2883,9 +2898,28 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
         log.error("AI deliberation failed: %s", exc, exc_info=True)
         raise
 
-    # Overseer player mode: replace engine's choice with policy-network argmax.
-    if session.use_overseer_player and _overseer_advisor is not None and _overseer_advisor.is_loaded():
+    # Specialist AI mode: triggered by difficulty 9 or 10 (or by the legacy
+    # use_overseer_player toggle, kept as a hidden test hook).  In specialist
+    # mode the coordinator's alpha-beta search (30 s @ diff 9 / 60 s @ diff 10)
+    # provides the top-K candidates; the phase-routed specialist re-ranks them
+    # and its argmax is the played move.  On specialist failure we fall back
+    # to the coordinator's move but print loudly to stderr so the user sees it.
+    _spec_by_diff = (session.game_ai is not None
+                     and int(getattr(session.game_ai, "difficulty", 0)) >= 9)
+    _spec_by_legacy = bool(session.use_overseer_player)
+    _spec_mode = ((_spec_by_diff or _spec_by_legacy)
+                  and _overseer_advisor is not None
+                  and _overseer_advisor.is_loaded())
+    if _spec_mode:
         try:
+            # Attach the just-searched coordinator GameAI so the specialist
+            # can reuse the TT + killer/history state (shared-search).  This
+            # avoids the router running a second full alpha-beta from scratch.
+            if session.game_ai is not None and hasattr(_overseer_advisor, "set_gameai"):
+                try:
+                    _overseer_advisor.set_gameai(session.game_ai)
+                except Exception:
+                    pass
             legal = get_all_legal_moves(board)
             if legal:
                 ov_cands = [{"from": m.get("from"), "to": m.get("to"), "capture": m.get("capture")} for m in legal]
@@ -2893,9 +2927,22 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
                 if ov_probs:
                     best = max(range(len(ov_probs)), key=lambda i: ov_probs[i])
                     move = legal[best]
-                    log.info("Overseer player: %s (prob=%.3f)", move, ov_probs[best])
+                    _mode_tag = f"diff{session.game_ai.difficulty}" if _spec_by_diff else "legacy_toggle"
+                    log.info("Specialist AI (%s): %s (prob=%.3f)", _mode_tag, move, ov_probs[best])
+                else:
+                    import sys as _sys
+                    print(f"\n[Specialist AI] score_moves returned None at diff "
+                          f"{session.game_ai.difficulty if session.game_ai else '?'} — "
+                          f"falling back to coordinator move.",
+                          file=_sys.stderr, flush=True)
         except Exception as _oe:
-            log.debug("Overseer player override failed: %s", _oe)
+            import sys as _sys, traceback as _tb
+            _diff_tag = session.game_ai.difficulty if session.game_ai else "?"
+            print(f"\n[Specialist AI @ diff {_diff_tag}] specialist FAILED — "
+                  f"falling back to coordinator move: {_oe}",
+                  file=_sys.stderr, flush=True)
+            _tb.print_exc(file=_sys.stderr)
+            log.warning("Specialist AI override failed: %s", _oe, exc_info=True)
 
     elapsed = _time.time() - t0
     log.info("AI turn end    move=%s elapsed=%.2fs ponder_hit=%s", move, elapsed, _ponder_hit is not None)
@@ -3713,6 +3760,7 @@ async def ws_endpoint(websocket: WebSocket):
 
                 # Endgame DB: probe each resulting position for WDL
                 eg_flags: dict = {}
+                eg_dtws:  dict = {}   # per-move absolute depth-to-mate (Malom only)
                 if _endgame_solved_db:
                     total_pc = sum(diag_board.pieces_on_board.values())
                     all_placed = (diag_board.pieces_placed.get("W", 0) >= 9
@@ -3750,21 +3798,50 @@ async def ws_endpoint(websocket: WebSocket):
                                 except Exception:
                                     pass
 
-                # Malom perfect DB: fill eg_flags for any move not covered above
-                if _malom_db is not None and _malom_db.is_available():
+                # Malom perfect DB: fill eg_flags for any move not covered above,
+                # and eg_dtws (moves-to-mate absolute value) whenever Malom is loaded.
+                # _malom_puzzle_db (MalomDB) returns {"outcome":str, "dtw":int}; if unavailable
+                # fall back to _malom_db (ExternalSolvedDB) which returns just "W"/"L"/"D".
+                _malom_ext = _malom_db if (_malom_db is not None and _malom_db.is_available()) else None
+                _malom_puz = _malom_puzzle_db
+                if _malom_puz is not None or _malom_ext is not None:
                     _flip = {"W": "L", "L": "W", "D": "D"}
+                    def _malom_probe(board_after):
+                        """Return (outcome_flipped, dtw_abs). Both None on miss."""
+                        if _malom_puz is not None:
+                            try:
+                                r = _malom_puz.query(board_after)
+                                if r is not None:
+                                    out = _flip.get(r.get("outcome"))
+                                    dtw = r.get("dtw")
+                                    dtw_abs = abs(int(dtw)) if dtw is not None else None
+                                    return out, dtw_abs
+                            except Exception:
+                                pass
+                        if _malom_ext is not None:
+                            try:
+                                res = _malom_ext.query(board_after)   # "W"/"L"/"D" or None
+                                if res:
+                                    return _flip.get(res), None
+                            except Exception:
+                                pass
+                        return None, None
+
                     if diag_mode == "capture":
                         for mv_e in moves_out:
                             cap_pos = mv_e.get("to")
-                            if cap_pos and not eg_flags.get(cap_pos):
-                                try:
-                                    after_ml = diag_board.apply_move(
-                                        {"from": None, "to": None, "capture": cap_pos})
-                                    res_ml = _malom_db.query(after_ml)
-                                    if res_ml:
-                                        eg_flags[cap_pos] = _flip.get(res_ml["outcome"])
-                                except Exception:
-                                    pass
+                            if not cap_pos:
+                                continue
+                            try:
+                                after_ml = diag_board.apply_move(
+                                    {"from": None, "to": None, "capture": cap_pos})
+                                out, dtw = _malom_probe(after_ml)
+                                if out and not eg_flags.get(cap_pos):
+                                    eg_flags[cap_pos] = out
+                                if dtw is not None:
+                                    eg_dtws[cap_pos] = dtw
+                            except Exception:
+                                pass
                     else:
                         try:
                             legal_ml = get_all_legal_moves(diag_board)
@@ -3772,13 +3849,13 @@ async def ws_endpoint(websocket: WebSocket):
                             legal_ml = []
                         for mv_ml in legal_ml:
                             ntn_ml = _diag_ntn(mv_ml)
-                            if eg_flags.get(ntn_ml):
-                                continue  # already set by endgame_solved_db
                             try:
                                 after_ml = diag_board.apply_move(mv_ml)
-                                res_ml = _malom_db.query(after_ml)
-                                if res_ml:
-                                    eg_flags[ntn_ml] = _flip.get(res_ml["outcome"])
+                                out, dtw = _malom_probe(after_ml)
+                                if out and not eg_flags.get(ntn_ml):
+                                    eg_flags[ntn_ml] = out
+                                if dtw is not None:
+                                    eg_dtws[ntn_ml] = dtw
                             except Exception:
                                 pass
 
@@ -3789,7 +3866,9 @@ async def ws_endpoint(websocket: WebSocket):
                     mv_e["db_delta"]  = float(_dd) if _dd is not None else None
                     # Capture mode eg_flags keyed by captured square
                     cap_pos = mv_e.get("to") if diag_mode == "capture" else None
-                    mv_e["eg_flag"] = eg_flags.get(cap_pos or ntn)  # "W"/"L"/"D"/None
+                    _key = cap_pos or ntn
+                    mv_e["eg_flag"] = eg_flags.get(_key)   # "W"/"L"/"D"/None
+                    mv_e["eg_dtw"]  = eg_dtws.get(_key)    # int moves-to-mate or None
 
                 # ── Sentinel overlay: score each legal move ───────────────────
                 # 2D: sentinel/overseer are skipped in capture mode — they encode

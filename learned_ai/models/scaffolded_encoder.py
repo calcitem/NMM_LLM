@@ -60,9 +60,18 @@ VALUE_INPUT_DIM: int = 23
 VN_BLEND: float = 0.5
 
 # ── Lookahead extension ────────────────────────────────────────────────────────
-# 5 half-plies × 3 signals (h_norm, vn_norm, sent_mean) = 15 floats
-LOOKAHEAD_FEAT_DIM: int = 15
-MOVE_FEAT_DIM_WITH_LOOKAHEAD: int = MOVE_FEAT_DIM + LOOKAHEAD_FEAT_DIM  # 77
+# 15 half-plies × 4 signals (h_norm, vn_norm, sent_mean, gap_norm) = 60 floats
+LOOKAHEAD_FEAT_DIM: int = 60
+MOVE_FEAT_DIM_WITH_LOOKAHEAD: int = MOVE_FEAT_DIM + LOOKAHEAD_FEAT_DIM  # 122
+
+# ── Top-K search-informed extension (v3, 2026-07-16) ──────────────────────────
+# Per-candidate row on top of the 122-float base+lookahead:
+#   [0] ab_score_norm : alpha-beta root score, min-max scaled to [0, 1] across the K candidates
+#   [1] ab_rank_norm  : (K - rank) / (K - 1)  →  1.0 for #1, 0.0 for #K
+#   [2] human_freq    : probability human plays this move (from HumanDB/TrajectoryDB/N-gram, or 0)
+#   [3] human_rank    : normalised rank among human choices — 1.0 for most-played, 0.0 for absent
+TOPK_EXTRA_DIM: int = 4
+MOVE_FEAT_DIM_WITH_TOPK: int = MOVE_FEAT_DIM_WITH_LOOKAHEAD + TOPK_EXTRA_DIM  # 126
 
 
 # ── heuristic evaluate import (avoids ai/__init__ heavy imports) ───────────────
@@ -367,3 +376,265 @@ def encode_position_with_lookahead(
 
     enc.feat_matrix = np.concatenate([enc.feat_matrix, la_block], axis=1).astype(np.float32)
     return enc
+
+
+# ── Top-K encoder (v3) ────────────────────────────────────────────────────────
+
+def _move_notation(mv: Dict[str, Any]) -> str:
+    """Return the notation string used by TrajectoryDB / HumanDB / NGram.
+
+    Matches ai/game_ai.py's move-notation convention:
+      placement           → "d3"
+      movement            → "d3-a1"
+      movement + capture  → "d3-a1xd7"
+      placement + capture → "d3xd7"
+    """
+    frm = mv.get("from")
+    to  = mv.get("to") or ""
+    cap = mv.get("capture")
+    s = f"{frm}-{to}" if frm else to
+    if cap:
+        s += f"x{cap}"
+    return s
+
+
+def _human_prior_freqs(
+    board,
+    color: str,
+    human_db=None,               # ai.human_db.HumanDB   (preferred, ELO-stratified)
+    trajectory_db=None,          # ai.trajectory_db.TrajectoryDB (fallback)
+    ngram_model=None,            # ai.ngram_opponent_model.NGramOpponentModel (last resort)
+    game_notations: Optional[List[str]] = None,   # required for ngram fallback
+) -> Dict[str, float]:
+    """Return {notation: probability} for the next move by `color`.
+
+    Precedence: HumanDB > TrajectoryDB > N-gram.  Returns {} when nothing hits.
+    """
+    # 1. HumanDB — richest source (ELO/win-rate stratified)
+    if human_db is not None:
+        try:
+            freqs = human_db.query_all_frequencies(board)
+            if freqs:
+                return freqs
+        except Exception:
+            pass
+
+    # 2. TrajectoryDB — position-based frequency
+    if trajectory_db is not None:
+        try:
+            freqs = trajectory_db.query_all_frequencies(board)
+            if freqs:
+                return freqs
+        except Exception:
+            pass
+
+    # 3. N-gram fallback — sequence-based; needs game_notations
+    if ngram_model is not None and game_notations is not None:
+        try:
+            freqs = ngram_model.predict(color, game_notations)
+            if freqs:
+                return freqs
+        except Exception:
+            pass
+
+    return {}
+
+
+def encode_top_k_candidates(
+    board,
+    player: str,
+    gameai,                                    # ai.game_ai.GameAI — provides alpha-beta search
+    top_k: int = 5,
+    ab_depth: Optional[int] = None,            # None → gameai.max_search_depth
+    ab_time_budget: Optional[float] = None,    # None → gameai's own per-diff cap
+    sentinel_advisor=None,
+    db=None,
+    value_net=None,
+    lookahead_advisor=None,
+    lookahead_dim: Optional[int] = None,
+    human_db=None,
+    trajectory_db=None,
+    ngram_model=None,
+    game_notations: Optional[List[str]] = None,
+    ab_preserve_tt: bool = False,
+) -> Optional[Any]:
+    """Encode the ``top_k`` alpha-beta-best candidates as a (K, MOVE_FEAT_DIM_WITH_TOPK) matrix.
+
+    The specialist is only ever asked to re-rank the classical engine's top K moves,
+    not to score every legal move from scratch.  This mirrors how strong players work:
+    narrow to a promising short-list, then evaluate deeply.
+
+    Per-candidate feature row (126 floats):
+      * 62 base features         (same as encode_position)
+      * 60 lookahead features    (same as encode_position_with_lookahead)
+      * 4  top-K extras          (ab_score_norm, ab_rank_norm, human_freq, human_rank)
+
+    Steps:
+      1. Call ``gameai.score_root_moves(board, depth, time_budget)`` to get
+         alpha-beta-scored candidates.  Take the top-K.
+      2. Encode the full position with lookahead as normal, then filter to the K rows.
+      3. Compute the alpha-beta score/rank normalisations.
+      4. Look up human-prior frequencies (HumanDB > TrajectoryDB > N-gram).
+      5. Concatenate the 4 extra floats onto each row.
+
+    Returns an EncodedPosition-like object with:
+        feat_matrix: (K, MOVE_FEAT_DIM_WITH_TOPK)
+        value_input: (23,)
+        legal_moves: the K candidate move dicts, in alpha-beta rank order
+
+    Returns None if there are no legal moves, or if the search fails, or if none
+    of the top-K survived the encoder's own legal-move filter.
+    """
+    if gameai is None:
+        # No alpha-beta search available — fall back to old-style encoding.
+        return encode_position_with_lookahead(board, player,
+                                              sentinel_advisor=sentinel_advisor,
+                                              db=db,
+                                              value_net=value_net,
+                                              lookahead_advisor=lookahead_advisor,
+                                              lookahead_dim=lookahead_dim)
+
+    # 1. Alpha-beta score all legal moves via the classical engine.
+    _depth  = int(ab_depth) if ab_depth is not None else int(getattr(gameai, "max_search_depth", 3))
+    _budget = float(ab_time_budget) if ab_time_budget is not None else float(getattr(gameai, "_override_time_budget", None) or 2.0)
+    try:
+        scored = gameai.score_root_moves(board, depth=_depth, time_budget=_budget,
+                                         preserve_tt=ab_preserve_tt)
+    except Exception:
+        scored = []
+    if not scored:
+        return None
+    scored_top_k = list(scored[:max(1, int(top_k))])
+
+    # 1b. If the sentinel's top pick is NOT in the α-β top-K, force-include it as
+    # an outsider candidate.  Rationale: sentinel scores moves differently from
+    # α-β (it's an ML advisor over blunder patterns) and its argmax may be a
+    # legitimately strong non-obvious move the specialist should have the chance
+    # to prefer.  Same for the highest-freq human move — if the human favourite
+    # is not covered by α-β top-K, expose it too.
+    def _key(m): return (m.get("from"), m.get("to"), m.get("capture"))
+    top_k_keys = {_key(mv) for mv, _ in scored_top_k}
+    scored_all_map = {_key(mv): float(s) for mv, s in scored}
+
+    def _add_outsider(mv: Dict[str, Any]) -> None:
+        k = _key(mv)
+        if k in top_k_keys:
+            return
+        top_k_keys.add(k)
+        scored_top_k.append((mv, scored_all_map.get(k, 0.0)))
+
+    if sentinel_advisor is not None:
+        try:
+            from game.rules import get_all_legal_moves
+            all_legal = get_all_legal_moves(board)
+            sent_advice = sentinel_advisor.advise(board, all_legal, player, 0)
+            if sent_advice and getattr(sent_advice, "move_scores", None):
+                _idx = int(np.argmax(np.asarray(sent_advice.move_scores)))
+                if 0 <= _idx < len(all_legal):
+                    _add_outsider(all_legal[_idx])
+        except Exception:
+            pass
+
+    # 2. Base encoding (all legal moves, then filter).
+    base_enc = encode_position_with_lookahead(
+        board, player,
+        sentinel_advisor=sentinel_advisor,
+        db=db,
+        value_net=value_net,
+        lookahead_advisor=lookahead_advisor,
+        lookahead_dim=lookahead_dim,
+    )
+    if base_enc is None or not base_enc.legal_moves:
+        return None
+
+    def _key(m): return (m.get("from"), m.get("to"), m.get("capture"))
+    enc_idx = {_key(m): i for i, m in enumerate(base_enc.legal_moves)}
+
+    kept_rows: List[np.ndarray] = []
+    kept_moves: List[Dict[str, Any]] = []
+    kept_scores: List[float] = []
+    for mv, score_norm in scored_top_k:
+        idx = enc_idx.get(_key(mv))
+        if idx is None:
+            continue
+        kept_rows.append(base_enc.feat_matrix[idx])
+        kept_moves.append(mv)
+        kept_scores.append(float(score_norm))
+
+    if not kept_rows:
+        return None
+
+    K = len(kept_rows)
+    feat_base = np.stack(kept_rows).astype(np.float32)   # (K, MOVE_FEAT_DIM_WITH_LOOKAHEAD)
+
+    # 3. ab_score_norm (already normalised by GameAI.score_root_moves)
+    #    ab_rank_norm: 1.0 for #1, 0.0 for #K (evenly spaced)
+    ab_scores_arr = np.asarray(kept_scores, dtype=np.float32)
+    if K > 1:
+        ab_ranks_arr = np.linspace(1.0, 0.0, num=K, dtype=np.float32)
+    else:
+        ab_ranks_arr = np.ones(1, dtype=np.float32)
+
+    # 4. Human-prior probability per candidate.
+    freqs = _human_prior_freqs(
+        board, player,
+        human_db=human_db,
+        trajectory_db=trajectory_db,
+        ngram_model=ngram_model,
+        game_notations=game_notations,
+    )
+    if freqs:
+        sorted_ntns = sorted(freqs.items(), key=lambda kv: kv[1], reverse=True)
+        ntn_rank = {ntn: r + 1 for r, (ntn, _) in enumerate(sorted_ntns)}
+    else:
+        ntn_rank = {}
+
+    human_freq_arr = np.zeros(K, dtype=np.float32)
+    human_rank_arr = np.zeros(K, dtype=np.float32)
+    for i, mv in enumerate(kept_moves):
+        ntn = _move_notation(mv)
+        human_freq_arr[i] = float(freqs.get(ntn, 0.0))
+        r = ntn_rank.get(ntn)
+        # Normalise rank: rank 1 → 1.0, rank 2 → 0.8, ..., rank 5 → 0.2, unseen → 0.0
+        if r is not None and r <= 5:
+            human_rank_arr[i] = 1.0 - (r - 1) / 5.0
+        # else: leave at 0.0
+
+    # 5. Concatenate the 4 extras.
+    extras = np.column_stack([
+        ab_scores_arr,
+        ab_ranks_arr,
+        human_freq_arr,
+        human_rank_arr,
+    ]).astype(np.float32)                                  # (K, 4)
+    feat_final = np.concatenate([feat_base, extras], axis=1).astype(np.float32)  # (K, 126)
+
+    # 6. Return an EncodedPosition-like object.  Reuse the base's other fields but
+    #    filter the per-move lists to the top-K.
+    from dataclasses import replace
+    top_idxs = [enc_idx[_key(mv)] for mv in kept_moves]
+    def _pick(lst):
+        if lst is None:
+            return lst
+        try:
+            return [lst[i] for i in top_idxs]
+        except Exception:
+            return lst
+
+    base_enc.feat_matrix = feat_final
+    base_enc.legal_moves = kept_moves
+    if hasattr(base_enc, "sentinel_scores"):
+        base_enc.sentinel_scores = _pick(base_enc.sentinel_scores)
+    if hasattr(base_enc, "h_scores_abs"):
+        base_enc.h_scores_abs = _pick(base_enc.h_scores_abs)
+    if hasattr(base_enc, "vn_scores_abs"):
+        base_enc.vn_scores_abs = _pick(base_enc.vn_scores_abs)
+    if hasattr(base_enc, "db_moves"):
+        base_enc.db_moves = _pick(base_enc.db_moves)
+    # h_top1_idx is over the K subset now; keep 0 if the AB #1 also matches heuristic top1.
+    if hasattr(base_enc, "h_top1_idx") and base_enc.h_scores_abs:
+        try:
+            base_enc.h_top1_idx = int(np.argmax(np.asarray(base_enc.h_scores_abs)))
+        except Exception:
+            base_enc.h_top1_idx = 0
+    return base_enc
