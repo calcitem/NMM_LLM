@@ -452,15 +452,28 @@ def _choose_resume_path(args: argparse.Namespace) -> tuple[Optional[Path], str]:
 def _load_model(
     device: torch.device,
     resume_path: Optional[Path],
+    policy_hidden: tuple[int, ...] = (512, 256, 128),
 ) -> tuple[ScaffoldedPolicyNet, int, float, int, str]:
     feat_dim = MOVE_FEAT_DIM_WITH_TOPK
-    if resume_path is None:
+
+    def _fresh():
         return ScaffoldedPolicyNet(
             move_feat_dim=feat_dim,
             value_input_dim=VALUE_INPUT_DIM_WITH_HISTORY,
+            policy_hidden=policy_hidden,
         ).to(device), 0, 0.0, DIFF_START, "scratch"
+
+    if resume_path is None or not Path(resume_path).exists():
+        return _fresh()
+
     ckpt   = torch.load(resume_path, map_location=device, weights_only=False)
     cfg    = ckpt.get("model_config", {})
+
+    ckpt_hidden = tuple(cfg.get("policy_hidden", (512, 256, 128)))
+    if ckpt_hidden != policy_hidden:
+        print(f"[s_open_v2] policy_hidden mismatch: ckpt={ckpt_hidden} vs requested={policy_hidden} — starting fresh")
+        return _fresh()
+
     cfg["move_feat_dim"]   = feat_dim
     cfg["value_input_dim"] = VALUE_INPUT_DIM_WITH_HISTORY
     model  = ScaffoldedPolicyNet.from_config(cfg).to(device)
@@ -469,8 +482,12 @@ def _load_model(
         model.load_state_dict(ckpt[sd_key])
     except RuntimeError:
         pol_state = {k: v for k, v in ckpt[sd_key].items() if k.startswith("policy_mlp")}
-        model.load_state_dict(pol_state, strict=False)
-        print("[s_open_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
+        try:
+            model.load_state_dict(pol_state, strict=False)
+            print("[s_open_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
+        except RuntimeError:
+            print(f"[s_open_v2] State dict incompatible — starting fresh with policy_hidden={policy_hidden}")
+            return _fresh()
     stage      = ckpt.get("stage", "unknown")
     is_mine    = (stage == STAGE_TAG)
     start_game = int(ckpt.get("game_count",   0))      if is_mine else 0
@@ -1044,7 +1061,7 @@ def run(args: argparse.Namespace) -> None:
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
     model, start_game, best_win_rate, difficulty, source_checkpoint = _load_model(
-        device, resume_path
+        device, resume_path, args.policy_hidden
     )
     difficulty = _apply_diff_start_override(difficulty, args)
     if resume_path is None:
@@ -1572,9 +1589,14 @@ def main() -> None:
                    help="LookaheadAdvisor simulation depth during training (default 5). "
                         "Feature width stays at 15-ply * 4 = 60 floats via padding, so inference "
                         "at full 15 plies matches. Big training speed-up.")
+    p.add_argument("--policy-hidden",       type=str,   default="1024,512,256",
+                   help="Comma-separated hidden layer widths for the policy MLP "
+                        "(default '1024,512,256'). Checkpoint is reset if this differs from the "
+                        "saved architecture.")
     p.add_argument("--batch-games",          type=int,   default=1,
                    help="Number of primary rollouts to run in parallel (ThreadPoolExecutor)")
     args = p.parse_args()
+    args.policy_hidden = tuple(int(x) for x in args.policy_hidden.split(","))
     run(args)
 
 

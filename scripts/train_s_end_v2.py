@@ -177,6 +177,8 @@ LAMBDA     = 0.70   # Batch 1: 0.5 → 0.7
 DECAY      = 0.99   # Batch 1: 0.98 → 0.99
 EXPLORE_COEF = 0.08 # bonus for winning with non-heuristic-top1 moves (Option A)
 MALOM_AGREE_BONUS = 0.10  # per-step bonus when chosen move matches Malom W (endgame only)
+ENDGAME_DB_WIN_REWARD   =  0.20  # learner landed opponent in a WDL-DB-losing position
+ENDGAME_DB_LOSS_PENALTY = -0.10  # learner landed opponent in a WDL-DB-winning position
 
 WIN_REWARD  =  1.0
 LOSS_REWARD = -1.0
@@ -232,6 +234,7 @@ class RewardBreakdown:
     heuristic:   float = 0.0
     mill_formed: float = 0.0
     retro:       float = 0.0
+    wdl_db:      float = 0.0
 
 
 @dataclass
@@ -437,15 +440,28 @@ def _load_model(
     device: torch.device,
     resume_path: Optional[Path],
     force_start_diff: bool = False,
+    policy_hidden: tuple[int, ...] = (512, 256, 128),
 ) -> tuple[ScaffoldedPolicyNet, int, float, int, str]:
     feat_dim = MOVE_FEAT_DIM_WITH_TOPK
-    if resume_path is None:
+
+    def _fresh():
         return ScaffoldedPolicyNet(
             move_feat_dim=feat_dim,
             value_input_dim=VALUE_INPUT_DIM_WITH_HISTORY,
+            policy_hidden=policy_hidden,
         ).to(device), 0, 0.0, DIFF_START, "scratch"
+
+    if resume_path is None or not Path(resume_path).exists():
+        return _fresh()
+
     ckpt = torch.load(resume_path, map_location=device, weights_only=False)
     cfg = ckpt.get("model_config", {})
+
+    ckpt_hidden = tuple(cfg.get("policy_hidden", (512, 256, 128)))
+    if ckpt_hidden != policy_hidden:
+        print(f"[s_end_v2] policy_hidden mismatch: ckpt={ckpt_hidden} vs requested={policy_hidden} — starting fresh")
+        return _fresh()
+
     cfg["move_feat_dim"]   = feat_dim
     cfg["value_input_dim"] = VALUE_INPUT_DIM_WITH_HISTORY
     model = ScaffoldedPolicyNet.from_config(cfg).to(device)
@@ -454,8 +470,12 @@ def _load_model(
         model.load_state_dict(ckpt[sd_key])
     except RuntimeError:
         pol_state = {k: v for k, v in ckpt[sd_key].items() if k.startswith("policy_mlp")}
-        model.load_state_dict(pol_state, strict=False)
-        print("[s_end_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
+        try:
+            model.load_state_dict(pol_state, strict=False)
+            print("[s_end_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
+        except RuntimeError:
+            print(f"[s_end_v2] State dict incompatible — starting fresh with policy_hidden={policy_hidden}")
+            return _fresh()
     stage      = ckpt.get("stage", "unknown")
     is_mine    = (stage == STAGE_TAG)
     start_game = int(ckpt.get("game_count",    0))         if is_mine else 0
@@ -635,6 +655,7 @@ def _rollout(
     forced_placements: Optional[list[str]] = None,
     lookahead_advisor=None,
     endgame_db=None,
+    wdl_db=None,
     game_difficulty: int = 1,
     human_db=None,
     trajectory_db=None,
@@ -765,6 +786,22 @@ def _rollout(
                 reward += mill_bonus
                 rb.mill_formed += mill_bonus
                 rb.total += mill_bonus
+
+            # WDL DB dense reward — probe after learner's move (opponent to move).
+            # "L" from opponent's view = learner forced a winning position.
+            if wdl_db is not None:
+                try:
+                    _wdl = wdl_db.query(board_after)
+                    if _wdl == "L":
+                        reward += ENDGAME_DB_WIN_REWARD
+                        rb.wdl_db += ENDGAME_DB_WIN_REWARD
+                        rb.total  += ENDGAME_DB_WIN_REWARD
+                    elif _wdl == "W":
+                        reward += ENDGAME_DB_LOSS_PENALTY
+                        rb.wdl_db += ENDGAME_DB_LOSS_PENALTY
+                        rb.total  += ENDGAME_DB_LOSS_PENALTY
+                except Exception:
+                    pass
 
             raw_now  = _build_raw_board_features(board)
             raw_next = _build_raw_board_features(board_after)
@@ -979,6 +1016,23 @@ def run(args: argparse.Namespace) -> None:
     if db is None:
         print("[s_end_v2] Malom DB unavailable — lookahead uses no endgame early-exit")
 
+    # User's own retrograde WDL tables — dense per-move rewards in endgame positions.
+    wdl_db = None
+    wdl_dir = args.endgame_db_dir or str(_ROOT / "data" / "endgame")
+    if wdl_dir and Path(wdl_dir).is_dir():
+        try:
+            from ai.endgame_solved_db import EndgameSolvedDB as _EndgameSolvedDB
+            wdl_db = _EndgameSolvedDB(wdl_dir)
+            if wdl_db.is_available():
+                print(f"[s_end_v2] Endgame WDL DB loaded from {wdl_dir}")
+            else:
+                wdl_db = None
+                print(f"[s_end_v2] Endgame WDL DB: no .wdl tables found in {wdl_dir}")
+        except Exception as e:
+            print(f"[s_end_v2] Endgame WDL DB failed ({e})")
+    else:
+        print(f"[s_end_v2] Endgame WDL DB dir not found ({wdl_dir}) — WDL dense rewards disabled")
+
     value_net = None
     vn_path = args.value_net or str(_ROOT / "data" / "value_net.npz")
     if vn_path and Path(vn_path).exists():
@@ -1018,6 +1072,8 @@ def run(args: argparse.Namespace) -> None:
         print("[s_end_v2] No HumanDB — human_freq features will be 0")
 
     # ── LookaheadAdvisor ─────────────────────────────────────────────────────
+    # Prefer Malom for early-exit (wider coverage); fall back to user WDL DB.
+    _la_endgame_db = db if db is not None else wdl_db
     lookahead_advisor = LookaheadAdvisor(
         sentinel=sentinel,
         value_net=value_net,
@@ -1026,14 +1082,16 @@ def run(args: argparse.Namespace) -> None:
         use_sentinel=True,
         ply_depth=15,
         sim_ply_depth=args.sim_ply_depth,
-        endgame_db=db,
+        endgame_db=_la_endgame_db,
     )
-    print(f"[s_end_v2] LookaheadAdvisor: 15-ply width, {args.sim_ply_depth}-ply sim, 4 signals (h+vn+sent+gap), Malom DB for early-exit")
+    _la_src = "Malom" if db is not None else ("WDL DB" if wdl_db is not None else "none")
+    print(f"[s_end_v2] LookaheadAdvisor: 15-ply width, {args.sim_ply_depth}-ply sim, 4 signals (h+vn+sent+gap), early-exit DB: {_la_src}")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
     model, start_game, best_win_rate, difficulty, source_checkpoint = _load_model(
-        device, resume_path, force_start_diff=args.force_start_diff
+        device, resume_path, force_start_diff=args.force_start_diff,
+        policy_hidden=args.policy_hidden,
     )
     difficulty = _apply_diff_start_override(difficulty, args)
     if resume_path is None:
@@ -1170,6 +1228,7 @@ def run(args: argparse.Namespace) -> None:
                 forced_placements=cfg.game_forced_placements,
                 lookahead_advisor=lookahead_advisor,
                 endgame_db=db,
+                wdl_db=wdl_db,
                 game_difficulty=cfg.game_difficulty,
                 human_db=human_db,
             )
@@ -1215,6 +1274,7 @@ def run(args: argparse.Namespace) -> None:
                     retry_ply=0,
                     lookahead_advisor=lookahead_advisor,
                     endgame_db=db,
+                wdl_db=wdl_db,
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                 )
@@ -1284,6 +1344,7 @@ def run(args: argparse.Namespace) -> None:
                     retry_ply=0,
                     lookahead_advisor=lookahead_advisor,
                     endgame_db=db,
+                wdl_db=wdl_db,
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                 )
@@ -1337,6 +1398,7 @@ def run(args: argparse.Namespace) -> None:
                     retry_ply=0,
                     lookahead_advisor=lookahead_advisor,
                     endgame_db=db,
+                wdl_db=wdl_db,
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                 )
@@ -1585,9 +1647,17 @@ def main() -> None:
                    help="LookaheadAdvisor simulation depth during training (default 5). "
                         "Feature width stays at 15-ply * 4 = 60 floats via padding, so inference "
                         "at full 15 plies matches. Big training speed-up.")
+    p.add_argument("--policy-hidden",       type=str,   default="1024,512,256",
+                   help="Comma-separated hidden layer widths for the policy MLP "
+                        "(default '1024,512,256'). Checkpoint is reset if this differs from the "
+                        "saved architecture.")
+    p.add_argument("--endgame-db-dir",      type=str,   default="",
+                   help="Directory containing endgame_*.wdl retrograde tables for dense per-move "
+                        "rewards (default: data/endgame/ auto-detected).")
     p.add_argument("--batch-games",          type=int,   default=1,
                    help="Parallel primary rollouts via ThreadPoolExecutor")
     args = p.parse_args()
+    args.policy_hidden = tuple(int(x) for x in args.policy_hidden.split(","))
     run(args)
 
 
