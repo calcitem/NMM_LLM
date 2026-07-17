@@ -200,7 +200,7 @@ class SpecialistRouter:
                     ab_preserve_tt=True,            # ← key: reuse coordinator's search state
                     sentinel_advisor=self._sentinel,
                     db=None,
-                    value_net=self._value_net,
+                    value_net=None,
                     lookahead_advisor=la,
                     human_db=self._human_db,
                     trajectory_db=None,
@@ -211,7 +211,7 @@ class SpecialistRouter:
                     board, color,
                     sentinel_advisor=self._sentinel,
                     db=None,
-                    value_net=self._value_net,
+                    value_net=None,
                     lookahead_advisor=la,
                 )
             if enc is None or not enc.legal_moves:
@@ -244,10 +244,11 @@ def load_specialist_router(
     ckpt_dir: Optional[Path] = None,
     sentinel_advisor=None,
     db=None,
+    human_db=None,
+    ply_depth: int = 20,
+    # Legacy params accepted but ignored — value_net and gap_net removed from specialists.
     value_net=None,
     gap_net=None,
-    human_db=None,
-    ply_depth: int = 15,
 ) -> Optional[SpecialistRouter]:
     """Load the three v2 specialists and their LookaheadAdvisors.
 
@@ -279,9 +280,8 @@ def load_specialist_router(
         try:
             return LookaheadAdvisor(
                 sentinel=sentinel_advisor,
-                value_net=value_net,
                 evaluate_fn=evaluate_fn,
-                gap_net=gap_net,
+                human_db=human_db,
                 use_sentinel=True,
                 endgame_db=endgame_db_arg,
                 ply_depth=ply_depth,
@@ -308,7 +308,7 @@ def load_specialist_router(
             "end":  str(end_path)  if m_end  else "",
         },
         sentinel_advisor=sentinel_advisor,
-        db=db, value_net=value_net, gap_net=gap_net,
+        db=db,
         endgame_db=db, human_db=human_db,
         lookahead_advisor_open=la_open,
         lookahead_advisor_mid=la_mid,

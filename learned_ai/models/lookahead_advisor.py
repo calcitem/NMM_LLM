@@ -1,23 +1,23 @@
-"""learned_ai/models/lookahead_advisor.py — 15-ply sentinel lookahead.
+"""learned_ai/models/lookahead_advisor.py — 20-ply sentinel + human-DB lookahead.
 
-For each legal move at the current position, simulates 15 half-plies using the
+For each legal move at the current position, simulates 20 half-plies using the
 static heuristic for BOTH sides (no model calls, no recursion, no feedback loop).
-At each depth, records 4 signals from the learner's perspective:
+At each depth, records 3 signals from the learner's perspective:
 
-  h_norm   : (evaluate(board, learner_color) + 1) / 2  → [0, 1]
-  vn_norm  : (value_net.predict(board, learner_color) + 1) / 2  (0.5 if no VN)
-  sent_mean: mean sentinel score for current-player moves  (0.5 if disabled/unavailable)
-             Flipped to 1 - mean when it is the opponent's turn, so the signal
-             always expresses learner-perspective favourability.
-  gap_norm : mean gap_net score for current-player legal moves  (0.5 if unavailable)
-             Flipped when opponent to move (opponent's blunder zone = good for learner).
+  h_norm    : (evaluate(board, learner_color) + 1) / 2  → [0, 1]
+  sent_mean : mean sentinel score for current-player moves  (0.5 if disabled/unavailable)
+              Flipped to 1 - mean when it is the opponent's turn, so the signal
+              always expresses learner-perspective favourability.
+  human_norm: confidence of the dominant human move from this position, derived from
+              HumanDB (max move frequency across legal moves, 0.5 if no DB data).
 
-The 15-depth × 4-signal = 60-float block is appended to the 62-float base features
+The 20-depth × 3-signal = 60-float block is appended to the 62-float base features
 by encode_position_with_lookahead(), producing the 122-float specialist input.
+Total with top-K extras: 126 floats (unchanged from the previous 4-signal 15-ply design).
 
-Sentinel calls inside lookahead are expensive (up to k × 15 per turn).  They are
-enabled by default (use_sentinel=True) for specialist training.  The sentinel base
-signal is already available in feature [58] of the base encoding.
+Value-net and gap-net signals have been removed: empirical ablation showed they
+detract from play quality as direct heuristic modifiers.  VN_BLEND is set to 0 in
+the base encoding so slots [59] and [61] carry pure heuristic signals.
 """
 
 from __future__ import annotations
@@ -53,47 +53,50 @@ def _static_best_move(board: BoardState, color: str, evaluate_fn) -> Optional[di
 class LookaheadAdvisor:
     """N-ply heuristic lookahead scoring for each legal move.
 
-    Returns a (k, ply_depth*4) ndarray — one row per candidate move —
+    Returns a (k, ply_depth*3) ndarray — one row per candidate move —
     for use as the lookahead block in the specialist input.
 
     Parameters
     ----------
     sentinel      : SentinelAdvisor or None
-    value_net     : value net with .predict(board, player) → float in [-1, 1], or None
     evaluate_fn   : callable(board, player) → float in [-1, 1]
-    gap_net       : GapNet or None; .predict(board, player) → float in [-1, 1]
+    human_db      : HumanDB or None; .query_all_frequencies(board) → {ntn: prob}
+    ngram_model   : NGramOpponentModel or None (reserved for future use)
     use_sentinel  : if True (default), sent_mean uses sentinel calls; False fills 0.5
-    ply_depth     : number of half-plies to simulate (default 15)
+    ply_depth     : number of half-plies to simulate (default 20)
     """
 
     def __init__(
         self,
         sentinel,
-        value_net,
         evaluate_fn,
-        gap_net=None,
+        human_db=None,
+        ngram_model=None,
         use_sentinel: bool = True,
         endgame_db=None,
-        ply_depth: int = 15,
+        ply_depth: int = 20,
         frozen_model=None,
         frozen_device=None,
         sim_ply_depth: Optional[int] = None,
+        # Legacy params accepted but ignored — value_net and gap_net removed.
+        value_net=None,
+        gap_net=None,
     ) -> None:
         self._sentinel      = sentinel
-        self._value_net     = value_net
         self._evaluate      = evaluate_fn
-        self._gap_net       = gap_net
+        self._human_db      = human_db
+        self._ngram_model   = ngram_model
         self._use_sentinel  = use_sentinel
         self._endgame_db    = endgame_db
-        self._ply_depth     = ply_depth      # output feature width = ply_depth * 4
+        self._ply_depth     = ply_depth      # output feature width = ply_depth * 3
         # sim_ply_depth: how many plies to ACTUALLY simulate.  Defaults to ply_depth.
-        # Training scripts may set a smaller sim depth (e.g. 5) so simulations run
+        # Training scripts may set a smaller sim depth (e.g. 10) so simulations run
         # faster; remaining ply slots are filled with the last valid signal, so
         # the feature width matches inference (which uses full ply_depth).
         self._sim_ply_depth = int(sim_ply_depth) if sim_ply_depth is not None else ply_depth
         self._frozen_model  = frozen_model
         self._frozen_device = frozen_device
-        self.feat_dim       = ply_depth * 4   # total floats per move row
+        self.feat_dim       = ply_depth * 3   # total floats per move row
 
     def set_frozen_model(self, model, device=None) -> None:
         """Update the frozen-model snapshot used to pick learner-side moves in lookahead."""
@@ -117,7 +120,7 @@ class LookaheadAdvisor:
                 board, color,
                 sentinel_advisor=self._sentinel,
                 db=None,
-                value_net=self._value_net,
+                value_net=None,
                 lookahead_advisor=None,
             )
             if enc is None or not enc.legal_moves:
@@ -177,15 +180,15 @@ class LookaheadAdvisor:
         On terminal or no-legal-moves, remaining depths are filled with the last
         valid signal (or the terminal score for all four channels).
         """
-        # Layout: [h1, vn1, s1, g1,  h2, vn2, s2, g2, ...,  hN, vnN, sN, gN]
-        result = np.full(self._ply_depth * 4, 0.5, dtype=np.float32)
+        # Layout: [h1, s1, u1,  h2, s2, u2, ...,  hN, sN, uN]  (h=heuristic, s=sentinel, u=human)
+        result = np.full(self._ply_depth * 3, 0.5, dtype=np.float32)
         # Simulate only the first sim_ply_depth half-plies; remaining slots are
-        # padded with the last valid signal.  Feature width is always ply_depth * 4.
+        # padded with the last valid signal.  Feature width is always ply_depth * 3.
         _sim = min(self._sim_ply_depth, self._ply_depth)
         try:
             b      = board
             actors = [learner_color if i % 2 == 0 else opp_color for i in range(_sim)]
-            last_sig = (0.5, 0.5, 0.5, 0.5)
+            last_sig = (0.5, 0.5, 0.5)
 
             for depth_idx in range(_sim):
                 actor = actors[depth_idx]
@@ -194,7 +197,7 @@ class LookaheadAdvisor:
                 if depth_idx == 0:
                     b = b.apply_move(first_move)
                 else:
-                    # Option C: learner-side uses frozen policy (if provided), opponent uses heuristic.
+                    # Learner-side uses frozen policy (if provided), opponent uses heuristic.
                     mv = None
                     if self._frozen_model is not None and actor == learner_color:
                         mv = self._frozen_model_best_move(b, actor)
@@ -203,7 +206,7 @@ class LookaheadAdvisor:
                     if mv is None:
                         # No legal moves — propagate last signal to remaining depths
                         for fill in range(depth_idx, self._ply_depth):
-                            result[fill * 4 : fill * 4 + 4] = last_sig
+                            result[fill * 3 : fill * 3 + 3] = last_sig
                         return result
                     b = b.apply_move(mv)
 
@@ -212,7 +215,7 @@ class LookaheadAdvisor:
                 if terminal:
                     val = 1.0 if winner == learner_color else (0.0 if winner else 0.5)
                     for fill in range(depth_idx, self._ply_depth):
-                        result[fill * 4 : fill * 4 + 4] = [val, val, val, val]
+                        result[fill * 3 : fill * 3 + 3] = [val, val, val]
                     return result
 
                 # Endgame DB probe — exact WDL terminates the trajectory early
@@ -226,7 +229,7 @@ class LookaheadAdvisor:
                             else:
                                 val = 0.0 if db_result == "W" else (1.0 if db_result == "L" else 0.5)
                             for fill in range(depth_idx, self._ply_depth):
-                                result[fill * 4 : fill * 4 + 4] = [val, val, val, val]
+                                result[fill * 3 : fill * 3 + 3] = [val, val, val]
                             return result
                     except Exception:
                         pass
@@ -234,14 +237,14 @@ class LookaheadAdvisor:
                 # Record signals at this position
                 sig = self._record_signals(b, learner_color)
                 last_sig = sig
-                result[depth_idx * 4 : depth_idx * 4 + 4] = sig
+                result[depth_idx * 3 : depth_idx * 3 + 3] = sig
 
             # If we simulated fewer plies than the output width (training speed-up),
             # propagate the last valid signal into the remaining slots so the
             # feature width matches inference.
             if _sim < self._ply_depth:
                 for fill in range(_sim, self._ply_depth):
-                    result[fill * 4 : fill * 4 + 4] = last_sig
+                    result[fill * 3 : fill * 3 + 3] = last_sig
 
         except Exception:
             pass   # partial result already in `result`; remaining slots stay 0.5
@@ -252,16 +255,9 @@ class LookaheadAdvisor:
         self,
         board: BoardState,
         learner_color: str,
-    ) -> tuple[float, float, float, float]:
-        """Return (h_norm, vn_norm, sent_mean, gap_norm) from the learner's perspective.
-
-        h_norm and vn_norm are always from the learner's view regardless of whose
-        turn it is.  sent_mean and gap_norm are the mean quality/blunder signals for
-        the current player's legal moves, each flipped when the opponent is to move
-        so the value always represents learner-favourability.
-        """
-        opp_color = "B" if learner_color == "W" else "W"
-        current_player = board.turn   # always the OTHER player after apply_move
+    ) -> tuple[float, float, float]:
+        """Return (h_norm, sent_mean, human_norm) from the learner's perspective."""
+        current_player = board.turn
 
         # ── heuristic ─────────────────────────────────────────────────────────
         h_norm = 0.5
@@ -271,15 +267,6 @@ class LookaheadAdvisor:
         except Exception:
             pass
 
-        # ── value net ─────────────────────────────────────────────────────────
-        vn_norm = 0.5
-        if self._value_net is not None:
-            try:
-                vn = float(self._value_net.predict(board, learner_color))
-                vn_norm = max(0.0, min(1.0, (vn + 1.0) / 2.0))
-            except Exception:
-                pass
-
         # ── sentinel ──────────────────────────────────────────────────────────
         sent_mean = 0.5
         if self._use_sentinel and self._sentinel is not None:
@@ -288,20 +275,18 @@ class LookaheadAdvisor:
                 if legal:
                     advice = self._sentinel.advise(board, legal, current_player)
                     m = float(sum(advice.move_scores) / len(advice.move_scores))
-                    # Flip if it's the opponent's turn (high opponent score = bad for us)
                     sent_mean = max(0.0, min(1.0, m if current_player == learner_color else 1.0 - m))
             except Exception:
                 pass
 
-        # ── gap net ───────────────────────────────────────────────────────────
-        gap_norm = 0.5
-        if self._gap_net is not None:
+        # ── human DB ──────────────────────────────────────────────────────────
+        human_norm = 0.5
+        if self._human_db is not None:
             try:
-                g = float(self._gap_net.predict(board, current_player))
-                g_mapped = max(0.0, min(1.0, (g + 1.0) / 2.0))
-                # gap near 1 = current player is in blunder zone (good if opp, bad if learner)
-                gap_norm = (1.0 - g_mapped) if current_player == learner_color else g_mapped
+                freqs = self._human_db.query_all_frequencies(board)
+                if freqs:
+                    human_norm = float(max(freqs.values()))
             except Exception:
                 pass
 
-        return h_norm, vn_norm, sent_mean, gap_norm
+        return h_norm, sent_mean, human_norm

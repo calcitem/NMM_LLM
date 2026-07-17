@@ -18,8 +18,8 @@ Opponent configurations (default set)
 All opponent configs share the same tuning: value_net_blend = 20, sentinel
 intervention probability = 20% when sentinel is enabled.
 
-Router (specialist AI) always has full sentinel + value_net + gap_net + Malom DB
-context available at inference — matches the training-time feature suite.
+Router (specialist AI) uses sentinel + human_db + Malom DB at inference.
+Value-net and gap-net have been removed from specialist features.
 
 Time budget
 -----------
@@ -341,14 +341,23 @@ def main() -> int:
     value_net = _load_value_net(args.value_net_path)
     gap_net   = _load_gap_net(args.gap_net_path)
     malom_db  = _load_malom(args.malom_path)
+    human_db  = None
+    _hdb_path = _ROOT / "data" / "human_db.sqlite"
+    if _hdb_path.exists():
+        try:
+            from ai.human_db import HumanDB as _HumanDB
+            human_db = _HumanDB(_hdb_path)
+            print(f"  HumanDB loaded: {human_db.game_count} games")
+        except Exception as _e:
+            print(f"  HumanDB load failed: {_e}")
+    else:
+        print("  HumanDB: not found (human_norm features will be 0.5)")
     print()
 
     print("Loading SpecialistRouter (v2 phase specialists)…")
     router = load_specialist_router(
         sentinel_advisor=sentinel,
-        value_net=value_net,
-        gap_net=gap_net,
-        human_db=None,
+        human_db=human_db,
         db=malom_db,
         ply_depth=args.specialist_ply_depth,
     )

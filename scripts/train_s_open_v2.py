@@ -1049,14 +1049,13 @@ def run(args: argparse.Namespace) -> None:
     # ── LookaheadAdvisor ─────────────────────────────────────────────────────
     lookahead_advisor = LookaheadAdvisor(
         sentinel=sentinel,
-        value_net=value_net,
         evaluate_fn=_simple_evaluate,
-        gap_net=gap_net,
+        human_db=human_db,
         use_sentinel=True,
-        ply_depth=15,
+        ply_depth=20,
         sim_ply_depth=args.sim_ply_depth,
-        )
-    print(f"[s_open_v2] LookaheadAdvisor: 15-ply width, {args.sim_ply_depth}-ply sim, 4 signals (h+vn+sent+gap)")
+    )
+    print(f"[s_open_v2] LookaheadAdvisor: 20-ply width, {args.sim_ply_depth}-ply sim, 3 signals (h+sent+human)")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)

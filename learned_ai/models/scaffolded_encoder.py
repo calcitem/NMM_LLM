@@ -57,10 +57,10 @@ VALUE_INPUT_DIM: int = 23
 
 # Blend weight: fraction of value-net signal mixed into features 59 and 61.
 # 0.0 = pure heuristic (old behaviour); 1.0 = pure value-net; 0.5 = equal blend.
-VN_BLEND: float = 0.5
+VN_BLEND: float = 0.0
 
 # ── Lookahead extension ────────────────────────────────────────────────────────
-# 15 half-plies × 4 signals (h_norm, vn_norm, sent_mean, gap_norm) = 60 floats
+# 20 half-plies × 3 signals (h_norm, sent_mean, human_norm) = 60 floats
 LOOKAHEAD_FEAT_DIM: int = 60
 MOVE_FEAT_DIM_WITH_LOOKAHEAD: int = MOVE_FEAT_DIM + LOOKAHEAD_FEAT_DIM  # 122
 

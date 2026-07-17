@@ -1076,16 +1076,15 @@ def run(args: argparse.Namespace) -> None:
     _la_endgame_db = db if db is not None else wdl_db
     lookahead_advisor = LookaheadAdvisor(
         sentinel=sentinel,
-        value_net=value_net,
         evaluate_fn=_simple_evaluate,
-        gap_net=gap_net,
+        human_db=human_db,
         use_sentinel=True,
-        ply_depth=15,
+        ply_depth=20,
         sim_ply_depth=args.sim_ply_depth,
         endgame_db=_la_endgame_db,
     )
     _la_src = "Malom" if db is not None else ("WDL DB" if wdl_db is not None else "none")
-    print(f"[s_end_v2] LookaheadAdvisor: 15-ply width, {args.sim_ply_depth}-ply sim, 4 signals (h+vn+sent+gap), early-exit DB: {_la_src}")
+    print(f"[s_end_v2] LookaheadAdvisor: 20-ply width, {args.sim_ply_depth}-ply sim, 3 signals (h+sent+human), early-exit DB: {_la_src}")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)

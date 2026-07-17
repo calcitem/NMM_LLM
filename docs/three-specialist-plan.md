@@ -429,3 +429,49 @@ Noted during v3 wiring; leaving as-is for now per user, but worth revisiting if 
   * The training-time opponent is weaker than the deployed classical AI, since it lacks the gap-net trap-setting bonus.
   * Fix if adopted: pass `gap_net=gap_net` to both `_GA(...)` constructions in each training script's `_rollout`.  Roughly a 3-line change per file.  Also decide which leaf-side mode (`ai_side` / `opp_side` / `both`) each side should use, which is exactly what the gap-leaf ablation bench (`scripts/bench_gap_leaf.py`) exists to answer.
 - **Depends on the gap-leaf ablation outcome.** Whatever mode wins the ablation should propagate consistently: (a) the classical AI's `gap_net_leaf_mode` in real play, (b) the learner's `gap_net_leaf_mode` in training, (c) how the LookaheadAdvisor's `gap_norm` signal is flipped by `current_player == learner_color`.  All three currently follow independent conventions — worth aligning once the ablation resolves the direction.
+
+---
+
+## Update — v3b Specialist Design (2026-07-17): Remove VN/Gap, 20-ply 3-signal lookahead
+
+### Motivation
+
+Value-net and gap-net signals were removed from all three specialist models after empirical evidence that they detract from play quality. Their per-ply signals in the lookahead block added noise; the base encoding's VN-blended slots [59] and [61] similarly diluted the cleaner heuristic signal. Both models remain available to the classical GameAI for its own alpha-beta blending — only the specialist features are cleaned up.
+
+### Feature changes
+
+| Aspect | Before (v3) | After (v3b) |
+|---|---|---|
+| Lookahead signals per ply | 4 (h, vn, sent, gap) | 3 (h, sent, human) |
+| Lookahead ply depth | 15 | 20 |
+| Lookahead feat width | 15 × 4 = 60 | 20 × 3 = 60 (**unchanged**) |
+| `MOVE_FEAT_DIM_WITH_LOOKAHEAD` | 122 | 122 (**unchanged**) |
+| `MOVE_FEAT_DIM_WITH_TOPK` | 126 | 126 (**unchanged**) |
+| `VN_BLEND` in base encoding | 0.5 | **0.0** (slots 59/61 = pure heuristic) |
+| 3rd lookahead signal | gap_norm | **human_norm** (from HumanDB) |
+
+`human_norm`: `max(HumanDB.query_all_frequencies(board).values())` when DB has coverage for this position, else 0.5. Represents the human-game dominance of the most-played move — a proxy for how "natural" the current trajectory is to human players.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `learned_ai/models/lookahead_advisor.py` | `_record_signals` returns 3-tuple `(h_norm, sent_mean, human_norm)`; removed vn_norm, gap_norm; added `human_db` param; default `ply_depth=20` |
+| `learned_ai/models/scaffolded_encoder.py` | `VN_BLEND = 0.0`; comment updated to "20 half-plies × 3 signals" |
+| `learned_ai/agents/specialist_router.py` | `_mk_la` passes `human_db`, not `value_net`/`gap_net`; `value_net=None` in encode calls; `load_specialist_router` default `ply_depth=20`, legacy params kept for compat |
+| `scripts/train_s_open_v2.py` | LookaheadAdvisor: removed vn/gap, added human_db, ply_depth=20 |
+| `scripts/train_s_mid_v2.py` | Same |
+| `scripts/train_s_end_v2.py` | Same |
+| `scripts/bench_scaffolded.py` | Loads HumanDB from `data/human_db.sqlite`, passes to router; removed value_net/gap_net from router call |
+
+### Network architecture unchanged
+
+Because `MOVE_FEAT_DIM_WITH_LOOKAHEAD` and `MOVE_FEAT_DIM_WITH_TOPK` are both unchanged at 122/126, existing checkpoints remain compatible dimensionally. However, the meaning of lookahead slots has changed (gap → human), so **all three specialists should be retrained from scratch** — the old checkpoints have learned correlations to the old signal layout.
+
+### Sign-off checkpoints (v3b)
+
+- [x] `LookaheadAdvisor` smoke test: `feat_dim=60`, `ply_depth=20`, 3-tuple `_record_signals`
+- [x] `load_specialist_router` loads all three with ply_depth=20, human_db wired
+- [x] `bench_scaffolded.py` loads HumanDB and passes to router
+- [ ] Retrain all three specialists from scratch; confirm no shape mismatches at startup
+- [ ] Bench run after reaching diff 3+ on all specialists
