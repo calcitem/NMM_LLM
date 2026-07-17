@@ -45,11 +45,11 @@ from learned_ai.agents.heuristic_agent import GameAI as _GA
 from learned_ai.models.lookahead_advisor import LookaheadAdvisor
 from learned_ai.models.scaffolded_encoder import (
     encode_position_with_lookahead,
-    encode_top_k_candidates,
     MOVE_FEAT_DIM_WITH_LOOKAHEAD,
     MOVE_FEAT_DIM_WITH_TOPK,
     VALUE_INPUT_DIM,
 )
+from learned_ai.data.specialist_db import SpecialistDB
 from learned_ai.models.scaffolded_net import ScaffoldedPolicyNet
 from learned_ai.sentinel.infer import load_advisor
 from learned_ai.training.scaffolded_a2c import (
@@ -382,7 +382,7 @@ def _run_s1b_refresher(
 
     def _pad_feat(fm: np.ndarray) -> np.ndarray:
         k, d = fm.shape
-        target = MOVE_FEAT_DIM_WITH_TOPK
+        target = MOVE_FEAT_DIM_WITH_LOOKAHEAD
         if d >= target:
             return fm[:, :target]
         pad = np.zeros((k, target - d), dtype=np.float32)
@@ -454,7 +454,7 @@ def _load_model(
     resume_path: Optional[Path],
     policy_hidden: tuple[int, ...] = (512, 256, 128),
 ) -> tuple[ScaffoldedPolicyNet, int, float, int, str]:
-    feat_dim = MOVE_FEAT_DIM_WITH_TOPK
+    feat_dim = MOVE_FEAT_DIM_WITH_LOOKAHEAD
 
     def _fresh():
         return ScaffoldedPolicyNet(
@@ -648,6 +648,16 @@ class _GameConfig:
     temperature:            float
 
 
+def _move_notation(mv: dict) -> str:
+    frm = mv.get("from")
+    to  = mv.get("to") or ""
+    cap = mv.get("capture")
+    s = f"{frm}-{to}" if frm else to
+    if cap:
+        s += f"x{cap}"
+    return s
+
+
 def _rollout(
     model:          ScaffoldedPolicyNet,
     device:         torch.device,
@@ -667,7 +677,15 @@ def _rollout(
     game_difficulty: int = 1,
     human_db=None,
     trajectory_db=None,
+    specialist_db=None,
+    deep_game: bool = False,
 ) -> RolloutResult:
+    # For deep games (1-in-20): temporarily run full ply_depth simulation
+    _saved_sim_ply = None
+    if deep_game and lookahead_advisor is not None:
+        _saved_sim_ply = lookahead_advisor._sim_ply_depth
+        lookahead_advisor._sim_ply_depth = lookahead_advisor._ply_depth
+
     board                   = start_board
     ply                     = 0
     move_phase_start_ply:   Optional[int] = None
@@ -681,20 +699,8 @@ def _rollout(
     retry_board: Optional[BoardState] = None
     move_history: deque[dict] = deque(maxlen=N_HISTORY)
     handoff_agents: dict[str, Any] = {}   # heuristic vs heuristic playout after placement
-
-    # v3: learner-side GameAI for alpha-beta top-K candidate scoring.
-    # Uses the same per-difficulty time budget as the opponent.
-    learner_gameai = _GA(
-        color=learner_color,
-        difficulty=game_difficulty,
-        value_net=value_net,
-        override_time_budget=_specialist_time_budget(game_difficulty),
-    )
-    if sentinel is not None:
-        try:
-            learner_gameai.set_sentinel(sentinel, mode="score_adjust")
-        except Exception:
-            pass
+    learner_boards: list[BoardState] = []
+    learner_moves_notation: list[str] = []
 
     while ply < max_ply:
         if ply == retry_ply:
@@ -737,18 +743,14 @@ def _rollout(
             continue
 
         if player == learner_color:
-            # v3: top-K candidates from alpha-beta search + lookahead + human prior.
-            enc = encode_top_k_candidates(
+            # v4: full-legal-moves scoring via encode_position_with_lookahead.
+            learner_boards.append(board)
+            enc = encode_position_with_lookahead(
                 board, player,
-                gameai=learner_gameai,
-                top_k=5,
-                ab_time_budget=None,       # let GameAI use its per-diff cap
                 sentinel_advisor=sentinel,
                 db=None,
                 value_net=value_net,
                 lookahead_advisor=lookahead_advisor,
-                human_db=human_db,
-                trajectory_db=trajectory_db,
             )
             if enc is None or not enc.legal_moves:
                 outcome = LOSS_REWARD
@@ -789,6 +791,7 @@ def _rollout(
             hist_feats_now = _build_history_features(move_history)
 
             move = enc.legal_moves[chosen_idx]
+            learner_moves_notation.append(_move_notation(move))
             if board.phase == "place":
                 learner_placement_count += 1
             move_history.append(move)   # advance history for next-state context
@@ -824,16 +827,18 @@ def _rollout(
                 # enc_after is a 122-float base+lookahead encoding; zero-pad to 126
                 # so the specialist (trained on 126-float rows) can bootstrap V(next).
                 _row_after = enc_after.feat_matrix
-                _pad_w = MOVE_FEAT_DIM_WITH_TOPK - _row_after.shape[1]
+                _pad_w = MOVE_FEAT_DIM_WITH_LOOKAHEAD - _row_after.shape[1]
                 if _pad_w > 0:
                     _row_after = np.concatenate(
                         [_row_after, np.zeros((_row_after.shape[0], _pad_w), dtype=np.float32)],
                         axis=1,
                     ).astype(np.float32)
+                elif _pad_w < 0:
+                    _row_after = _row_after[:, :MOVE_FEAT_DIM_WITH_LOOKAHEAD]
                 next_mf = _row_after
                 next_vi = np.concatenate([enc_after.value_input, hist_feats_next, raw_next])
             else:
-                next_mf = np.zeros((1, MOVE_FEAT_DIM_WITH_TOPK), dtype=np.float32)
+                next_mf = np.zeros((1, MOVE_FEAT_DIM_WITH_LOOKAHEAD), dtype=np.float32)
                 next_vi = np.zeros(VALUE_INPUT_DIM_WITH_HISTORY, dtype=np.float32)
 
             terminal_next, _ = is_terminal(board_after)
@@ -904,6 +909,18 @@ def _rollout(
 
     if not done:
         outcome = DRAW_LONG
+
+    # Restore sim_ply_depth if deep_game temporarily changed it
+    if _saved_sim_ply is not None and lookahead_advisor is not None:
+        lookahead_advisor._sim_ply_depth = _saved_sim_ply
+
+    # Record game in SpecialistDB
+    if specialist_db is not None and learner_boards:
+        try:
+            _res = "W" if outcome == WIN_REWARD else ("D" if outcome in (DRAW_SHORT, DRAW_LONG) else "L")
+            specialist_db.record_game(learner_boards, _res, learner_moves_notation, "open")
+        except Exception:
+            pass
 
     return RolloutResult(
         trajectory=game_trajectory,
@@ -1050,12 +1067,18 @@ def run(args: argparse.Namespace) -> None:
     lookahead_advisor = LookaheadAdvisor(
         sentinel=sentinel,
         evaluate_fn=_simple_evaluate,
+        value_net=value_net,
+        gap_net=gap_net,
         human_db=human_db,
         use_sentinel=True,
-        ply_depth=20,
+        ply_depth=12,
         sim_ply_depth=args.sim_ply_depth,
     )
-    print(f"[s_open_v2] LookaheadAdvisor: 20-ply width, {args.sim_ply_depth}-ply sim, 3 signals (h+sent+human)")
+    print(f"[s_open_v2] LookaheadAdvisor: 12-ply width, {args.sim_ply_depth}-ply sim, 5 signals (h+learner_sent+opp_sent+vn+gap)")
+
+    # ── SpecialistDB ─────────────────────────────────────────────────────────
+    specialist_db = SpecialistDB(_ROOT / "data" / "specialist_db.sqlite")
+    print(f"[s_open_v2] SpecialistDB: {specialist_db.stats()}")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
@@ -1067,7 +1090,7 @@ def run(args: argparse.Namespace) -> None:
         print("[s_open_v2] No checkpoint found — starting from scratch")
     else:
         print(f"[s_open_v2] Resuming from ({source_tag}): {resume_path}")
-    print(f"[s_open_v2] feat_dim={MOVE_FEAT_DIM_WITH_TOPK}, starting game={start_game}, diff={difficulty}")
+    print(f"[s_open_v2] feat_dim={MOVE_FEAT_DIM_WITH_LOOKAHEAD}, starting game={start_game}, diff={difficulty}")
 
     frozen_opp = FrozenModelOpponent(model, device, sentinel=sentinel, value_net=value_net)
     # Option C: lookahead uses same frozen snapshot for learner-side simulated moves.
@@ -1159,6 +1182,8 @@ def run(args: argparse.Namespace) -> None:
             ))
 
         # ── Run primary rollouts (parallel when batch_games > 1) ─────────────
+        _is_deep_game = (game_count % 20 == 0)   # 1-in-20 games use full 12-ply sim
+
         def _primary(cfg: _GameConfig, opp: Any) -> RolloutResult:
             return _rollout(
                 model=model, device=device, start_board=BoardState.new_game(),
@@ -1170,6 +1195,8 @@ def run(args: argparse.Namespace) -> None:
                 lookahead_advisor=lookahead_advisor,
                 game_difficulty=cfg.game_difficulty,
                 human_db=human_db,
+                specialist_db=specialist_db,
+                deep_game=_is_deep_game,
             )
 
         if _executor is not None and len(batch_slots) > 1:
@@ -1214,6 +1241,7 @@ def run(args: argparse.Namespace) -> None:
                     lookahead_advisor=lookahead_advisor,
                     game_difficulty=game_difficulty,
                     human_db=human_db,
+                    specialist_db=specialist_db,
                 )
                 if confirm_result.trajectory:
                     _retroactive_rescore(confirm_result.trajectory, confirm_result.step_diags,
@@ -1286,6 +1314,7 @@ def run(args: argparse.Namespace) -> None:
                     lookahead_advisor=lookahead_advisor,
                     game_difficulty=game_difficulty,
                     human_db=human_db,
+                    specialist_db=specialist_db,
                 )
                 if retry_result.trajectory:
                     _retroactive_rescore(retry_result.trajectory, retry_result.step_diags, retry_result.outcome)
@@ -1338,6 +1367,7 @@ def run(args: argparse.Namespace) -> None:
                     retry_ply=0,
                     lookahead_advisor=lookahead_advisor,
                     game_difficulty=game_difficulty,
+                    specialist_db=specialist_db,
                 )
 
                 if branch_result.trajectory:

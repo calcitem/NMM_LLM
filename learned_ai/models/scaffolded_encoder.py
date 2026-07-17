@@ -60,8 +60,10 @@ VALUE_INPUT_DIM: int = 23
 VN_BLEND: float = 0.0
 
 # ── Lookahead extension ────────────────────────────────────────────────────────
-# 20 half-plies × 3 signals (h_norm, sent_mean, human_norm) = 60 floats
-LOOKAHEAD_FEAT_DIM: int = 60
+# 12 half-plies × 5 signals (h_norm, learner_sent, opp_sent, vn_norm, gap_norm) = 60 floats
+LOOKAHEAD_PLIES:              int = 12
+LOOKAHEAD_SIGNALS:            int = 5
+LOOKAHEAD_FEAT_DIM:           int = LOOKAHEAD_PLIES * LOOKAHEAD_SIGNALS   # 60
 MOVE_FEAT_DIM_WITH_LOOKAHEAD: int = MOVE_FEAT_DIM + LOOKAHEAD_FEAT_DIM  # 122
 
 # ── Top-K search-informed extension (v3, 2026-07-16) ──────────────────────────

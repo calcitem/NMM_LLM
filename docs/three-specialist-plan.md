@@ -1,4 +1,4 @@
-# Three-Specialist AI Plan (v2 — No Overseer)
+# Three-Specialist AI Plan (v4 — Self-Reflecting Memory Architecture)
 
 ## Goal
 
@@ -474,4 +474,87 @@ Because `MOVE_FEAT_DIM_WITH_LOOKAHEAD` and `MOVE_FEAT_DIM_WITH_TOPK` are both un
 - [x] `load_specialist_router` loads all three with ply_depth=20, human_db wired
 - [x] `bench_scaffolded.py` loads HumanDB and passes to router
 - [ ] Retrain all three specialists from scratch; confirm no shape mismatches at startup
+
+---
+
+## V4 Update — Self-Reflecting Memory Architecture (2026-07-18)
+
+See full design: `docs/v4-specialist-plan.md`
+
+### Why V4
+
+Removing value_net and gap_net in v3b left the lookahead with only heuristic-reflected signals.
+Without an independent value estimator (vn) and opponent-blunder predictor (gap), the specialist
+had no leverage to override alpha-beta. The specialists failed to learn. V4 restores both nets,
+splits the sentinel signal into learner vs opponent perspective, and adds a self-built experience
+database so the specialist accumulates its own WDL knowledge without requiring Malom at inference.
+
+### Feature layout change
+
+| Aspect | v3b | V4 |
+|---|---|---|
+| Lookahead signals per ply | 3 (h, sent_mean, human_norm) | **5** (h, learner_sent, opp_sent, vn_norm, gap_norm) |
+| Lookahead ply depth | 20 | **12** |
+| Lookahead feat width | 20 × 3 = 60 | 12 × 5 = 60 (**unchanged**) |
+| Value net | removed | **restored** |
+| Gap net | removed | **restored** |
+| Sentinel | averaged (single signal) | **split**: learner_sent / opp_sent |
+| Human norm | 3rd lookahead signal | dropped from lookahead (available in base features) |
+| Move encoding | top-K re-ranking (top 5 from α-β) | **full legal moves** |
+| `MOVE_FEAT_DIM` (training) | 126 (with topK extras) | **122** (base 62 + lookahead 60) |
+| SpecialistDB | none | **new** — self-built SQLite experience DB |
+
+`learner_sent`: mean sentinel quality of the learner's legal moves at this ply (learner-turn plies
+only; 0.5 on opponent-turn plies).
+`opp_sent`: mean sentinel quality of the opponent's legal moves (opp-turn plies only; 0.5 on
+learner-turn plies).
+
+The contrast `learner_sent` ↑ while `opp_sent` ↓ across successive plies is the signature of a
+trap being set. The specialist learns trap patterns implicitly from this differential without any
+explicit trap detection logic.
+
+### SpecialistDB — self-built experience database
+
+- **One shared SQLite** file (`data/specialist_db.sqlite`) written to by all three specialists
+- **D4 symmetry**: position keys use `canonical_board_str()` from `ai/board_symmetry.py` — all 8
+  rotationally/reflectionally equivalent positions share the same key (up to 8× data efficiency)
+- **Position table**: per-position wins/draws/losses accumulated from every learner game
+- **Malom labels**: during training, Malom labels key branch-point positions; stored as
+  `malom_label` so inference can use them without downloading Malom
+- **Winning lines**: move sequences from won/drawn games, phase-tagged, with running win rate
+- **Preferred plays**: lines promoted when `times_played ≥ 5` and `win_rate ≥ 0.65`; demoted
+  when win rate falls below 0.45 over 20 encounters
+- **No size cap**: 100K games ≈ <1 GB; DB grows from every game the user plays, including
+  against human opponents at inference time (no Malom needed post-training)
+
+### Training
+
+- **Low difficulty, 5-ply sim** for normal games (fast)
+- **1-in-20 deep games**: `sim_ply_depth = 12` (full ply depth) — provides long-horizon ground truth
+- All three specialists run **in parallel** from separate scripts; shared DB uses SQLite WAL mode
+- Existing checkpoints are incompatible (122 vs 126 features) — all three start from scratch
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `learned_ai/data/specialist_db.py` | **NEW** — SpecialistDB (SQLite, D4 hash, record/query/promote) |
+| `learned_ai/models/lookahead_advisor.py` | 5-signal layout; split learner_sent/opp_sent; value_net+gap_net restored; `feat_dim = ply_depth * 5`; `sim_ply_depth` override param on `score_moves_matrix` |
+| `learned_ai/models/scaffolded_encoder.py` | `LOOKAHEAD_PLIES=12`, `LOOKAHEAD_SIGNALS=5` constants |
+| `learned_ai/agents/specialist_router.py` | Full-legal-moves mode (dropped top-K branch); value_net+gap_net wired to LookaheadAdvisors; specialist_db param |
+| `scripts/train_s_open_v2.py` | Full-legal-moves rollout; specialist_db init + record_game; 1-in-20 deep games; VN+gap passed to LookaheadAdvisor; feat_dim=122 |
+| `scripts/train_s_mid_v2.py` | Same |
+| `scripts/train_s_end_v2.py` | Same |
+| `scripts/bench_scaffolded.py` | value_net+gap_net passed to router; ply_depth default 12 |
+
+### Sign-off checkpoints (V4)
+
+- [x] `LOOKAHEAD_PLIES=12`, `LOOKAHEAD_SIGNALS=5`, `LOOKAHEAD_FEAT_DIM=60`
+- [x] `LookaheadAdvisor.feat_dim = 60` (12 × 5)
+- [x] D4 canonical hash in `SpecialistDB._board_hash` via `ai.board_symmetry.canonical_board_str`
+- [x] Training scripts use `encode_position_with_lookahead` (full legal moves, 122 features)
+- [x] `bench_scaffolded.py` passes value_net + gap_net to router
+- [ ] Run training smoke test: `--max-games 20` on all three specialists, confirm no shape errors
+- [ ] After 1000 training games: SpecialistDB has ≥300 position entries with ≥3 samples
+- [ ] After 5000 games: preferred_plays has ≥3 promoted entries
 - [ ] Bench run after reaching diff 3+ on all specialists

@@ -18,8 +18,7 @@ Opponent configurations (default set)
 All opponent configs share the same tuning: value_net_blend = 20, sentinel
 intervention probability = 20% when sentinel is enabled.
 
-Router (specialist AI) uses sentinel + human_db + Malom DB at inference.
-Value-net and gap-net have been removed from specialist features.
+Router (specialist AI) uses sentinel + value_net + gap_net + human_db + Malom DB at inference.
 
 Time budget
 -----------
@@ -309,8 +308,8 @@ def main() -> int:
                         "Default (-1) uses the game's per-difficulty caps "
                         "(15/30/45/60 s at diff 1-5/6/7/8+, with 3-10 s early-placement reductions). "
                         "Pass a positive value for a flat override.")
-    p.add_argument("--specialist-ply-depth", type=int, default=20,
-                   help="LookaheadAdvisor ply depth for the specialists (default 15).")
+    p.add_argument("--specialist-ply-depth", type=int, default=12,
+                   help="LookaheadAdvisor ply depth for the specialists (default 12, matches V4 training).")
     p.add_argument("--max-plies",       type=int,   default=400)
     p.add_argument("--sentinel-path",   default=_SENTINEL_CKPT)
     p.add_argument("--value-net-path",  default=_VALUE_NET_PATH)
@@ -318,9 +317,6 @@ def main() -> int:
     p.add_argument("--malom-path",      default=_MALOM_DEFAULT,
                    help=f"Malom perfect DB dir (default {_MALOM_DEFAULT}).")
     p.add_argument("--out-dir",         default=str(_ROOT / "data" / "bench"))
-    p.add_argument("--router-difficulty", type=int, default=7,
-                   help="Difficulty for the router's own GameAI (alpha-beta move ordering). "
-                        "Default 7 — gives solid top-K ordering without heavy search cost.")
     p.add_argument("--quiet",           action="store_true",
                    help="Suppress per-game progress dots.")
     args = p.parse_args()
@@ -359,6 +355,8 @@ def main() -> int:
         sentinel_advisor=sentinel,
         human_db=human_db,
         db=malom_db,
+        value_net=value_net,
+        gap_net=gap_net,
         ply_depth=args.specialist_ply_depth,
     )
     if router is None:
@@ -369,17 +367,6 @@ def main() -> int:
           f"end={'OK' if router._spec_end else 'missing'}  "
           f"ply_depth={args.specialist_ply_depth}")
 
-    # Give the router a dedicated GameAI for alpha-beta move ordering (encode_top_k_candidates).
-    # Without this the router falls back to the 122-feat path which mismatches 126-dim checkpoints.
-    from ai.game_ai import GameAI as _GameAI
-    _router_gameai = _GameAI(
-        color="W",                # router handles both colors; color here only affects book lookup
-        difficulty=args.router_difficulty,
-        value_net=value_net,
-        malom_db=malom_db,
-    )
-    router.set_gameai(_router_gameai)
-    print(f"  router GameAI: diff={args.router_difficulty} (for top-K move ordering)")
     print()
 
     # ── plan ──────────────────────────────────────────────────────────────────

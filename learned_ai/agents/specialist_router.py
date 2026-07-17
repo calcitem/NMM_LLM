@@ -80,6 +80,7 @@ class SpecialistRouter:
         lookahead_advisor_open=None,
         lookahead_advisor_mid=None,
         lookahead_advisor_end=None,
+        specialist_db=None,
     ) -> None:
         self._spec_open = spec_open
         self._spec_mid  = spec_mid
@@ -95,6 +96,7 @@ class SpecialistRouter:
         self._la_open   = lookahead_advisor_open
         self._la_mid    = lookahead_advisor_mid
         self._la_end    = lookahead_advisor_end
+        self._specialist_db = specialist_db
 
     # ── OverseerAdvisor-compatible surface ────────────────────────────────────
 
@@ -149,18 +151,13 @@ class SpecialistRouter:
         Routes to the phase-appropriate specialist; falls back to whichever
         specialist is loaded if the preferred one is missing.
 
-        v3 (2026-07-16): uses ``encode_top_k_candidates`` when a GameAI is available,
-        so the specialist re-ranks the classical engine's top-K alpha-beta moves plus
-        their lookahead + human-prior features.  Falls back to the v2 full-legal-moves
-        path when GameAI is None (for backward compatibility with older checkpoints).
+        v4: scores ALL legal moves via encode_position_with_lookahead (full-legal-moves
+        mode).  The specialist is not limited to re-ranking a top-K subset.
         """
         if not candidates:
             return None
         try:
-            from learned_ai.models.scaffolded_encoder import (
-                encode_position_with_lookahead,
-                encode_top_k_candidates,
-            )
+            from learned_ai.models.scaffolded_encoder import encode_position_with_lookahead
 
             spec, la, phase_label = self._pick_specialist(board, color)
             # Fallback ladder: preferred → any other loaded specialist
@@ -175,45 +172,13 @@ class SpecialistRouter:
             if spec is None:
                 return None
 
-            # v3 top-K path: use GameAI's alpha-beta ordering plus human-prior features.
-            # Only enabled when a GameAI is attached AND the loaded specialist's move_feat_dim matches.
-            expected_dim = getattr(spec, "move_feat_dim", None)
-            use_topk = (
-                self._gameai is not None
-                and expected_dim == 126        # MOVE_FEAT_DIM_WITH_TOPK
+            enc = encode_position_with_lookahead(
+                board, color,
+                sentinel_advisor=self._sentinel,
+                db=None,
+                value_net=self._value_net,
+                lookahead_advisor=la,
             )
-
-            if use_topk:
-                # Shared-search: reuse the coordinator's already-populated
-                # transposition table + killer moves + history.  We also cap
-                # the depth to whatever the coordinator reached, so the
-                # second search returns instantly (all TT hits) instead of
-                # burning another 15-60 s of wall time.
-                _last_depth = getattr(self._gameai, "last_depth_reached", 0) or 0
-                _ab_depth = max(2, int(_last_depth)) if _last_depth else None
-                enc = encode_top_k_candidates(
-                    board, color,
-                    gameai=self._gameai,
-                    top_k=5,
-                    ab_depth=_ab_depth,
-                    ab_time_budget=2.0,             # ceiling — TT hits finish it faster
-                    ab_preserve_tt=True,            # ← key: reuse coordinator's search state
-                    sentinel_advisor=self._sentinel,
-                    db=None,
-                    value_net=None,
-                    lookahead_advisor=la,
-                    human_db=self._human_db,
-                    trajectory_db=None,
-                    ngram_model=None,
-                )
-            else:
-                enc = encode_position_with_lookahead(
-                    board, color,
-                    sentinel_advisor=self._sentinel,
-                    db=None,
-                    value_net=None,
-                    lookahead_advisor=la,
-                )
             if enc is None or not enc.legal_moves:
                 return None
 
@@ -245,10 +210,10 @@ def load_specialist_router(
     sentinel_advisor=None,
     db=None,
     human_db=None,
-    ply_depth: int = 20,
-    # Legacy params accepted but ignored — value_net and gap_net removed from specialists.
     value_net=None,
     gap_net=None,
+    specialist_db=None,
+    ply_depth: int = 12,
 ) -> Optional[SpecialistRouter]:
     """Load the three v2 specialists and their LookaheadAdvisors.
 
@@ -281,6 +246,8 @@ def load_specialist_router(
             return LookaheadAdvisor(
                 sentinel=sentinel_advisor,
                 evaluate_fn=evaluate_fn,
+                value_net=value_net,
+                gap_net=gap_net,
                 human_db=human_db,
                 use_sentinel=True,
                 endgame_db=endgame_db_arg,
@@ -309,7 +276,11 @@ def load_specialist_router(
         },
         sentinel_advisor=sentinel_advisor,
         db=db,
-        endgame_db=db, human_db=human_db,
+        value_net=value_net,
+        gap_net=gap_net,
+        endgame_db=db,
+        human_db=human_db,
+        specialist_db=specialist_db,
         lookahead_advisor_open=la_open,
         lookahead_advisor_mid=la_mid,
         lookahead_advisor_end=la_end,
