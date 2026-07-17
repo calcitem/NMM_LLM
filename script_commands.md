@@ -556,56 +556,79 @@ Output: `learned_ai/data/human_imitation2.npz` — 13,040 positions, 122-float f
 | `--max-moves N` | 120 | Cap moves per game to avoid stalls |
 
 
-## Learned AI — Specialist Training v2 (Opening / Midgame / Endgame)
+## Learned AI — Specialist Training v3 (Opening / Midgame / Endgame)
 
-Three independent networks, each acting directly for its own phase. No overseer. Features: 122-float move features (62-float base + 15-ply × 4-signal lookahead block). Value head input: 32 floats (23-float base + 9-float history: last 3 moves × from/to/capture). Reward: sentinel delta + heuristic delta + mill bonus (Malom zeroed for opening specialist). Difficulty: 20 levels, log-scale time budget (L1≈0.01 s → L10≈0.6 s → L20=60 s). Advancement: win/(win+loss) ≥ 51% (level 1) → 60% (level 20), min 20 decisive games.
+Three independent phase specialists (opening / midgame / endgame). Each one sits on top of the classical engine's alpha-beta search and re-ranks its top-K candidates.
 
-**Prerequisite: generate `human_imitation2.npz` first (s1a warm-start data):**
+**Per-move features (126 floats each row):**
+- **62 base** — sentinel score, heuristic + VN blended eval and delta, counterfactual block, `is_engine_top1` flag, and the 58-float sentinel/board context.
+- **60 lookahead** — 15 half-plies × 4 signals (heuristic + VN + sentinel + gap). Training simulates only `--sim-ply-depth` half-plies (default 5) and pads to full width; inference always runs full 15.
+- **4 top-K extras** — `ab_score_norm`, `ab_rank_norm`, `human_freq`, `human_rank`.
+
+**Value input (80 floats):** 23 encoder base + 9 history (last 3 moves' from/to/capture as normalised indices) + 48 raw-board one-hot (24 positions × 2 colours).
+
+**Model:** `ScaffoldedPolicyNet` — policy MLP `126 → 512 → 256 → 128 → 1`, value MLP `80 → 256 → 128 → 64 → 1`. ~289 k params.
+
+**Difficulty:** 20 levels. Log-scale per-move opponent budget: L1 ≈ 1 ms → L15+ caps at 2 s (mid/end) or 1 s (opening). **Advancement:** Sanmill superiority-probability gate — `P(true score > target) ≥ 0.95` on the last 50 games; target ramps 55% (L1) → 60% (L20) with time-of-flight relaxation to a 51% floor after 1000+ stalled games. Checked every 10 games once `games_at_level ≥ 20`.
+
+### Prerequisites
+
+Generate the 122-float human imitation warm-start dataset once (`human_imitation2.npz`, ~6-8 h wall):
 
 ```
-.venv/bin/python scripts/gen_human_imitation_data_v2.py  \
+.venv/bin/python scripts/gen_human_imitation_data_v2.py \
   --gap-net data/gap_net.npz --max-moves 120
 ```
 
-**Opening specialist (v2) — fresh start:**
+### Fresh training runs (recommended flags)
+
+Speed flags: `--sim-ply-depth 5` (~3× lookahead speed-up during training; inference stays at 15) and `--minimal-rollouts` (one primary rollout per game, no confirm / retry). Launch each specialist in its own terminal / tmux pane — they train independently and in parallel.
+
+**Opening specialist — fresh:**
 
 ```
-.venv/bin/python scripts/train_s_open_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+.venv/bin/python scripts/train_s_open_v2.py \
+  --max-games 30000 --batch-games 10 \
+  --sim-ply-depth 5 --minimal-rollouts \
+  --self-play-ratio 0.05
 ```
 
-**Opening specialist (v2) — resume:**
+**Midgame specialist — fresh:**
 
 ```
-.venv/bin/python scripts/train_s_open_v2.py --auto-resume-best --max-games 10000
+.venv/bin/python scripts/train_s_mid_v2.py \
+  --max-games 30000 --batch-games 10 \
+  --sim-ply-depth 5 --minimal-rollouts \
+  --self-play-ratio 0.05
 ```
 
-**Opening specialist (v2) — parallel (2 games per iteration):**
+**Endgame specialist — fresh:**
 
 ```
-.venv/bin/python scripts/train_s_open_v2.py --max-games 10000 --batch-games 2
+.venv/bin/python scripts/train_s_end_v2.py \
+  --max-games 30000 --batch-games 10 \
+  --sim-ply-depth 5 --minimal-rollouts \
+  --self-play-ratio 0.05 \
+  --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 ```
 
-**Midgame specialist (v2):**
+### Resume from best checkpoint
 
 ```
-.venv/bin/python scripts/train_s_mid_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+.venv/bin/python scripts/train_s_open_v2.py --auto-resume-best --max-games 30000 --batch-games 10 --sim-ply-depth 5 --minimal-rollouts
+.venv/bin/python scripts/train_s_mid_v2.py  --auto-resume-best --max-games 30000 --batch-games 10 --sim-ply-depth 5 --minimal-rollouts
+.venv/bin/python scripts/train_s_end_v2.py  --auto-resume-best --max-games 30000 --batch-games 10 --sim-ply-depth 5 --minimal-rollouts --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 ```
 
-**Endgame specialist (v2):**
+### Smoke test (2-5 games each, no warm-start)
 
 ```
-.venv/bin/python scripts/train_s_end_v2.py --max-games 5000 --batch-games 4 --self-play-ratio 0.05
+.venv/bin/python scripts/train_s_open_v2.py --max-games 5 --no-s1a-warmstart --sim-ply-depth 5 --minimal-rollouts
+.venv/bin/python scripts/train_s_mid_v2.py  --max-games 5 --no-s1a-warmstart --sim-ply-depth 5 --minimal-rollouts
+.venv/bin/python scripts/train_s_end_v2.py  --max-games 5 --no-s1a-warmstart --sim-ply-depth 5 --minimal-rollouts --malom /mnt/windows/NMM_DB/Malom_Standard_Ultra-strong_1.1.0/Std_DD_89adjusted
 ```
 
-**Smoke test (5 games, no warm-start):**
-
-```
-.venv/bin/python scripts/train_s_open_v2.py --max-games 5 --no-s1a-warmstart
-.venv/bin/python scripts/train_s_mid_v2.py  --max-games 5 --no-s1a-warmstart
-.venv/bin/python scripts/train_s_end_v2.py  --max-games 5 --no-s1a-warmstart
-```
-
-Common flags (all three v2 specialists):
+### Common flags (all three v2/v3 specialists)
 
 | Flag | Default | Description |
 | - | - | - |
@@ -613,20 +636,32 @@ Common flags (all three v2 specialists):
 | `--value-net PATH` | `data/value_net.npz` | Trajectory value net |
 | `--gap-net PATH` | `data/gap_net.npz` | Gap net (blunder density) |
 | `--out-dir PATH` | `learned_ai/checkpoints/scaffolded/s_*_v2` | Checkpoint output |
-| `--s1a-data PATH` | `human_imitation2.npz` | Pre-RL imitation warm-start data |
-| `--no-s1a-warmstart` | off | Skip s1a imitation warm-start (run from scratch) |
-| `--batch-games N` | 1 | Parallel primary rollouts via ThreadPoolExecutor (2 recommended) |
-| `--max-games N` | 5000 | Training games |
-| `--diff-max N` | 20 | Maximum difficulty level |
-| `--time-budget F` | -1 (auto) | Override time budget per move (≤0 = formula) |
-| `--lr F` | 1e-4 | Learning rate |
-| `--entropy-coef F` | 0.01 | Entropy regularisation coefficient |
-| `--update-every N` | 16 | Policy update interval (steps) |
-| `--rolling-win N` | 50 | Rolling window for win-rate tracking |
-| `--resume PATH` | — | Explicit checkpoint to resume from |
-| `--auto-resume-best` | off | Auto-resume from `s_*_v2/best.pt` |
-| `--ppo` | off | Use PPO instead of A2C |
-| `--seed N` | 42 | Random seed |
+| `--s1a-data PATH` | `data/human_imitation2.npz` | Pre-RL imitation warm-start data |
+| `--no-s1a-warmstart` | off | Skip s1a warm-start (start RL from scratch) |
+| `--batch-games N` | 1 | Parallel primary rollouts via ThreadPoolExecutor. 10 recommended on 16+ cores; diminishing returns beyond 24. |
+| `--sim-ply-depth N` | 5 | LookaheadAdvisor simulated depth during training. Feature width still 60 floats via padding; inference runs full 15. |
+| `--minimal-rollouts` | off | Skip retry + confirm rollouts (branches already off by default). ~3× training throughput at the cost of sample efficiency. |
+| `--max-games N` | 5000 | Games (soft cap; specialist stops early on hitting max difficulty). |
+| `--diff-max N` | 20 | Maximum difficulty level. |
+| `--diff-start N` | 1 | Starting difficulty level. |
+| `--time-budget F` | -1 (auto per-level) | Override per-move budget for the opponent's α-β search. |
+| `--self-play-ratio F` | 0.5 | Fraction of games vs frozen model. 0.05 recommended once RL is stable. |
+| `--lr F` | 1e-4 | Learning rate. |
+| `--entropy-coef F` | 0.01 | Entropy regularisation coefficient. |
+| `--update-every N` | 16 | Policy update interval (steps). |
+| `--rolling-win N` | 50 | Rolling window for the Sanmill advance test. |
+| `--resume PATH` | — | Explicit checkpoint to resume from. |
+| `--auto-resume-best` | off | Auto-resume from `s_*_v2/best.pt`. |
+| `--ppo` | off | Use PPO instead of A2C. |
+| `--seed N` | 42 | Random seed. |
+| `--malom PATH` | — | (endgame only) Malom perfect DB directory for endgame reward + lookahead early-exit. |
+
+### Notes for overnight runs
+
+- Each specialist runs independently. Launch all three in parallel, one per terminal / tmux pane.
+- At `--batch-games 10` on a 16-core CUDA box, expect **~300-1100 games/hour at diff 1** with the v3 speed flags applied.
+- Watch `htop` — if all CPU cores are pegged, raise `--batch-games` cautiously (10 → 16 → 24). Beyond 24 you'll see diminishing returns from Python GIL + memory pressure.
+- Advance-check log line format: `[s_open_v2] advance-check @ diff 3: P=0.982 ≥ 0.95 (target=0.545, score=0.760)`. When the P-value stays < 0.5 for 5000+ games at a level, more games won't help — the model has plateaued.
 
 
 ## Learned AI — Specialist Benchmark (bench_scaffolded.py)
