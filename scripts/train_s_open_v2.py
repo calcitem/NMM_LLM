@@ -1037,8 +1037,9 @@ def run(args: argparse.Namespace) -> None:
         gap_net=gap_net,
         use_sentinel=True,
         ply_depth=15,
-    )
-    print("[s_open_v2] LookaheadAdvisor: 15-ply, 4 signals (h+vn+sent+gap)")
+        sim_ply_depth=args.sim_ply_depth,
+        )
+    print(f"[s_open_v2] LookaheadAdvisor: 15-ply width, {args.sim_ply_depth}-ply sim, 4 signals (h+vn+sent+gap)")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
@@ -1177,7 +1178,9 @@ def run(args: argparse.Namespace) -> None:
 
             if result.outcome == WIN_REWARD:
                 ep_steps.extend(result.trajectory)
-            elif result.outcome in (LOSS_REWARD, DRAW_SHORT) and result.retry_board is not None:
+            elif (not args.minimal_rollouts
+                  and result.outcome in (LOSS_REWARD, DRAW_SHORT)
+                  and result.retry_board is not None):
                 confirm_result = _rollout(
                     model=model,
                     device=device,
@@ -1247,7 +1250,9 @@ def run(args: argparse.Namespace) -> None:
                 _dif = f"d{game_difficulty}" if game_difficulty != difficulty else f"diff {difficulty}"
                 print(f"[s_open_v2] {game_count:6d} {_gt:4s} {learner_color} | {_dif} | {_oc} ply={result.ply:3d} | hwr={hwr:.3f} hdr={hdr:.3f} awr={_awr:.3f} | temp={temperature:.2f} lr={opt.param_groups[0]['lr']:.5f}")
 
-            if result.outcome != WIN_REWARD and result.retry_board is not None:
+            if (not args.minimal_rollouts
+                and result.outcome != WIN_REWARD
+                and result.retry_board is not None):
                 retry_result = _rollout(
                     model=model,
                     device=device,
@@ -1560,6 +1565,13 @@ def main() -> None:
     p.add_argument("--s1b-refresher-epochs", type=int,  default=S1B_REFRESHER_EPOCHS)
     p.add_argument("--s1b-refresher-lr",     type=float,default=S1B_REFRESHER_LR)
     p.add_argument("--no-s1a-warmstart",     action="store_true", help="Skip s1a imitation warm-start")
+    p.add_argument("--minimal-rollouts",    action="store_true",
+                   help="Skip retry + confirm rollouts (branches are already off by default). "
+                        "Trades sample efficiency for wall-clock speed — one primary rollout per game.")
+    p.add_argument("--sim-ply-depth",       type=int,   default=5,
+                   help="LookaheadAdvisor simulation depth during training (default 5). "
+                        "Feature width stays at 15-ply * 4 = 60 floats via padding, so inference "
+                        "at full 15 plies matches. Big training speed-up.")
     p.add_argument("--batch-games",          type=int,   default=1,
                    help="Number of primary rollouts to run in parallel (ThreadPoolExecutor)")
     args = p.parse_args()

@@ -401,6 +401,25 @@ VN itself is used **correctly** per the current design. The only problem is the 
 - Overseer toggle in-game behaviour: coordinator runs first, specialist re-scores (kept).
 - The classical heuristic AI's algorithm otherwise — only the VN/gap short-circuit is being fixed.
 
+### Training speed-ups (2026-07-17, applied)
+
+Three optimizations landed for training throughput. All preserve inference-time behaviour (specialist still uses full 15-ply lookahead in real gameplay).
+
+1. **Top-K-only lookahead in the encoder.** `encode_top_k_candidates` used to call `encode_position_with_lookahead` (computing the 15-ply block for *all* legal moves) then throw away all but K rows. Now it calls `encode_position` for the base 62-float rows across all legal moves, determines the top-K via alpha-beta + sentinel outsider, and calls `LookaheadAdvisor.score_moves_matrix(..., moves_subset=top_k_moves)` for the expensive 15-ply block only on those K candidates. Roughly **~2.4× speed-up on the lookahead phase alone** (5-6 candidates instead of ~17).
+
+2. **`--sim-ply-depth N` training flag** (default 5). `LookaheadAdvisor` now separates *feature width* (still 15 × 4 = 60 floats) from *simulated depth* (configurable). Training runs 5 half-plies of real simulation and pads the remaining 10 with the last-observed signal. Feature width is unchanged so inference (which uses the default 15-ply simulation) reads compatible checkpoints. Roughly **~3× on the lookahead per-candidate cost**.
+
+3. **`--minimal-rollouts` flag**. Skips retry + confirm rollouts (branches were already off by default). One primary rollout per game, no extra "confirm this loss with a fresh replay from the retry_board" or "try again from mid-game". Trades sample efficiency for wall-clock throughput; useful early in a run when we want games/hour up.
+
+4. **`ai/human_db.py`**: `query_all_frequencies` cached via `@lru_cache(maxsize=100_000)` on `(state_key, min_samples)`. Same position gets re-queried many times per rollout (learner-decide, retry, sentinel outsider, encode_top_k_candidates internal). SYM inverse still applied per call.
+
+5. **`GameAI.score_root_moves` default depth in the encoder**: was `gameai.max_search_depth = 19` (which caused *13-second* per-call latency at diff 1 because `time_budget` is not respected internally). Now defaults to **1** in the encoder for training; the router overrides to `last_depth_reached` at inference (where the coordinator's warm TT makes it near-instant).
+
+Combined training speedup vs the old encoder path: **~3× at diff 1** (mid-game position, batch 4). Larger absolute wins at higher diffs where the lookahead cost dominates more.
+
+**Not applied** (bigger refactor, deferred):
+- Batching sentinel forward passes across the 5 candidate trajectories at each lookahead depth (lock-step). Would give another ~5× on the sentinel portion but requires restructuring `_simulate_trajectory` from per-candidate to lock-step across candidates with variable-K termination handling.
+
 ### Known gaps / possible improvements (deferred, 2026-07-17)
 
 Noted during v3 wiring; leaving as-is for now per user, but worth revisiting if the specialists still stall after the current training run.

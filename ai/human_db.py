@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import sqlite3
+from functools import lru_cache
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -266,30 +267,45 @@ class HumanDB:
         board: "BoardState",
         min_samples: int = 5,
     ) -> dict[str, float]:
-        """Per-notation relative frequency [0, 1] for use in SE-11 opponent extension."""
+        """Per-notation relative frequency [0, 1] for use in SE-11 opponent extension.
+
+        Cached on (state_key, min_samples) — the same canonical position is often
+        re-queried many times during a rollout (learner-decide, enc_after, retry,
+        confirm, branch rollouts) and per encoder call.  Cache holds up to 100k
+        entries; SYM inverse transform applied per call since sym_idx varies.
+        """
         if not self.is_available():
             return {}
         state_key, sym_idx = make_board_state_key(board)
+        canon = self._query_all_frequencies_canonical(state_key, min_samples)
+        if not canon:
+            return {}
+        inv = SYM_INVERSE[sym_idx]
+        result: dict[str, float] = {}
+        for canon_ntn, freq in canon:
+            actual = transform_notation(canon_ntn, inv)
+            if actual:
+                result[actual] = freq
+        return result
+
+    @lru_cache(maxsize=100_000)
+    def _query_all_frequencies_canonical(
+        self, state_key: str, min_samples: int,
+    ) -> tuple[tuple[str, float], ...]:
+        """SQL lookup + canonical-form frequency computation (no SYM transform).
+
+        Returned as a tuple so lru_cache can hold it; empty tuple when no data.
+        """
         rows = self._conn.execute(
             "SELECT notation, total FROM moves WHERE state_key = ?",
             (state_key,),
         ).fetchall()
         if not rows:
-            return {}
-
+            return ()
         total_all = sum(r[1] for r in rows)
         if total_all < min_samples:
-            return {}
-
-        inv = SYM_INVERSE[sym_idx]
-        result: dict[str, float] = {}
-        for r in rows:
-            if r[1] == 0:
-                continue
-            actual = transform_notation(r[0], inv)
-            if actual:
-                result[actual] = r[1] / total_all
-        return result
+            return ()
+        return tuple((r[0], r[1] / total_all) for r in rows if r[1] > 0)
 
     def query_opponent_loss(
         self,

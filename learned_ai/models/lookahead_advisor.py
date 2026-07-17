@@ -77,6 +77,7 @@ class LookaheadAdvisor:
         ply_depth: int = 15,
         frozen_model=None,
         frozen_device=None,
+        sim_ply_depth: Optional[int] = None,
     ) -> None:
         self._sentinel      = sentinel
         self._value_net     = value_net
@@ -84,7 +85,12 @@ class LookaheadAdvisor:
         self._gap_net       = gap_net
         self._use_sentinel  = use_sentinel
         self._endgame_db    = endgame_db
-        self._ply_depth     = ply_depth
+        self._ply_depth     = ply_depth      # output feature width = ply_depth * 4
+        # sim_ply_depth: how many plies to ACTUALLY simulate.  Defaults to ply_depth.
+        # Training scripts may set a smaller sim depth (e.g. 5) so simulations run
+        # faster; remaining ply slots are filled with the last valid signal, so
+        # the feature width matches inference (which uses full ply_depth).
+        self._sim_ply_depth = int(sim_ply_depth) if sim_ply_depth is not None else ply_depth
         self._frozen_model  = frozen_model
         self._frozen_device = frozen_device
         self.feat_dim       = ply_depth * 4   # total floats per move row
@@ -130,19 +136,25 @@ class LookaheadAdvisor:
         board: BoardState,
         enc,
         learner_color: str,
+        moves_subset=None,
     ) -> np.ndarray:
         """Return per-move lookahead feature block.  Shape: (k, ply_depth*4).
 
         Each row is the trajectory for one legal move.
         Returns a zero-filled matrix on any top-level error (neutral, no distortion).
+
+        ``moves_subset`` — if provided, only simulate lookahead for those moves.
+        Returns (len(moves_subset), ply_depth*4).  Used by encode_top_k_candidates
+        to avoid running 15-ply simulations on the k-5 rejected candidates.
         """
         opp_color = "B" if learner_color == "W" else "W"
-        k = len(enc.legal_moves)
+        target_moves = moves_subset if moves_subset is not None else enc.legal_moves
+        k = len(target_moves)
         if k == 0:
             return np.zeros((0, self.feat_dim), dtype=np.float32)
 
         rows = []
-        for mv in enc.legal_moves:
+        for mv in target_moves:
             row = self._simulate_trajectory(board, mv, learner_color, opp_color)
             rows.append(row)
 
@@ -167,12 +179,15 @@ class LookaheadAdvisor:
         """
         # Layout: [h1, vn1, s1, g1,  h2, vn2, s2, g2, ...,  hN, vnN, sN, gN]
         result = np.full(self._ply_depth * 4, 0.5, dtype=np.float32)
+        # Simulate only the first sim_ply_depth half-plies; remaining slots are
+        # padded with the last valid signal.  Feature width is always ply_depth * 4.
+        _sim = min(self._sim_ply_depth, self._ply_depth)
         try:
             b      = board
-            actors = [learner_color if i % 2 == 0 else opp_color for i in range(self._ply_depth)]
+            actors = [learner_color if i % 2 == 0 else opp_color for i in range(_sim)]
             last_sig = (0.5, 0.5, 0.5, 0.5)
 
-            for depth_idx in range(self._ply_depth):
+            for depth_idx in range(_sim):
                 actor = actors[depth_idx]
 
                 # Apply the move for this half-ply
@@ -220,6 +235,13 @@ class LookaheadAdvisor:
                 sig = self._record_signals(b, learner_color)
                 last_sig = sig
                 result[depth_idx * 4 : depth_idx * 4 + 4] = sig
+
+            # If we simulated fewer plies than the output width (training speed-up),
+            # propagate the last valid signal into the remaining slots so the
+            # feature width matches inference.
+            if _sim < self._ply_depth:
+                for fill in range(_sim, self._ply_depth):
+                    result[fill * 4 : fill * 4 + 4] = last_sig
 
         except Exception:
             pass   # partial result already in `result`; remaining slots stay 0.5

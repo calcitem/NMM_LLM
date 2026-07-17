@@ -495,7 +495,14 @@ def encode_top_k_candidates(
                                               lookahead_dim=lookahead_dim)
 
     # 1. Alpha-beta score all legal moves via the classical engine.
-    _depth  = int(ab_depth) if ab_depth is not None else int(getattr(gameai, "max_search_depth", 3))
+    # NB: GameAI.score_root_moves does NOT respect its time_budget — it runs
+    # to full depth regardless.  So the depth default matters a lot.
+    # Depth 1 = ~30 ms/call and gives real scores for all moves.
+    # Depth 2 = ~500 ms/call, deeper structure but 500× slower.
+    # Depth 3+ = starts aborting inside negamax → returns mostly-zero scores anyway.
+    # For training we cap at depth 2; at inference the router passes coordinator's
+    # last_depth_reached (which reuses the warm TT for near-instant probes).
+    _depth  = int(ab_depth) if ab_depth is not None else 1
     _budget = float(ab_time_budget) if ab_time_budget is not None else float(getattr(gameai, "_override_time_budget", None) or 2.0)
     try:
         scored = gameai.score_root_moves(board, depth=_depth, time_budget=_budget,
@@ -535,24 +542,24 @@ def encode_top_k_candidates(
         except Exception:
             pass
 
-    # 2. Base encoding (all legal moves, then filter).
-    base_enc = encode_position_with_lookahead(
+    # 2. Base encoding only — 62-float rows for all legal moves.  We defer
+    #    the expensive 15-ply lookahead until AFTER we've filtered to top-K
+    #    (~3-4× speedup vs the previous "encode all then discard" pattern).
+    base_enc = encode_position(
         board, player,
         sentinel_advisor=sentinel_advisor,
         db=db,
         value_net=value_net,
-        lookahead_advisor=lookahead_advisor,
-        lookahead_dim=lookahead_dim,
     )
     if base_enc is None or not base_enc.legal_moves:
         return None
 
-    def _key(m): return (m.get("from"), m.get("to"), m.get("capture"))
     enc_idx = {_key(m): i for i, m in enumerate(base_enc.legal_moves)}
 
     kept_rows: List[np.ndarray] = []
     kept_moves: List[Dict[str, Any]] = []
     kept_scores: List[float] = []
+    kept_orig_idx: List[int] = []
     for mv, score_norm in scored_top_k:
         idx = enc_idx.get(_key(mv))
         if idx is None:
@@ -560,12 +567,28 @@ def encode_top_k_candidates(
         kept_rows.append(base_enc.feat_matrix[idx])
         kept_moves.append(mv)
         kept_scores.append(float(score_norm))
+        kept_orig_idx.append(idx)
 
     if not kept_rows:
         return None
 
     K = len(kept_rows)
-    feat_base = np.stack(kept_rows).astype(np.float32)   # (K, MOVE_FEAT_DIM_WITH_LOOKAHEAD)
+    feat_62 = np.stack(kept_rows).astype(np.float32)   # (K, MOVE_FEAT_DIM=62)
+
+    # 2b. Compute lookahead ONLY for the K candidates (biggest single speedup).
+    if lookahead_advisor is not None:
+        try:
+            la_block = lookahead_advisor.score_moves_matrix(
+                board, base_enc, player, moves_subset=kept_moves,
+            )
+        except Exception:
+            _dim = getattr(lookahead_advisor, "feat_dim", LOOKAHEAD_FEAT_DIM)
+            la_block = np.zeros((K, _dim), dtype=np.float32)
+    else:
+        _dim = lookahead_dim if lookahead_dim is not None else LOOKAHEAD_FEAT_DIM
+        la_block = np.zeros((K, _dim), dtype=np.float32)
+
+    feat_base = np.concatenate([feat_62, la_block], axis=1).astype(np.float32)   # (K, 122)
 
     # 3. ab_score_norm (already normalised by GameAI.score_root_moves)
     #    ab_rank_norm: 1.0 for #1, 0.0 for #K (evenly spaced)
@@ -611,13 +634,11 @@ def encode_top_k_candidates(
 
     # 6. Return an EncodedPosition-like object.  Reuse the base's other fields but
     #    filter the per-move lists to the top-K.
-    from dataclasses import replace
-    top_idxs = [enc_idx[_key(mv)] for mv in kept_moves]
     def _pick(lst):
         if lst is None:
             return lst
         try:
-            return [lst[i] for i in top_idxs]
+            return [lst[i] for i in kept_orig_idx]
         except Exception:
             return lst
 
