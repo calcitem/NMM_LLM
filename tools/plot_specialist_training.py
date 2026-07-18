@@ -84,14 +84,22 @@ def _get(rows: list[dict], key: str) -> tuple[list[int], list[float]]:
     return xs, ys
 
 
+_WIN_OUTCOME  =  1.5
+_LOSS_OUTCOME = -1.0
+
 def _get_draw_rate(rows: list[dict], window: int = SMOOTH) -> tuple[list[int], list[float]]:
-    """Rolling draw rate derived from per-game outcome (0.0 = draw)."""
+    """Rolling draw rate derived from per-game outcome.
+
+    Draws are anything that is not a win (1.5) or loss (-1.0).
+    Previously used == 0.0 but draw penalties changed to -0.15/-0.25.
+    """
     xs, ys = [], []
     for r in rows:
         outcome = r.get("outcome")
         if outcome is not None:
+            v = float(outcome)
             xs.append(r.get("game", len(xs)))
-            ys.append(1.0 if float(outcome) == 0.0 else 0.0)
+            ys.append(1.0 if (v != _WIN_OUTCOME and v != _LOSS_OUTCOME) else 0.0)
     return xs, ys
 
 
