@@ -691,6 +691,7 @@ def _rollout(
     retry_board: Optional[BoardState] = None
     move_history: deque[dict] = deque(maxlen=N_HISTORY)
     learner_boards: list[BoardState] = []
+    learner_result_boards: list[BoardState] = []
     learner_moves_notation: list[str] = []
 
     while ply < max_ply:
@@ -721,6 +722,7 @@ def _rollout(
                 db=None,
                 value_net=value_net,
                 lookahead_advisor=lookahead_advisor,
+                specialist_db=specialist_db,
             )
             if enc is None or not enc.legal_moves:
                 outcome = LOSS_REWARD
@@ -768,6 +770,7 @@ def _rollout(
             hist_feats_next = _build_history_features(move_history)
 
             board_after = board.apply_move(move)
+            learner_result_boards.append(board_after)
 
             enc_after  = encode_position_with_lookahead(board_after, opp_color,
                                                         sentinel_advisor=sentinel,
@@ -909,9 +912,22 @@ def _rollout(
     if specialist_db is not None and learner_boards:
         try:
             _res = "W" if outcome == WIN_REWARD else ("D" if outcome in (DRAW_SHORT, DRAW_LONG) else "L")
-            specialist_db.record_game(learner_boards, _res, learner_moves_notation, "end")
+            specialist_db.record_game(learner_boards + learner_result_boards, _res, learner_moves_notation, "end")
         except Exception:
             pass
+        if wdl_db is not None:
+            try:
+                _scored = [(b, abs(_simple_evaluate(b, learner_color))) for b in learner_boards]
+                _scored.sort(key=lambda x: -x[1])
+                for _b, _ in _scored[:10]:
+                    try:
+                        _ml = wdl_db.query(_b)
+                        if _ml in ("W", "D", "L"):
+                            specialist_db.label_position_malom(_b, _ml)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     return RolloutResult(
         trajectory=game_trajectory,

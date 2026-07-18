@@ -678,6 +678,7 @@ def _rollout(
     human_db=None,
     trajectory_db=None,
     specialist_db=None,
+    malom_db=None,
     deep_game: bool = False,
 ) -> RolloutResult:
     # For deep games (1-in-20): temporarily run full ply_depth simulation
@@ -700,6 +701,7 @@ def _rollout(
     move_history: deque[dict] = deque(maxlen=N_HISTORY)
     handoff_agents: dict[str, Any] = {}   # heuristic vs heuristic playout after placement
     learner_boards: list[BoardState] = []
+    learner_result_boards: list[BoardState] = []  # post-learner-move boards for SpecialistDB lookup
     learner_moves_notation: list[str] = []
 
     while ply < max_ply:
@@ -751,6 +753,7 @@ def _rollout(
                 db=None,
                 value_net=value_net,
                 lookahead_advisor=lookahead_advisor,
+                specialist_db=specialist_db,
             )
             if enc is None or not enc.legal_moves:
                 outcome = LOSS_REWARD
@@ -798,6 +801,7 @@ def _rollout(
             hist_feats_next = _build_history_features(move_history)
 
             board_after = board.apply_move(move)
+            learner_result_boards.append(board_after)
             enc_after   = encode_position_with_lookahead(board_after, opp_color,
                                                           sentinel_advisor=sentinel,
                                                           db=None,
@@ -914,13 +918,27 @@ def _rollout(
     if _saved_sim_ply is not None and lookahead_advisor is not None:
         lookahead_advisor._sim_ply_depth = _saved_sim_ply
 
-    # Record game in SpecialistDB
+    # Record game in SpecialistDB (pre- and post-move boards for both directions of lookup)
     if specialist_db is not None and learner_boards:
         try:
             _res = "W" if outcome == WIN_REWARD else ("D" if outcome in (DRAW_SHORT, DRAW_LONG) else "L")
-            specialist_db.record_game(learner_boards, _res, learner_moves_notation, "open")
+            specialist_db.record_game(learner_boards + learner_result_boards, _res, learner_moves_notation, "open")
         except Exception:
             pass
+        # Label top-10 most decisive positions with Malom WDL
+        if malom_db is not None:
+            try:
+                _scored = [(b, abs(_simple_evaluate(b, learner_color))) for b in learner_boards]
+                _scored.sort(key=lambda x: -x[1])
+                for _b, _ in _scored[:10]:
+                    try:
+                        _ml = malom_db.query(_b)
+                        if _ml in ("W", "D", "L"):
+                            specialist_db.label_position_malom(_b, _ml)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     return RolloutResult(
         trajectory=game_trajectory,
@@ -1023,7 +1041,20 @@ def run(args: argparse.Namespace) -> None:
     if sentinel is None:
         print("[s_open_v2] Sentinel unavailable — sentinel reward = 0")
 
-    print("[s_open_v2] Malom DB not used for opening specialist")
+    db = None
+    malom_path = args.malom or _load_settings().get("malom_db_path", "")
+    if malom_path and Path(malom_path).exists():
+        try:
+            from learned_ai.sentinel.db_teacher import ExternalSolvedDB
+            db = ExternalSolvedDB(malom_path)
+            if db.is_available():
+                print(f"[s_open_v2] Malom DB loaded (position labelling only): {malom_path}")
+            else:
+                db = None
+        except Exception as e:
+            print(f"[s_open_v2] Malom DB failed ({e})")
+    if db is None:
+        print("[s_open_v2] Malom DB unavailable — positions will not be Malom-labelled")
 
     value_net = None
     vn_path = args.value_net or str(_ROOT / "data" / "value_net.npz")
@@ -1196,6 +1227,7 @@ def run(args: argparse.Namespace) -> None:
                 game_difficulty=cfg.game_difficulty,
                 human_db=human_db,
                 specialist_db=specialist_db,
+                malom_db=db,
                 deep_game=_is_deep_game,
             )
 
@@ -1242,6 +1274,7 @@ def run(args: argparse.Namespace) -> None:
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
                 if confirm_result.trajectory:
                     _retroactive_rescore(confirm_result.trajectory, confirm_result.step_diags,
@@ -1315,6 +1348,7 @@ def run(args: argparse.Namespace) -> None:
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
                 if retry_result.trajectory:
                     _retroactive_rescore(retry_result.trajectory, retry_result.step_diags, retry_result.outcome)
@@ -1368,6 +1402,7 @@ def run(args: argparse.Namespace) -> None:
                     lookahead_advisor=lookahead_advisor,
                     game_difficulty=game_difficulty,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
 
                 if branch_result.trajectory:
@@ -1642,6 +1677,7 @@ def main() -> None:
                         "saved architecture.")
     p.add_argument("--batch-games",          type=int,   default=1,
                    help="Number of primary rollouts to run in parallel (ThreadPoolExecutor)")
+    p.add_argument("--malom",    default="", type=str)
     args = p.parse_args()
     args.policy_hidden = tuple(int(x) for x in args.policy_hidden.split(","))
     run(args)

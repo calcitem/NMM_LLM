@@ -220,6 +220,7 @@ def encode_position(
     sentinel_advisor=None,
     db=None,
     value_net=None,
+    specialist_db=None,
 ) -> Optional[EncodedPosition]:
     """Encode all legal moves at ``board`` into the scaffolded feature format.
 
@@ -294,13 +295,34 @@ def encode_position(
         except Exception:
             db_moves = []
 
+    # ── SpecialistDB lookup — per candidate, query the resulting position ───────
+    # Populates counterfactual feature slots [40:58] from self-play experience.
+    # Available at both training and inference (DB ships pre-seeded from training).
+    sdb_all_moves: List[Dict[str, Any]] = []
+    if specialist_db is not None:
+        for _sdb_mv in legal_moves:
+            try:
+                _sdb_after = board.apply_move(_sdb_mv)
+                _sdb_wdl = specialist_db.query_wdl(_sdb_after)
+                if _sdb_wdl is not None:
+                    _sw, _sd, _sl = _sdb_wdl
+                    if _sw >= _sd and _sw >= _sl:
+                        _slbl = "win"
+                    elif _sd >= _sl:
+                        _slbl = "draw"
+                    else:
+                        _slbl = "loss"
+                    sdb_all_moves.append({"move": _sdb_mv, "wdl": _slbl, "dtm": None})
+            except Exception:
+                pass
+
     # ── Build feature matrix ───────────────────────────────────────────────────
-    # DB data is kept in EncodedPosition.db_moves for reward computation but
-    # must NOT flow into feature slots — inference has no DB access.
+    # Malom DB data stays in db_moves (reward-only — not available at inference).
+    # SpecialistDB data flows into ctx["all_moves"] — available at both.
     rows: List[np.ndarray] = []
     for i, mv in enumerate(legal_moves):
         ctx = {
-            "all_moves": [],
+            "all_moves": sdb_all_moves,
             "heuristic_rank": h_ranks[i],
             "n_legal": k,
             "heuristic_score_norm": h_norms[i],
@@ -348,6 +370,7 @@ def encode_position_with_lookahead(
     value_net=None,
     lookahead_advisor=None,
     lookahead_dim: Optional[int] = None,
+    specialist_db=None,
 ) -> Optional[EncodedPosition]:
     """Encode legal moves with a lookahead block appended.
 
@@ -360,8 +383,10 @@ def encode_position_with_lookahead(
       - LOOKAHEAD_FEAT_DIM (15)  otherwise — backward-compatible default
 
     All other fields of EncodedPosition are identical to encode_position().
+    specialist_db: SpecialistDB instance — populates counterfactual slots [40:58]
+    from self-play experience; available at both training and inference.
     """
-    enc = encode_position(board, player, sentinel_advisor, db, value_net)
+    enc = encode_position(board, player, sentinel_advisor, db, value_net, specialist_db)
     if enc is None:
         return None
 

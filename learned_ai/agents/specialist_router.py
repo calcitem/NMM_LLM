@@ -178,6 +178,7 @@ class SpecialistRouter:
                 db=None,
                 value_net=self._value_net,
                 lookahead_advisor=la,
+                specialist_db=self._specialist_db,
             )
             if enc is None or not enc.legal_moves:
                 return None

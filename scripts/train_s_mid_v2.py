@@ -663,6 +663,7 @@ def _rollout(
     human_db=None,
     trajectory_db=None,
     specialist_db=None,
+    malom_db=None,
     deep_game: bool = False,
 ) -> RolloutResult:
     # For deep games (1-in-20): temporarily run full ply_depth simulation
@@ -684,6 +685,7 @@ def _rollout(
     retry_board: Optional[BoardState] = None
     move_history: deque[dict] = deque(maxlen=N_HISTORY)
     learner_boards: list[BoardState] = []
+    learner_result_boards: list[BoardState] = []
     learner_moves_notation: list[str] = []
 
     while ply < max_ply:
@@ -714,6 +716,7 @@ def _rollout(
                 db=None,
                 value_net=value_net,
                 lookahead_advisor=lookahead_advisor,
+                specialist_db=specialist_db,
             )
             if enc is None or not enc.legal_moves:
                 outcome = LOSS_REWARD
@@ -761,6 +764,7 @@ def _rollout(
             hist_feats_next = _build_history_features(move_history)
 
             board_after = board.apply_move(move)
+            learner_result_boards.append(board_after)
             enc_after   = encode_position_with_lookahead(board_after, opp_color,
                                                           sentinel_advisor=sentinel, db=None,
                                                           value_net=value_net,
@@ -878,9 +882,22 @@ def _rollout(
     if specialist_db is not None and learner_boards:
         try:
             _res = "W" if outcome == WIN_REWARD else ("D" if outcome in (DRAW_SHORT, DRAW_LONG) else "L")
-            specialist_db.record_game(learner_boards, _res, learner_moves_notation, "mid")
+            specialist_db.record_game(learner_boards + learner_result_boards, _res, learner_moves_notation, "mid")
         except Exception:
             pass
+        if malom_db is not None:
+            try:
+                _scored = [(b, abs(_simple_evaluate(b, learner_color))) for b in learner_boards]
+                _scored.sort(key=lambda x: -x[1])
+                for _b, _ in _scored[:10]:
+                    try:
+                        _ml = malom_db.query(_b)
+                        if _ml in ("W", "D", "L"):
+                            specialist_db.label_position_malom(_b, _ml)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     return RolloutResult(
         trajectory=game_trajectory,
@@ -1184,6 +1201,7 @@ def run(args: argparse.Namespace) -> None:
                 game_difficulty=cfg.game_difficulty,
                 human_db=human_db,
                 specialist_db=specialist_db,
+                malom_db=db,
                 deep_game=_is_deep_game,
             )
 
@@ -1230,6 +1248,7 @@ def run(args: argparse.Namespace) -> None:
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
                 if confirm_result.trajectory:
                     _retroactive_rescore(confirm_result.trajectory, confirm_result.step_diags,
@@ -1303,6 +1322,7 @@ def run(args: argparse.Namespace) -> None:
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
                 if retry_result.trajectory:
                     _retroactive_rescore(retry_result.trajectory, retry_result.step_diags, retry_result.outcome)
@@ -1357,6 +1377,7 @@ def run(args: argparse.Namespace) -> None:
                     game_difficulty=game_difficulty,
                     human_db=human_db,
                     specialist_db=specialist_db,
+                    malom_db=db,
                 )
 
                 if branch_result.trajectory:
