@@ -294,6 +294,8 @@ class GeneralistAgent:
 
     def set_db(self, db) -> None:
         self._db = db
+        if self._la is not None:
+            self._la._endgame_db = db  # type: ignore[attr-defined]
 
     def set_sentinel(self, sentinel_advisor) -> None:
         self._sentinel = sentinel_advisor
@@ -320,7 +322,7 @@ class GeneralistAgent:
             enc = encode_position_with_lookahead(
                 board, color,
                 sentinel_advisor=self._sentinel,
-                db=None,
+                db=self._db,
                 value_net=self._value_net,
                 lookahead_advisor=self._la,
                 specialist_db=self._specialist_db,
