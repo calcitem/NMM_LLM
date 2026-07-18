@@ -1,16 +1,15 @@
-"""scripts/train_s_mid_v2.py — Midgame specialist v2: 15-ply lookahead + gap net.
+"""scripts/train_s_gen_v2.py — Generalist v2: full-game (opening → midgame → endgame).
 
-Trains on the movement phase when >= 12 total pieces are on the board.
-Reward: sentinel delta + heuristic delta + mill bonus; Malom reward = 0.
-Gap net included in lookahead (15-ply × 4 signals).  No mill-dance, no
-mobility reward, no Malom trap — simpler, cleaner signal.
+Plays complete games from BoardState.new_game(); rewards fire during movement
+phase (sentinel delta + heuristic delta + mill bonus).  No phase restriction.
+Malom reward = 0.  Gap net included in lookahead (12-ply × 6 signals).
 
-Resume chain: explicit --resume → s_mid_v2/best.pt → scratch
+Resume chain: explicit --resume → s_gen_v2/best.pt → scratch
 
 Usage
 -----
-.venv/bin/python scripts/train_s_mid_v2.py --max-games 20
-.venv/bin/python scripts/train_s_mid_v2.py --auto-resume-best
+.venv/bin/python scripts/train_s_gen_v2.py --max-games 20
+.venv/bin/python scripts/train_s_gen_v2.py --auto-resume-best
 """
 
 from __future__ import annotations
@@ -170,8 +169,8 @@ def _build_history_features(history: deque, n: int = 3) -> np.ndarray:
 
 # ── Stage tag ─────────────────────────────────────────────────────────────────
 
-STAGE_TAG = "s_mid_v2"
-OUT_DIR   = "learned_ai/checkpoints/scaffolded/s_mid_v2"
+STAGE_TAG = "s_gen_v2"
+OUT_DIR   = "learned_ai/checkpoints/scaffolded/s_gen_v2"
 
 # ── Reward weights ────────────────────────────────────────────────────────────
 
@@ -348,7 +347,7 @@ def _run_s1b_refresher(
 ) -> None:
     p = Path(data_path)
     if not p.exists():
-        print(f"[s_mid_v2] s1b refresher: data not found ({data_path}) — skipping")
+        print(f"[s_gen_v2] s1b refresher: data not found ({data_path}) — skipping")
         return
 
     data          = np.load(str(p), allow_pickle=True)
@@ -375,7 +374,7 @@ def _run_s1b_refresher(
     )
 
     model.train()
-    print(f"[s_mid_v2] s1b refresher: loser={len(loser_idxs)} winner={len(winner_idxs)} positions  lr={lr:.2e}")
+    print(f"[s_gen_v2] s1b refresher: loser={len(loser_idxs)} winner={len(winner_idxs)} positions  lr={lr:.2e}")
 
     def _pad_feat(fm: np.ndarray) -> np.ndarray:
         k, d = fm.shape
@@ -422,7 +421,7 @@ def _run_s1b_refresher(
                 opt_s1b.step()
                 ep_loss  += float(loss.item()) * float(w_t.sum())
                 ep_w_sum += float(w_t.sum())
-            print(f"[s_mid_v2]   refresher [{phase_label}] epoch {epoch}/{epochs}  loss={ep_loss / max(ep_w_sum, 1e-9):.4f}")
+            print(f"[s_gen_v2]   refresher [{phase_label}] epoch {epoch}/{epochs}  loss={ep_loss / max(ep_w_sum, 1e-9):.4f}")
 
     _run_phase(loser_idxs, "loser→heuristic", use_heuristic_target=True)
     _run_phase(winner_idxs, "winner", use_heuristic_target=False)
@@ -431,7 +430,7 @@ def _run_s1b_refresher(
         param.requires_grad = True
 
     model.eval()
-    print("[s_mid_v2] s1b refresher done")
+    print("[s_gen_v2] s1b refresher done")
 
 
 def _imitation_mix_step(
@@ -478,9 +477,9 @@ def _choose_resume_path(args: argparse.Namespace) -> tuple[Optional[Path], str]:
         p = Path(args.resume)
         if p.exists():
             return p, "explicit_resume"
-    s_mid_v2_best = _ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s_mid_v2" / "best.pt"
-    if args.auto_resume_best and s_mid_v2_best.exists():
-        return s_mid_v2_best, "s_mid_v2_best"
+    s_gen_v2_best = _ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s_gen_v2" / "best.pt"
+    if args.auto_resume_best and s_gen_v2_best.exists():
+        return s_gen_v2_best, "s_gen_v2_best"
     return None, "scratch"
 
 
@@ -507,7 +506,7 @@ def _load_model(
     # If the requested architecture differs from the checkpoint, start fresh.
     ckpt_hidden = tuple(cfg.get("policy_hidden", (512, 256, 128)))
     if ckpt_hidden != policy_hidden:
-        print(f"[s_mid_v2] policy_hidden mismatch: ckpt={ckpt_hidden} vs requested={policy_hidden} — starting fresh")
+        print(f"[s_gen_v2] policy_hidden mismatch: ckpt={ckpt_hidden} vs requested={policy_hidden} — starting fresh")
         return _fresh()
 
     cfg["move_feat_dim"]   = feat_dim
@@ -520,9 +519,9 @@ def _load_model(
         pol_state = {k: v for k, v in ckpt[sd_key].items() if k.startswith("policy_mlp")}
         try:
             model.load_state_dict(pol_state, strict=False)
-            print("[s_mid_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
+            print("[s_gen_v2] Warning: value_mlp shape mismatch — policy weights loaded, value head reinitialized")
         except RuntimeError:
-            print(f"[s_mid_v2] State dict incompatible — starting fresh with policy_hidden={policy_hidden}")
+            print(f"[s_gen_v2] State dict incompatible — starting fresh with policy_hidden={policy_hidden}")
             return _fresh()
     stage      = ckpt.get("stage", "unknown")
     is_mine    = (stage == STAGE_TAG)
@@ -562,9 +561,9 @@ def _compute_per_move_reward(
 ) -> tuple[float, RewardBreakdown]:
     rb = RewardBreakdown()
 
-    in_midgame = total_pieces >= 12 and board_phase != "place"
+    in_movement = board_phase != "place"
 
-    if in_midgame:
+    if in_movement:
         if getattr(enc, "sentinel_scores", None):
             mean_s   = float(sum(enc.sentinel_scores) / len(enc.sentinel_scores))
             played_s = float(enc.sentinel_scores[chosen_idx])
@@ -677,7 +676,6 @@ class _GameConfig:
     game_forced_placements: Optional[list[str]]
     retry_ply:              int
     temperature:            float
-    start_board:            BoardState
 
 
 @dataclass
@@ -942,7 +940,7 @@ def _rollout(
     if specialist_db is not None and learner_boards:
         try:
             _res = "W" if outcome == WIN_REWARD else ("D" if outcome in (DRAW_SHORT, DRAW_LONG) else "L")
-            specialist_db.record_game(learner_boards + learner_result_boards, _res, learner_moves_notation, "mid", learner_color=learner_color)
+            specialist_db.record_game(learner_boards + learner_result_boards, _res, learner_moves_notation, "gen", learner_color=learner_color)
         except Exception:
             pass
         if malom_db is not None:
@@ -1042,7 +1040,7 @@ def _build_game_diag(
 
 def run(args: argparse.Namespace) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[s_mid_v2] Device: {device}")
+    print(f"[s_gen_v2] Device: {device}")
     rng = random.Random(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -1055,11 +1053,11 @@ def run(args: argparse.Namespace) -> None:
     if Path(sent_path).exists():
         sentinel = load_advisor(sent_path)
         if sentinel and sentinel.is_loaded():
-            print(f"[s_mid_v2] Sentinel loaded: {sent_path}")
+            print(f"[s_gen_v2] Sentinel loaded: {sent_path}")
         else:
             sentinel = None
     if sentinel is None:
-        print("[s_mid_v2] Sentinel unavailable — sentinel reward = 0")
+        print("[s_gen_v2] Sentinel unavailable — sentinel reward = 0")
 
     db = None
     malom_path = args.malom or _load_settings().get("malom_db_path", "")
@@ -1068,13 +1066,13 @@ def run(args: argparse.Namespace) -> None:
             from learned_ai.sentinel.db_teacher import ExternalSolvedDB
             db = ExternalSolvedDB(malom_path)
             if db.is_available():
-                print(f"[s_mid_v2] Malom DB loaded (lookahead termination only): {malom_path}")
+                print(f"[s_gen_v2] Malom DB loaded (lookahead termination only): {malom_path}")
             else:
                 db = None
         except Exception as e:
-            print(f"[s_mid_v2] Malom DB failed ({e})")
+            print(f"[s_gen_v2] Malom DB failed ({e})")
     if db is None:
-        print("[s_mid_v2] Malom DB unavailable — lookahead uses no endgame early-exit")
+        print("[s_gen_v2] Malom DB unavailable — lookahead uses no endgame early-exit")
 
     value_net = None
     vn_path = args.value_net or str(_ROOT / "data" / "value_net.npz")
@@ -1082,11 +1080,11 @@ def run(args: argparse.Namespace) -> None:
         try:
             from ai.value_net import ValueNet as _ValueNet
             value_net = _ValueNet.load(vn_path)
-            print(f"[s_mid_v2] Value net loaded: {vn_path}")
+            print(f"[s_gen_v2] Value net loaded: {vn_path}")
         except Exception as e:
-            print(f"[s_mid_v2] Value net load failed ({e}) — VN features will be 0")
+            print(f"[s_gen_v2] Value net load failed ({e}) — VN features will be 0")
     else:
-        print("[s_mid_v2] No value net — VN features will be 0")
+        print("[s_gen_v2] No value net — VN features will be 0")
 
     gap_net = None
     gap_path = args.gap_net or str(_ROOT / "data" / "gap_net.npz")
@@ -1094,11 +1092,11 @@ def run(args: argparse.Namespace) -> None:
         try:
             from ai.gap_net import GapNet as _GapNet
             gap_net = _GapNet.load(gap_path)
-            print(f"[s_mid_v2] Gap net loaded: {gap_path}")
+            print(f"[s_gen_v2] Gap net loaded: {gap_path}")
         except Exception as e:
-            print(f"[s_mid_v2] Gap net load failed ({e}) — gap features will be 0.5")
+            print(f"[s_gen_v2] Gap net load failed ({e}) — gap features will be 0.5")
     else:
-        print("[s_mid_v2] No gap net — gap features will be 0.5")
+        print("[s_gen_v2] No gap net — gap features will be 0.5")
 
     # v3: HumanDB — for per-candidate human-play-frequency feature
     human_db = None
@@ -1107,12 +1105,12 @@ def run(args: argparse.Namespace) -> None:
         try:
             from ai.human_db import HumanDB
             human_db = HumanDB(hdb_path)
-            print(f"[s_mid_v2] HumanDB loaded: {human_db.game_count} games "
+            print(f"[s_gen_v2] HumanDB loaded: {human_db.game_count} games "
                   f"({human_db.entry_count} positions)")
         except Exception as e:
-            print(f"[s_mid_v2] HumanDB load failed ({e}) — human_freq features will be 0")
+            print(f"[s_gen_v2] HumanDB load failed ({e}) — human_freq features will be 0")
     else:
-        print("[s_mid_v2] No HumanDB — human_freq features will be 0")
+        print("[s_gen_v2] No HumanDB — human_freq features will be 0")
 
     # ── LookaheadAdvisor ─────────────────────────────────────────────────────
     lookahead_advisor = LookaheadAdvisor(
@@ -1126,26 +1124,26 @@ def run(args: argparse.Namespace) -> None:
         sim_ply_depth=args.sim_ply_depth,
         endgame_db=db,
     )
-    print(f"[s_mid_v2] LookaheadAdvisor: 12-ply width, {args.sim_ply_depth}-ply sim, 5 signals (h+learner_sent+opp_sent+vn+gap)")
+    print(f"[s_gen_v2] LookaheadAdvisor: 12-ply width, {args.sim_ply_depth}-ply sim, 5 signals (h+learner_sent+opp_sent+vn+gap)")
 
     # ── SpecialistDB ─────────────────────────────────────────────────────────
     specialist_db = SpecialistDB(_ROOT / "data" / "specialist_db.sqlite")
-    print(f"[s_mid_v2] SpecialistDB: {specialist_db.stats()}")
+    print(f"[s_gen_v2] SpecialistDB: {specialist_db.stats()}")
 
     # ── Load model ─────────────────────────────────────────────────────────────
     resume_path, source_tag = _choose_resume_path(args)
     model, start_game, best_win_rate, difficulty, source_checkpoint = _load_model(device, resume_path, args.policy_hidden)
     difficulty = _apply_diff_start_override(difficulty, args)
     if resume_path is None:
-        print("[s_mid_v2] No checkpoint found — starting from scratch")
+        print("[s_gen_v2] No checkpoint found — starting from scratch")
     else:
-        print(f"[s_mid_v2] Resuming from ({source_tag}): {resume_path}")
-    print(f"[s_mid_v2] feat_dim={MOVE_FEAT_DIM_WITH_LOOKAHEAD}, starting game={start_game}, diff={difficulty}")
+        print(f"[s_gen_v2] Resuming from ({source_tag}): {resume_path}")
+    print(f"[s_gen_v2] feat_dim={MOVE_FEAT_DIM_WITH_LOOKAHEAD}, starting game={start_game}, diff={difficulty}")
 
     frozen_opp = FrozenModelOpponent(model, device, sentinel=sentinel, value_net=value_net)
     # Option C: lookahead uses same frozen snapshot for learner-side simulated moves.
     lookahead_advisor.set_frozen_model(frozen_opp._model, device=device)
-    print("[s_mid_v2] LookaheadAdvisor: frozen-model driven learner-side (Option C)")
+    print("[s_gen_v2] LookaheadAdvisor: frozen-model driven learner-side (Option C)")
     games_since_target_update = 0
     games_at_level            = 0   # for Sanmill time-of-flight target relaxation
 
@@ -1169,26 +1167,16 @@ def run(args: argparse.Namespace) -> None:
     log_path        = out_dir / "train_log.jsonl"
     update_log_path = out_dir / "update_log.jsonl"
 
-    # ── Position pool ─────────────────────────────────────────────────────────
-    midgame_pool: list = []
-    if not args.no_position_pool:
-        try:
-            from learned_ai.training.position_pool import load_position_pool
-            midgame_pool = load_position_pool(
-                _ROOT, phase="midgame", movement_turn=10, window=2,
-            )
-            print(f"[s_mid_v2] Position pool: {len(midgame_pool)} midgame positions")
-        except Exception as e:
-            print(f"[s_mid_v2] Position pool load failed ({e}) — starting from new_game()")
+    # Generalist starts every game from scratch (no position pool)
 
-    print(f"[s_mid_v2] Starting at game {game_count}, difficulty {difficulty}")
-    print(f"[s_mid_v2] Self-play ratio {args.self_play_ratio:.0%}, "
+    print(f"[s_gen_v2] Starting at game {game_count}, difficulty {difficulty}")
+    print(f"[s_gen_v2] Self-play ratio {args.self_play_ratio:.0%}, "
           f"branch every {args.branch_every} turns, "
           f"max {args.max_branches_per_game} branches/game")
 
     # s1a warm-start: run once before RL if starting from game 0
     if not args.no_s1a_warmstart and start_game == 0:
-        print(f"[s_mid_v2] Running s1a warm-start (pre-RL imitation) from {args.s1a_data}")
+        print(f"[s_gen_v2] Running s1a warm-start (pre-RL imitation) from {args.s1a_data}")
         _run_s1b_refresher(model, device, args.s1a_data,
                            epochs=args.s1b_refresher_epochs,
                            lr=args.s1b_refresher_lr)
@@ -1204,16 +1192,16 @@ def run(args: argparse.Namespace) -> None:
                 "label_dists":   _raw["label_dists"],
                 "is_winner":     _raw["is_winner"] if "is_winner" in _raw else np.ones(len(_raw["feat_matrices"]), dtype=bool),
             }
-            print(f"[s_mid_v2] Imitation data loaded: {len(_imitation_data['feat_matrices'])} positions for mixing")
+            print(f"[s_gen_v2] Imitation data loaded: {len(_imitation_data['feat_matrices'])} positions for mixing")
         except Exception as e:
-            print(f"[s_mid_v2] Imitation data load failed ({e}) — imitation mixing disabled")
+            print(f"[s_gen_v2] Imitation data load failed ({e}) — imitation mixing disabled")
 
     # Warm the lazy-init heuristic eval global before spawning threads
     if args.batch_games > 1:
         encode_position_with_lookahead(BoardState.new_game(), "W",
                                        sentinel_advisor=None, db=None,
                                        value_net=None, lookahead_advisor=None)
-        print(f"[s_mid_v2] Encoder warmed for {args.batch_games}-game parallel batches")
+        print(f"[s_gen_v2] Encoder warmed for {args.batch_games}-game parallel batches")
 
     diag_buffer: list[GameDiag] = []
     _executor = ThreadPoolExecutor(max_workers=args.batch_games) if args.batch_games > 1 else None
@@ -1224,16 +1212,12 @@ def run(args: argparse.Namespace) -> None:
         if games_since_target_update >= args.update_target_every:
             frozen_opp.refresh(model)
             games_since_target_update = 0
-            print(f"[s_mid_v2] Frozen model updated at game {game_count}")
+            print(f"[s_gen_v2] Frozen model updated at game {game_count}")
 
         # ── Build N game configs ──────────────────────────────────────────────
         batch_slots: list[tuple[_GameConfig, Any]] = []
         for _ in range(max(1, min(args.batch_games, args.max_games - game_count))):
-            if not midgame_pool:
-                raise RuntimeError("[s_mid_v2] midgame position pool is empty — refusing to train from placement. "
-                                   "Remove --no-position-pool or ensure the pool loader finds positions.")
-            _sb = midgame_pool[rng.randint(0, len(midgame_pool) - 1)]
-            _lc = _sb.turn
+            _lc = "W" if rng.random() < 0.5 else "B"
             _oc = "B" if _lc == "W" else "W"
             if rng.random() < args.self_play_ratio:
                 _opp, _gt, _gd = frozen_opp, "vs_frozen", difficulty
@@ -1257,7 +1241,6 @@ def run(args: argparse.Namespace) -> None:
                     game_forced_placements=_fp,
                     retry_ply=rng.randint(RETRY_PLY_MIN, RETRY_PLY_MAX),
                     temperature=temperature,
-                    start_board=_sb,
                 ),
                 _opp,
             ))
@@ -1267,7 +1250,7 @@ def run(args: argparse.Namespace) -> None:
 
         def _primary(cfg: _GameConfig, opp: Any) -> RolloutResult:
             return _rollout(
-                model=model, device=device, start_board=cfg.start_board,
+                model=model, device=device, start_board=BoardState.new_game(),
                 learner_color=cfg.learner_color, opponent=opp, opp_color=cfg.opp_color,
                 sentinel=sentinel, value_net=value_net, temperature=cfg.temperature,
                 max_ply=args.max_ply, record_branches=(args.max_branches_per_game > 0),
@@ -1346,7 +1329,7 @@ def run(args: argparse.Namespace) -> None:
                     win_history_heuristic.append(_hv)
                 _coc = "W" if confirm_result.outcome == WIN_REWARD else ("L" if confirm_result.outcome == LOSS_REWARD else "D")
                 if game_count % 10 == 0:
-                    print(f"[s_mid_v2] {game_count:6d}  r{game_retry_ply:2d} {learner_color} |          | {_coc} ply={confirm_result.ply:3d} | (from ply {game_retry_ply}) {'[learn]' if confirmed else '[skip]'}")
+                    print(f"[s_gen_v2] {game_count:6d}  r{game_retry_ply:2d} {learner_color} |          | {_coc} ply={confirm_result.ply:3d} | (from ply {game_retry_ply}) {'[learn]' if confirmed else '[skip]'}")
 
             _hv = _outcome_to_history_float(result.outcome)
             win_history.append(_hv)
@@ -1375,7 +1358,7 @@ def run(args: argparse.Namespace) -> None:
                 _oc  = "W" if result.outcome == WIN_REWARD else ("L" if result.outcome == LOSS_REWARD else "D")
                 _gt  = "heur" if game_type == "vs_heuristic" else "self"
                 _dif = f"d{game_difficulty}" if game_difficulty != difficulty else f"diff {difficulty}"
-                print(f"[s_mid_v2] {game_count:6d} {_gt:4s} {learner_color} | {_dif} | {_oc} ply={result.ply:3d} | hwr={hwr:.3f} hdr={hdr:.3f} awr={_awr:.3f} | temp={temperature:.2f} lr={opt.param_groups[0]['lr']:.5f}")
+                print(f"[s_gen_v2] {game_count:6d} {_gt:4s} {learner_color} | {_dif} | {_oc} ply={result.ply:3d} | hwr={hwr:.3f} hdr={hdr:.3f} awr={_awr:.3f} | temp={temperature:.2f} lr={opt.param_groups[0]['lr']:.5f}")
 
             if (not args.minimal_rollouts
                 and result.outcome != WIN_REWARD
@@ -1413,7 +1396,7 @@ def run(args: argparse.Namespace) -> None:
                 games_since_target_update += 1
                 _roc = "W" if retry_result.outcome == WIN_REWARD else ("L" if retry_result.outcome == LOSS_REWARD else "D")
                 if game_count % 10 == 0:
-                    print(f"[s_mid_v2] {game_count:6d} retry {learner_color} |          | {_roc} ply={retry_result.ply:3d} | (from ply {game_retry_ply})")
+                    print(f"[s_gen_v2] {game_count:6d} retry {learner_color} |          | {_roc} ply={retry_result.ply:3d} | (from ply {game_retry_ply})")
 
             # ── Branch games ───────────────────────────────────────────────────
             branches_spawned = 0
@@ -1479,7 +1462,7 @@ def run(args: argparse.Namespace) -> None:
 
                     if game_count % 10 == 0:
                         _boc = "W" if branch_result.outcome == WIN_REWARD else ("L" if branch_result.outcome == LOSS_REWARD else "D")
-                        print(f"[s_mid_v2] {game_count:6d}  +b  {learner_color} | {bucket:7s} | {_boc} ply={branch_result.ply:3d} | (from ply {branch_ply})")
+                        print(f"[s_gen_v2] {game_count:6d}  +b  {learner_color} | {bucket:7s} | {_boc} ply={branch_result.ply:3d} | (from ply {branch_ply})")
 
             # ── Update ─────────────────────────────────────────────────────────
             if len(ep_steps) >= args.update_every:
@@ -1517,7 +1500,7 @@ def run(args: argparse.Namespace) -> None:
                     _second_wr = sum(1 for x in _h_list[_mid:] if x == 1.0) / max(len(_h_list) - _mid, 1)
                     _is_improving = _second_wr > _first_wr + 0.02
                     if _is_improving:
-                        print(f"[s_mid_v2] Recovery skipped: AI is improving ({_first_wr:.3f} → {_second_wr:.3f})")
+                        print(f"[s_gen_v2] Recovery skipped: AI is improving ({_first_wr:.3f} → {_second_wr:.3f})")
                     else:
                         best_ckpt = out_dir / f"best{difficulty}.pt"
                         if best_ckpt.exists():
@@ -1531,9 +1514,9 @@ def run(args: argparse.Namespace) -> None:
                                 try:
                                     model.load_state_dict(pol_state, strict=False)
                                     _loaded_recovery = True
-                                    print(f"[s_mid_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
+                                    print(f"[s_gen_v2] Recovery: value_mlp shape mismatch — policy weights loaded, value head kept")
                                 except RuntimeError:
-                                    print(f"[s_mid_v2] Recovery: checkpoint shape incompatible (old feat_dim) — keeping current weights")
+                                    print(f"[s_gen_v2] Recovery: checkpoint shape incompatible (old feat_dim) — keeping current weights")
                             if _loaded_recovery:
                                 model.to(device)
                                 opt = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -1541,7 +1524,7 @@ def run(args: argparse.Namespace) -> None:
                                 win_history.clear()
                                 win_history_heuristic.clear()
                                 temperature = TEMP_START
-                                print(f"[s_mid_v2] Recovery: reloaded best{difficulty}.pt (win rate was {win_rate:.2f})")
+                                print(f"[s_gen_v2] Recovery: reloaded best{difficulty}.pt (win rate was {win_rate:.2f})")
 
                 main_diags   = [d for d in diag_buffer if not d.is_branch]
                 branch_diags = [d for d in diag_buffer if d.is_branch]
@@ -1557,7 +1540,7 @@ def run(args: argparse.Namespace) -> None:
                     d = last_main
                     _sign = lambda v: f"{'+' if v >= 0 else ''}{v:.3f}"
                     print(
-                        f"[s_mid_v2] game {game_count:6d} | diff {difficulty} | "
+                        f"[s_gen_v2] game {game_count:6d} | diff {difficulty} | "
                         f"win={win_rate:.3f} draw={draw_rate:.3f} all={win_rate_all:.3f} | "
                         f"temp={temperature:.2f} | "
                         f"outcome={d.outcome:+.2f} | lr={opt.param_groups[0]['lr']:.5f} | "
@@ -1589,7 +1572,7 @@ def run(args: argparse.Namespace) -> None:
                     torch.save(ckpt, out_dir / "best.pt")
                     if win_rate > best_win_rate:
                         best_win_rate = win_rate
-                    print(f"[s_mid_v2]  → best diff-{difficulty} win rate: {best_win_rate_at_diff:.3f}")
+                    print(f"[s_gen_v2]  → best diff-{difficulty} win rate: {best_win_rate_at_diff:.3f}")
 
             # ── Difficulty advancement (Sanmill superiority-probability) ──────
             # Throttle: evaluate the P-value only every 10 games at the current
@@ -1600,10 +1583,10 @@ def run(args: argparse.Namespace) -> None:
                                               difficulty=difficulty,
                                               games_at_level=games_at_level)
                 if game_count % 50 == 0:
-                    print(f"[s_mid_v2] advance-check @ diff {difficulty}: {_adv.reason}")
+                    print(f"[s_gen_v2] advance-check @ diff {difficulty}: {_adv.reason}")
             if _adv is not None and _adv.should_advance:
                 if difficulty >= args.diff_max:
-                    print(f"[s_mid_v2] *** DONE at diff {difficulty}: {_adv.reason} ***")
+                    print(f"[s_gen_v2] *** DONE at diff {difficulty}: {_adv.reason} ***")
                     _advance_done = True
                     break
                 else:
@@ -1612,7 +1595,7 @@ def run(args: argparse.Namespace) -> None:
                     win_history.clear()
                     win_history_heuristic.clear()
                     games_at_level = 0
-                    print(f"[s_mid_v2] *** Advanced to diff {difficulty} (was diff {prev_diff}: "
+                    print(f"[s_gen_v2] *** Advanced to diff {difficulty} (was diff {prev_diff}: "
                           f"score={_adv.score_pct:.3f} P={_adv.p_super:.3f} target={_adv.target:.3f}) ***")
                     wr = _adv.score_pct
 
@@ -1630,7 +1613,7 @@ def run(args: argparse.Namespace) -> None:
                         "temperature":       float(temperature),
                     }
                     torch.save(_adv_ckpt, prev_best)
-                    print(f"[s_mid_v2] Saved best{prev_diff}.pt at advancement (wr={wr:.3f})")
+                    print(f"[s_gen_v2] Saved best{prev_diff}.pt at advancement (wr={wr:.3f})")
                 if prev_best.exists():
                     ckpt_prev = torch.load(str(prev_best), map_location=device, weights_only=False)
                     try:
@@ -1639,11 +1622,11 @@ def run(args: argparse.Namespace) -> None:
                         pol_state = {k: v for k, v in ckpt_prev["model"].items() if k.startswith("policy_mlp")}
                         try:
                             model.load_state_dict(pol_state, strict=False)
-                            print(f"[s_mid_v2] Advance-load: value_mlp shape mismatch — policy weights loaded, value head kept")
+                            print(f"[s_gen_v2] Advance-load: value_mlp shape mismatch — policy weights loaded, value head kept")
                         except RuntimeError:
-                            print(f"[s_mid_v2] Advance-load: checkpoint shape incompatible (old feat_dim) — keeping current weights")
+                            print(f"[s_gen_v2] Advance-load: checkpoint shape incompatible (old feat_dim) — keeping current weights")
                     model.to(device)
-                    print(f"[s_mid_v2] Loaded best{prev_diff}.pt as starting point for diff {difficulty}")
+                    print(f"[s_gen_v2] Loaded best{prev_diff}.pt as starting point for diff {difficulty}")
 
                 best_win_rate_at_diff = 0.0
                 opt = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -1672,17 +1655,17 @@ def run(args: argparse.Namespace) -> None:
         "temperature":       float(temperature),
     }
     torch.save(ckpt, out_dir / "latest.pt")
-    print(f"\n[s_mid_v2] Done. Games: {game_count}  Best win rate: {best_win_rate:.3f}")
-    print(f"[s_mid_v2] Checkpoint: {out_dir / 'best.pt'}")
+    print(f"\n[s_gen_v2] Done. Games: {game_count}  Best win rate: {best_win_rate:.3f}")
+    print(f"[s_gen_v2] Checkpoint: {out_dir / 'best.pt'}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Midgame specialist v2: 15-ply lookahead + gap net")
+    p = argparse.ArgumentParser(description="Generalist v2: full-game training from new_game()")
     p.add_argument("--resume",             default="",   type=str)
     p.add_argument("--auto-resume-best",   action="store_true")
-    p.add_argument("--out-dir",  default=str(_ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s_mid_v2"))
+    p.add_argument("--out-dir",  default=str(_ROOT / "learned_ai" / "checkpoints" / "scaffolded" / "s_gen_v2"))
     p.add_argument("--sentinel", default=str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt"))
     p.add_argument("--malom",    default="", type=str)
     p.add_argument("--value-net",default=str(_ROOT / "data" / "value_net.npz"), type=str)
@@ -1712,7 +1695,6 @@ def main() -> None:
     p.add_argument("--s1b-refresher-epochs", type=int,  default=S1B_REFRESHER_EPOCHS)
     p.add_argument("--s1b-refresher-lr",     type=float,default=S1B_REFRESHER_LR)
     p.add_argument("--no-s1b-refresher",     action="store_true")
-    p.add_argument("--no-position-pool",     action="store_true")
     p.add_argument("--s1a-data",             type=str,  default=str(_ROOT / "learned_ai" / "data" / "human_imitation2.npz"))
     p.add_argument("--no-s1a-warmstart",     action="store_true")
     p.add_argument("--minimal-rollouts",    action="store_true",

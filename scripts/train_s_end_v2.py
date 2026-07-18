@@ -225,6 +225,9 @@ OPENING_EXTENSION_PLY = 6
 
 PHASE_BUCKETS = ("opening", "midgame", "endgame")
 
+IMITATION_COEF  = 0.05   # AlphaZero-style: auxiliary CE loss on winner positions each RL update
+IMITATION_BATCH = 16     # positions sampled per imitation mini-step
+
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
@@ -424,6 +427,45 @@ def _run_s1b_refresher(
 
     model.eval()
     print("[s_end_v2] s1b refresher done")
+
+
+def _imitation_mix_step(
+    model: ScaffoldedPolicyNet,
+    device: torch.device,
+    imitation_data: dict,
+    opt: torch.optim.Optimizer,
+) -> float:
+    feat_matrices = imitation_data["feat_matrices"]
+    label_dists   = imitation_data["label_dists"]
+    is_winner     = imitation_data.get("is_winner", np.ones(len(feat_matrices), dtype=bool))
+    winner_idxs   = [i for i in range(len(feat_matrices)) if is_winner[i]]
+    if not winner_idxs:
+        return 0.0
+    batch_idxs = random.sample(winner_idxs, min(IMITATION_BATCH, len(winner_idxs)))
+    model.train()
+    terms = []
+    for i in batch_idxs:
+        fm = feat_matrices[i]
+        k, d = fm.shape
+        if d < MOVE_FEAT_DIM_WITH_LOOKAHEAD:
+            fm = np.concatenate([fm, np.zeros((k, MOVE_FEAT_DIM_WITH_LOOKAHEAD - d), dtype=np.float32)], axis=1)
+        else:
+            fm = fm[:, :MOVE_FEAT_DIM_WITH_LOOKAHEAD]
+        feat   = torch.tensor(fm, dtype=torch.float32).to(device)
+        target = torch.tensor(label_dists[i], dtype=torch.float32).to(device)
+        if target.shape[0] != feat.shape[0]:
+            continue
+        logits = model.policy_logits(feat)
+        log_p  = F.log_softmax(logits, dim=-1)
+        terms.append(-(target * log_p).sum())
+    if not terms:
+        return 0.0
+    loss = IMITATION_COEF * torch.stack(terms).mean()
+    opt.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    opt.step()
+    return float(loss.item())
 
 
 def _choose_resume_path(args: argparse.Namespace) -> tuple[Optional[Path], str]:
@@ -1195,6 +1237,21 @@ def run(args: argparse.Namespace) -> None:
                            epochs=args.s1b_refresher_epochs,
                            lr=args.s1b_refresher_lr)
 
+    # Load imitation data for ongoing mixing during RL (AlphaZero-style)
+    _imitation_data = None
+    _imitation_path = Path(args.s1a_data)
+    if _imitation_path.exists():
+        try:
+            _raw = np.load(str(_imitation_path), allow_pickle=True)
+            _imitation_data = {
+                "feat_matrices": _raw["feat_matrices"],
+                "label_dists":   _raw["label_dists"],
+                "is_winner":     _raw["is_winner"] if "is_winner" in _raw else np.ones(len(_raw["feat_matrices"]), dtype=bool),
+            }
+            print(f"[s_end_v2] Imitation data loaded: {len(_imitation_data['feat_matrices'])} positions for mixing")
+        except Exception as e:
+            print(f"[s_end_v2] Imitation data load failed ({e}) — imitation mixing disabled")
+
     # Warm the lazy-init heuristic eval global before spawning threads
     if args.batch_games > 1:
         encode_position_with_lookahead(BoardState.new_game(), "W",
@@ -1496,6 +1553,8 @@ def run(args: argparse.Namespace) -> None:
                 with open(update_log_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(upd_entry) + "\n")
                 ep_steps.clear()
+                if _imitation_data is not None:
+                    _imitation_mix_step(model, device, _imitation_data, opt)
 
             # ── Periodic log + checkpoint ──────────────────────────────────────
             if game_count % args.log_every == 0 and diag_buffer:
@@ -1717,9 +1776,9 @@ def main() -> None:
                    help="LookaheadAdvisor simulation depth during training (default 5). "
                         "Feature width stays at 15-ply * 4 = 60 floats via padding, so inference "
                         "at full 15 plies matches. Big training speed-up.")
-    p.add_argument("--policy-hidden",       type=str,   default="1024,512,256",
+    p.add_argument("--policy-hidden",       type=str,   default="256,128",
                    help="Comma-separated hidden layer widths for the policy MLP "
-                        "(default '1024,512,256'). Checkpoint is reset if this differs from the "
+                        "(default '256,128'). Checkpoint is reset if this differs from the "
                         "saved architecture.")
     p.add_argument("--endgame-db-dir",      type=str,   default="",
                    help="Directory containing endgame_*.wdl retrograde tables for dense per-move "

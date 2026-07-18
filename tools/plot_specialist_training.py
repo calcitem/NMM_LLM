@@ -34,9 +34,10 @@ ROOT = Path(__file__).resolve().parent.parent
 CKPT_BASE = ROOT / "learned_ai" / "checkpoints" / "scaffolded"
 
 SPECIALISTS = [
-    ("Opening",  CKPT_BASE / "s_open_v2"),
-    ("Midgame",  CKPT_BASE / "s_mid_v2"),
-    ("Endgame",  CKPT_BASE / "s_end_v2"),
+    ("Opening",    CKPT_BASE / "s_open_v2"),
+    ("Midgame",    CKPT_BASE / "s_mid_v2"),
+    ("Endgame",    CKPT_BASE / "s_end_v2"),
+    ("Generalist", CKPT_BASE / "s_gen_v2"),
 ]
 
 SMOOTH = 50   # rolling window
@@ -203,8 +204,8 @@ def main():
     args = parser.parse_args()
 
     fig, axes = plt.subplots(
-        5, 3,
-        figsize=(14, 15),
+        5, 4,
+        figsize=(18, 15),
         sharex=False,
     )
 
