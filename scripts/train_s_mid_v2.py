@@ -182,10 +182,10 @@ LAMBDA     = 0.70   # Batch 1: 0.5 → 0.7 (outcome matters more)
 DECAY      = 0.99   # Batch 1: 0.98 → 0.99 (outcome reaches further back)
 EXPLORE_COEF = 0.08 # bonus for winning with non-heuristic-top1 moves (Option A)
 
-WIN_REWARD  =  1.0
+WIN_REWARD  =  1.5
 LOSS_REWARD = -1.0
-DRAW_SHORT  =  0.0    # 2026-07-18: neutral (was -0.10); penalising draws hurts value head at low win rates
-DRAW_LONG   =  0.0    # 2026-07-18: neutral (was -0.25)
+DRAW_SHORT  = -0.15   # penalise draws — specialist must try to win at low difficulty
+DRAW_LONG   = -0.25   # max-ply timeout draws penalised harder (passive play)
 
 # ── Optimiser / schedule ──────────────────────────────────────────────────────
 
@@ -193,7 +193,7 @@ LR            = 1e-4
 GAMMA_TD      = 0.99
 TEMP_START    = 0.90   # explore early; anneals down to TEMP_END over training
 TEMP_END      = 0.20   # exploit late
-ENTROPY_COEF  = 0.03
+ENTROPY_COEF  = 0.01
 UPDATE_EVERY  = 64
 ROLLING_WIN   = 40
 DIFF_START    = 1
@@ -229,7 +229,7 @@ OPENING_EXTENSION_PLY = 6
 
 PHASE_BUCKETS = ("opening", "midgame", "endgame")
 
-MALOM_REWARD = 0.05
+MALOM_REWARD = 0.0   # zeroed: per-step Malom reward incentivised safe draws over wins
 
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
@@ -565,22 +565,26 @@ def _outcome_to_history_float(outcome: float) -> float:
 
 
 def _check_advance(win_history_heuristic: deque, rolling_win: int, difficulty: int) -> bool:
-    """Advance when (wins + 0.5×draws)/total >= threshold AND draw_rate < 33%.
+    """Advance when (wins + 0.5×draws)/total >= threshold.
 
-    Threshold ramps linearly: 51% at level 1 → 60% at level 20.
-    Draw-rate cap prevents advancing on stale defensive play.
-    Requires ≥20 games in window."""
+    Levels 1-3: threshold 0.40/0.43/0.46, draw cap 0.55, min 12 games.
+    Level 4+: threshold ramps 0.51→0.60, draw cap 0.33, min 20 games.
+    Early levels are easier to escape to generate diverse training data."""
     recent = list(win_history_heuristic)[-rolling_win:]
-    if len(recent) < 20:
+    early  = difficulty <= 3
+    if len(recent) < (12 if early else 20):
         return False
-    wins   = sum(1 for x in recent if x == 1.0)
-    draws  = sum(1 for x in recent if x == 0.5)
-    n      = len(recent)
+    wins      = sum(1 for x in recent if x == 1.0)
+    draws     = sum(1 for x in recent if x == 0.5)
+    n         = len(recent)
     draw_rate = draws / n
-    if draw_rate >= 0.33:
+    if draw_rate >= (0.55 if early else 0.33):
         return False
-    score  = (wins + 0.5 * draws) / n
-    threshold = 0.51 + (difficulty - 1) * (0.09 / 19.0)
+    score = (wins + 0.5 * draws) / n
+    if early:
+        threshold = 0.40 + (difficulty - 1) * 0.03   # 0.40 / 0.43 / 0.46
+    else:
+        threshold = 0.51 + (difficulty - 4) * (0.09 / 16.0)  # 0.51→0.60 at level 20
     return score >= threshold
 
 
