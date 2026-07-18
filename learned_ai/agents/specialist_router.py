@@ -275,6 +275,127 @@ class SpecialistRouter:
             return None
 
 
+# ── generalist (single model, no phase routing) ───────────────────────────────
+
+class GeneralistAgent:
+    """Wraps a single s_gen_v2 ScaffoldedPolicyNet.  Same public interface as SpecialistRouter."""
+
+    def __init__(self, model, la, sentinel_advisor=None, value_net=None, specialist_db=None):
+        self._model    = model
+        self._la       = la
+        self._sentinel = sentinel_advisor
+        self._value_net = value_net
+        self._specialist_db = specialist_db
+        self._gameai   = None
+        self._db       = None
+
+    def is_loaded(self) -> bool:
+        return self._model is not None
+
+    def set_db(self, db) -> None:
+        self._db = db
+
+    def set_sentinel(self, sentinel_advisor) -> None:
+        self._sentinel = sentinel_advisor
+        if self._la is not None:
+            self._la._sentinel = sentinel_advisor  # type: ignore[attr-defined]
+
+    def set_value_net(self, value_net) -> None:
+        self._value_net = value_net
+        if self._la is not None:
+            self._la._value_net = value_net  # type: ignore[attr-defined]
+
+    def set_gameai(self, gameai) -> None:
+        self._gameai = gameai
+
+    def record_game_result(self, game_record: dict) -> None:
+        pass  # generalist doesn't use specialist_db routing
+
+    def score_moves(self, board: BoardState, candidates: list[dict], color: str) -> Optional[list[float]]:
+        if not candidates or self._model is None:
+            return None
+        try:
+            from learned_ai.models.scaffolded_encoder import encode_position_with_lookahead
+
+            enc = encode_position_with_lookahead(
+                board, color,
+                sentinel_advisor=self._sentinel,
+                db=None,
+                value_net=self._value_net,
+                lookahead_advisor=self._la,
+                specialist_db=self._specialist_db,
+            )
+            if enc is None or not enc.legal_moves:
+                return None
+
+            feat = torch.from_numpy(enc.feat_matrix).to(torch.float32)
+            with torch.no_grad():
+                probs = self._model.policy_probs(feat)
+            probs_np = probs.cpu().numpy()
+
+            enc_key_to_idx = {_move_key(m): i for i, m in enumerate(enc.legal_moves)}
+            result: list[float] = []
+            for cand in candidates:
+                idx = enc_key_to_idx.get(_move_key(cand))
+                result.append(float(probs_np[idx]) if idx is not None and idx < len(probs_np) else 0.0)
+
+            total = sum(result)
+            if total > 1e-9:
+                result = [v / total for v in result]
+            return result
+        except Exception as e:
+            log.warning("GeneralistAgent.score_moves failed: %s", e, exc_info=True)
+            return None
+
+
+def load_generalist(
+    ckpt_dir: Optional[Path] = None,
+    sentinel_advisor=None,
+    value_net=None,
+    gap_net=None,
+    human_db=None,
+    specialist_db=None,
+    ply_depth: int = 12,
+) -> Optional[GeneralistAgent]:
+    """Load the s_gen_v2 generalist checkpoint. Returns None if not found."""
+    from learned_ai.models.lookahead_advisor import LookaheadAdvisor
+    from learned_ai.agents.heuristic_agent import get_heuristic_evaluate
+
+    root = Path(__file__).parent.parent.parent
+    if ckpt_dir is None:
+        ckpt_dir = root / "learned_ai" / "checkpoints" / "scaffolded"
+
+    gen_path = ckpt_dir / "s_gen_v2" / "best.pt"
+    m_gen, _ = _load_spec_model(gen_path)
+    if m_gen is None:
+        log.info("GeneralistAgent: no checkpoint at %s", gen_path)
+        return None
+
+    evaluate_fn = get_heuristic_evaluate()
+    try:
+        la = LookaheadAdvisor(
+            sentinel=sentinel_advisor,
+            evaluate_fn=evaluate_fn,
+            value_net=value_net,
+            gap_net=gap_net,
+            human_db=human_db,
+            use_sentinel=True,
+            ply_depth=ply_depth,
+        )
+    except Exception as e:
+        log.warning("GeneralistAgent LookaheadAdvisor init failed: %s", e)
+        la = None
+
+    log.info("GeneralistAgent loaded from %s ply_depth=%d", gen_path, ply_depth)
+    return GeneralistAgent(
+        model=m_gen,
+        la=la,
+        sentinel_advisor=sentinel_advisor,
+        value_net=value_net,
+        specialist_db=specialist_db,
+    )
+
+
 # ── loader ────────────────────────────────────────────────────────────────────
 
 def load_specialist_router(

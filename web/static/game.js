@@ -685,6 +685,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Mutual exclusion: Specialist AI ↔ Generalist AI
+  const _chkSpec = $("chk-overseer-player");
+  const _chkGen  = $("chk-generalist-player");
+  if (_chkSpec && _chkGen) {
+    _chkSpec.addEventListener("change", () => { if (_chkSpec.checked) _chkGen.checked = false; });
+    _chkGen.addEventListener("change",  () => { if (_chkGen.checked)  _chkSpec.checked = false; });
+  }
+
   $("rng-replay-speed").addEventListener("input", () => {
     const ms = parseInt($("rng-replay-speed").value);
     $("lbl-replay-speed").textContent = (ms / 1000).toFixed(1) + "s";
@@ -1038,6 +1046,7 @@ function startNewGame() {
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
       use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
+      use_generalist_player: $("chk-generalist-player") ? $("chk-generalist-player").checked : false,
       ai_weights:   _getWeights(),
       player_name:  playerName,
     }));
@@ -1333,6 +1342,7 @@ function startSetupGame() {
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
       use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
+      use_generalist_player: $("chk-generalist-player") ? $("chk-generalist-player").checked : false,
       ai_weights:   _getWeights(),
       positions:    positions,
       phase:        $("sel-setup-phase").value,
@@ -2951,6 +2961,7 @@ function _handleTournamentNext(msg) {
       use_perfect_db: $("chk-perfect-db") ? $("chk-perfect-db").checked : false,
       use_learned_ai: $("chk-learned-ai") ? $("chk-learned-ai").checked : false,
       use_overseer_player: $("chk-overseer-player") ? $("chk-overseer-player").checked : false,
+      use_generalist_player: $("chk-generalist-player") ? $("chk-generalist-player").checked : false,
     }));
   }
 }

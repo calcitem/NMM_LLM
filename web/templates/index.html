@@ -434,11 +434,19 @@
           </label>
         </div>
 
-        <div class="form-row" id="row-overseer-player" style="flex-direction:row; align-items:center; gap:8px; display:none">
-          <input type="checkbox" id="chk-overseer-player" disabled>
+        <div class="form-row" id="row-overseer-player" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-overseer-player">
           <label for="chk-overseer-player" style="color:#f5a623; font-size:.9rem;">
-            Specialist AI (test hook)
-            <span style="font-size:.75rem; color:var(--text-dim);">(force phase-routed specialists even below diff 9 — diff 9/10 auto-enable this)</span>
+            Specialist AI
+            <span style="font-size:.75rem; color:var(--text-dim);">(phase-routed specialists — diff 9/10 auto-enable)</span>
+          </label>
+        </div>
+
+        <div class="form-row" id="row-generalist-player" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="chk-generalist-player">
+          <label for="chk-generalist-player" style="color:#4fc3f7; font-size:.9rem;">
+            Generalist AI
+            <span style="font-size:.75rem; color:var(--text-dim);">(single full-game model)</span>
           </label>
         </div>
 

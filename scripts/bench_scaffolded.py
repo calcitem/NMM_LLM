@@ -65,7 +65,7 @@ sys.path.insert(0, str(_ROOT))
 
 from game.board import BoardState
 from game.rules import is_terminal, get_all_legal_moves
-from learned_ai.agents.specialist_router import load_specialist_router
+from learned_ai.agents.specialist_router import load_specialist_router, load_generalist
 from learned_ai.sentinel.infer import load_advisor
 
 _SENTINEL_CKPT   = str(_ROOT / "learned_ai" / "sentinel" / "checkpoints" / "best.pt")
@@ -308,6 +308,9 @@ def main() -> int:
                         "Default (-1) uses the game's per-difficulty caps "
                         "(15/30/45/60 s at diff 1-5/6/7/8+, with 3-10 s early-placement reductions). "
                         "Pass a positive value for a flat override.")
+    p.add_argument("--agent",               default="specialist",
+                   choices=["specialist", "generalist"],
+                   help="Which learned AI to bench: 'specialist' (phase-routed, default) or 'generalist' (s_gen_v2).")
     p.add_argument("--specialist-ply-depth", type=int, default=12,
                    help="LookaheadAdvisor ply depth for the specialists (default 12, matches V4 training).")
     p.add_argument("--max-plies",       type=int,   default=400)
@@ -350,22 +353,36 @@ def main() -> int:
         print("  HumanDB: not found (human_norm features will be 0.5)")
     print()
 
-    print("Loading SpecialistRouter (v2 phase specialists)…")
-    router = load_specialist_router(
-        sentinel_advisor=sentinel,
-        human_db=human_db,
-        db=malom_db,
-        value_net=value_net,
-        gap_net=gap_net,
-        ply_depth=args.specialist_ply_depth,
-    )
-    if router is None:
-        print("ERROR: no v2 specialist checkpoints found. Train first or check paths.", file=sys.stderr)
-        return 1
-    print(f"  open={'OK' if router._spec_open else 'missing'}  "
-          f"mid={'OK' if router._spec_mid else 'missing'}  "
-          f"end={'OK' if router._spec_end else 'missing'}  "
-          f"ply_depth={args.specialist_ply_depth}")
+    if args.agent == "generalist":
+        print("Loading GeneralistAgent (s_gen_v2)…")
+        router = load_generalist(
+            sentinel_advisor=sentinel,
+            human_db=human_db,
+            value_net=value_net,
+            gap_net=gap_net,
+            ply_depth=args.specialist_ply_depth,
+        )
+        if router is None:
+            print("ERROR: s_gen_v2/best.pt not found. Train first or check paths.", file=sys.stderr)
+            return 1
+        print(f"  generalist=OK  ply_depth={args.specialist_ply_depth}")
+    else:
+        print("Loading SpecialistRouter (v2 phase specialists)…")
+        router = load_specialist_router(
+            sentinel_advisor=sentinel,
+            human_db=human_db,
+            db=malom_db,
+            value_net=value_net,
+            gap_net=gap_net,
+            ply_depth=args.specialist_ply_depth,
+        )
+        if router is None:
+            print("ERROR: no v2 specialist checkpoints found. Train first or check paths.", file=sys.stderr)
+            return 1
+        print(f"  open={'OK' if router._spec_open else 'missing'}  "
+              f"mid={'OK' if router._spec_mid else 'missing'}  "
+              f"end={'OK' if router._spec_end else 'missing'}  "
+              f"ply_depth={args.specialist_ply_depth}")
 
     print()
 
@@ -385,7 +402,7 @@ def main() -> int:
     # ── output ────────────────────────────────────────────────────────────────
     out_dir = Path(args.out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = out_dir / f"scaffolded_v2_{ts}.jsonl"
+    out_path = out_dir / f"scaffolded_{args.agent}_{ts}.jsonl"
     print(f"Streaming results to {out_path}")
     print()
 

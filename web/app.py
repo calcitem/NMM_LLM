@@ -322,6 +322,21 @@ try:
 except Exception as _sre:
     log.warning("SpecialistRouter load failed (%s) — falling back to Overseer", _sre)
 
+_generalist_advisor = None
+try:
+    from learned_ai.agents.specialist_router import load_generalist as _load_generalist
+    _generalist_advisor = _load_generalist(
+        sentinel_advisor=_sentinel_advisor,
+        value_net=_value_net,
+        gap_net=_gap_net,
+        human_db=_human_db,
+        specialist_db=_specialist_db,
+    )
+    if _generalist_advisor is not None:
+        log.info("GeneralistAgent (s_gen_v2) loaded")
+except Exception as _gre:
+    log.warning("GeneralistAgent load failed (%s)", _gre)
+
 if _overseer_advisor is None:
     try:
         from learned_ai.models.overseer import load_overseer as _load_overseer
@@ -363,9 +378,11 @@ try:
 except Exception as _e:
     log.warning("Malom DB load failed (non-fatal): %s", _e)
 
-# Wire Malom DB into Overseer now that both are loaded.
+# Wire Malom DB into Overseer/Generalist now that both are loaded.
 if _overseer_advisor is not None and _malom_db is not None:
     _overseer_advisor.set_db(_malom_db)
+if _generalist_advisor is not None and _malom_db is not None:
+    _generalist_advisor.set_db(_malom_db)
 
 # Probability that sentinel (or DB fallback) intervenes, by difficulty level.
 SENTINEL_PROB_BY_DIFF: dict[int, float] = {
@@ -773,6 +790,7 @@ class Session:
         self._proj_board: Optional[BoardState] = None
         # Testing: Overseer drives every AI move instead of the engine
         self.use_overseer_player: bool = False
+        self.use_generalist_player: bool = False
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -2957,6 +2975,36 @@ async def _ai_turn(ws: WebSocket, session: Session) -> None:
             _tb.print_exc(file=_sys.stderr)
             log.warning("Specialist AI override failed: %s", _oe, exc_info=True)
 
+    # Generalist AI mode: single full-game model, activated by checkbox.
+    _gen_mode = (bool(session.use_generalist_player)
+                 and _generalist_advisor is not None
+                 and _generalist_advisor.is_loaded())
+    if _gen_mode and not _spec_mode:   # specialist takes priority if both somehow set
+        try:
+            if session.game_ai is not None and hasattr(_generalist_advisor, "set_gameai"):
+                try:
+                    _generalist_advisor.set_gameai(session.game_ai)
+                except Exception:
+                    pass
+            legal = get_all_legal_moves(board)
+            if legal:
+                gen_cands = [{"from": m.get("from"), "to": m.get("to"), "capture": m.get("capture")} for m in legal]
+                gen_probs = await asyncio.to_thread(_generalist_advisor.score_moves, board, gen_cands, board.turn)
+                if gen_probs:
+                    best = max(range(len(gen_probs)), key=lambda i: gen_probs[i])
+                    move = legal[best]
+                    log.info("Generalist AI: %s (prob=%.3f)", move, gen_probs[best])
+                else:
+                    import sys as _sys
+                    print("\n[Generalist AI] score_moves returned None — falling back to coordinator move.",
+                          file=_sys.stderr, flush=True)
+        except Exception as _ge:
+            import sys as _sys, traceback as _tb
+            print(f"\n[Generalist AI] FAILED — falling back to coordinator move: {_ge}",
+                  file=_sys.stderr, flush=True)
+            _tb.print_exc(file=_sys.stderr)
+            log.warning("Generalist AI override failed: %s", _ge, exc_info=True)
+
     elapsed = _time.time() - t0
     log.info("AI turn end    move=%s elapsed=%.2fs ponder_hit=%s", move, elapsed, _ponder_hit is not None)
 
@@ -3267,6 +3315,7 @@ async def ws_endpoint(websocket: WebSocket):
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
                 use_overseer_player = bool(msg.get("use_overseer_player", False))
+                use_generalist_player = bool(msg.get("use_generalist_player", False))
                 star_square_mode = bool(msg.get("star_square_mode", False))
                 settings  = _load_settings()
 
@@ -3377,6 +3426,7 @@ async def ws_endpoint(websocket: WebSocket):
                 session = Session(engine, game_ai, coord, hc, vs_human)
                 session.is_tournament_game = is_tournament
                 session.use_overseer_player = use_overseer_player and not vs_human
+                session.use_generalist_player = use_generalist_player and not vs_human
                 if not vs_human:
                     session.adaptive = adaptive
                     session.hint_cap = _hint_cap_for_elo(player_elo)
@@ -3424,6 +3474,7 @@ async def ws_endpoint(websocket: WebSocket):
                 use_perfect_db = bool(msg.get("use_perfect_db", False))
                 use_learned_ai = bool(msg.get("use_learned_ai", False))
                 use_overseer_player = bool(msg.get("use_overseer_player", False))
+                use_generalist_player = bool(msg.get("use_generalist_player", False))
                 star_square_mode = bool(msg.get("star_square_mode", False))
                 setup_fen_str = msg.get("setup_fen", "")
                 if setup_fen_str:
@@ -3534,6 +3585,7 @@ async def ws_endpoint(websocket: WebSocket):
 
                 session = Session(engine, game_ai, coord, hc, vs_human)
                 session.use_overseer_player = use_overseer_player and not vs_human
+                session.use_generalist_player = use_generalist_player and not vs_human
                 if not vs_human and coord is None and game_ai is not None:
                     _nollm_book = OpeningBook()
                     session.opening_recognizer = OpeningRecognizer(_nollm_book)
